@@ -1,0 +1,31 @@
+A. Terminals
+    terminal 1: flow emulator
+
+    terminal 2: flow evm gateway --coa-address 0xf8d6e0586b0a20c7 \
+                                                --coa-key 3b5b4c89c324937546d44c954e116e4986cc4818104db75a9be158113dfcf64e \
+                                                --coa-resource-create \
+                                                --coinbase 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf \
+                                                --rpc-port 8545 \
+                                                --evm-network-id preview
+
+B. Transactions
+    1. Setup emulator account COA (or getting it's EVM address if already exists). Required for TidalRequests deployment:
+    flow transactions send ./cadence/transactions/setup_coa.cdc
+
+    2. Fund the deployer and userA on the EVM side
+    flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc 0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF 50.46
+    flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69 123.12
+
+    2. Deploy the TidalRequests Solidity contract:
+    forge script ./solidity/script/DeployTidalRequests.s.sol --rpc-url localhost:8545 --broadcast --legacy
+
+C. Project deployment
+    1. flow project deploy
+    2. EVM Tide creation : 
+            forge script ./solidity/script/CreateTideRequest.s.sol --rpc-url localhost:8545 --broadcast --legacy
+
+EVM addresses
+coinnbase (EOA): 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf
+deployer (EOA): 0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF
+userA: 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69
+TidalRequests: 0x153b84F377C6C7a7D93Bd9a717E48097Ca6Cfd11
