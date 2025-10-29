@@ -1,3 +1,6 @@
 [submodule "lib/tidal-sc"]
 	path = lib/tidal-sc
 	url = https://github.com/onflow/tidal-sc.git
+[submodule "solidity/lib/forge-std"]
+	path = solidity/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
