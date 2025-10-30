@@ -8,21 +8,25 @@ A. Terminals
                                                 --rpc-port 8545 \
                                                 --evm-network-id preview
 
-B. Transactions
-    1. Setup emulator account COA (or getting it's EVM address if already exists). Required for TidalRequests deployment:
+#B. Transactions
+    #1. Setup emulator account COA (or getting it's EVM address if already exists). Required for TidalRequests deployment:
     flow transactions send ./cadence/transactions/setup_coa.cdc
 
-    2. Fund the deployer and userA on the EVM side
+    #2. Fund the deployer and userA on the EVM side
     flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc 0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF 50.46
     flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69 123.12
 
-    2. Deploy the TidalRequests Solidity contract:
+    #2. Deploy the TidalRequests Solidity contract:
     forge script ./solidity/script/DeployTidalRequests.s.sol --rpc-url localhost:8545 --broadcast --legacy
 
-C. Project deployment
-    1. flow project deploy
-    2. EVM Tide creation : 
-            forge script ./solidity/script/CreateTideRequest.s.sol --rpc-url localhost:8545 --broadcast --legacy
+#C. Project deployment
+    #1. Deployment on Cadence + Grant Beta badge to self & Setup worker:
+        flow project deploy
+        flow transactions send ./cadence/transactions/setup_worker_with_badge.cdc  "0x153b84F377C6C7a7D93Bd9a717E48097Ca6Cfd11"
+    #2. EVM Tide creation: 
+        forge script ./solidity/script/CreateTideRequest.s.sol --rpc-url localhost:8545 --broadcast --legacy
+    #3. ProcessRequests
+        flow transactions send ./cadence/transactions/process_requests.cdc
 
 EVM addresses
 coinnbase (EOA): 0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf

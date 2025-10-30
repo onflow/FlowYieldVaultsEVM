@@ -357,7 +357,7 @@ contract TidalRequests {
         address tokenAddress,
         uint256 amount,
         uint64 tideId
-    ) public payable returns (uint256) {
+    ) internal returns (uint256) {
         address user = msg.sender;
         uint256 requestId = _requestIdCounter++;
 

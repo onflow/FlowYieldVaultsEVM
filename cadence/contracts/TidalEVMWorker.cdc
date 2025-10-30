@@ -97,8 +97,6 @@ access(all) contract TidalEVMWorker {
     /// Admin capability for managing the bridge
     /// Only the contract account should hold this
     access(all) resource Admin {
-        
-        /// Set the TidalRequests contract address (one-time only for security)
         access(all) fun setTidalRequestsAddress(_ address: EVM.EVMAddress) {
             pre {
                 TidalEVMWorker.tidalRequestsAddress == nil: "TidalRequests address already set"
@@ -107,13 +105,12 @@ access(all) contract TidalEVMWorker {
             emit TidalRequestsAddressSet(address: address.toString())
         }
         
-        /// Create a new Worker (can only be called by Admin)
-        /// This is used during setup after beta access is granted
+        /// Create a new Worker with a capability instead of reference
         access(all) fun createWorker(
             coa: @EVM.CadenceOwnedAccount, 
-            betaBadge: auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge
+            betaBadgeCap: Capability<auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge>
         ): @Worker {
-            let worker <- create Worker(coa: <-coa, betaBadge: betaBadge)
+            let worker <- create Worker(coa: <-coa, betaBadgeCap: betaBadgeCap)
             emit WorkerInitialized(coaAddress: worker.getCOAAddressString())
             return <-worker
         }
@@ -130,20 +127,28 @@ access(all) contract TidalEVMWorker {
         /// TideManager to hold Tides for EVM users
         access(self) let tideManager: @TidalYield.TideManager
         
-        /// Beta badge reference for creating Tides
-        access(self) let betaBadgeRef: auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge
+        /// Capability to beta badge (instead of reference)
+        access(self) let betaBadgeCap: Capability<auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge>
         
-        init(coa: @EVM.CadenceOwnedAccount, betaBadge: auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge) {
+        init(
+            coa: @EVM.CadenceOwnedAccount, 
+            betaBadgeCap: Capability<auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge>
+        ) {
             self.coa <- coa
-            self.betaBadgeRef = betaBadge
+            self.betaBadgeCap = betaBadgeCap
+            
+            // Borrow the beta badge to create TideManager
+            let betaBadge = betaBadgeCap.borrow()
+                ?? panic("Could not borrow beta badge capability")
             
             // Create TideManager for holding EVM user Tides
             self.tideManager <- TidalYield.createTideManager(betaRef: betaBadge)
         }
         
-        /// Get beta reference for creating Tides
+        /// Get beta reference by borrowing from capability
         access(self) fun getBetaReference(): auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge {
-            return self.betaBadgeRef
+            return self.betaBadgeCap.borrow()
+                ?? panic("Could not borrow beta badge capability")
         }
         
         /// Get COA's EVM address as string
@@ -170,6 +175,16 @@ access(all) contract TidalEVMWorker {
             
             // 2. Process each request
             for request in requests {
+                // log the request details in the same order as EVM struct
+                log("Processing request: ".concat(request.id.toString()))
+                log("Request type: ".concat(request.requestType.toString()))
+                log("User: ".concat(request.user.toString()))
+                log("Amount: ".concat(request.amount.toString()))
+                log("Status: ".concat(request.status.toString()))
+                log("Token Address: ".concat(request.tokenAddress.toString()))
+                log("Tide ID: ".concat(request.tideId.toString()))
+                log("Timestamp: ".concat(request.timestamp.toString()))
+
                 let success = self.processRequestSafely(request)
                 if success {
                     successCount = successCount + 1
@@ -225,8 +240,13 @@ access(all) contract TidalEVMWorker {
             // In production, you'd encode these in the EVM request or have a mapping
 
             // TODO - Pass those params more elegantly
-            let vaultIdentifier = "A.7e60df042a9c0868.FlowToken.Vault"
-            let strategyIdentifier = "A.d27920b6384e2a78.TidalYieldStrategies.TracerStrategy"
+            // // testnet
+            // let vaultIdentifier = "A.7e60df042a9c0868.FlowToken.Vault"
+            // let strategyIdentifier = "A.d27920b6384e2a78.TidalYieldStrategies.TracerStrategy"
+
+            // emulator
+            let vaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
+            let strategyIdentifier = "A.f8d6e0586b0a20c7.TidalYieldStrategies.TracerStrategy"
 
             // 2. Convert amount from UInt256 to UFix64
             let amount = TidalEVMWorker.ufix64FromUInt256(request.amount)
@@ -322,13 +342,9 @@ access(all) contract TidalEVMWorker {
         
         /// Withdraw funds from TidalRequests contract via COA
         access(self) fun withdrawFundsFromEVM(amount: UFix64): @{FungibleToken.Vault} {
-            // Call TidalRequests.withdrawFunds(NATIVE_FLOW, amount)
-            // This transfers FLOW from TidalRequests to COA's EVM address
-            
             let amountUInt256 = TidalEVMWorker.uint256FromUFix64(amount)
             let nativeFlowAddress = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF")
             
-            // Encode function call: withdrawFunds(address,uint256)
             let calldata = EVM.encodeABIWithSignature(
                 "withdrawFunds(address,uint256)",
                 [nativeFlowAddress, amountUInt256]
@@ -343,9 +359,13 @@ access(all) contract TidalEVMWorker {
             
             assert(result.status == EVM.Status.successful, message: "withdrawFunds call failed")
             
-            // Now withdraw from COA to get Cadence vault
-            // TODO - fix amount conversion to not be greater than UFix64 max
-            let balance = EVM.Balance(attoflow: UInt(amount * 1_000_000_000.0))
+            // FIX: Proper conversion to attoflow
+            // UFix64 uses 8 decimals, attoflow uses 18 decimals
+            // Multiply by 10^10 to go from UFix64 to attoflow
+            let rawUFix64 = UInt64(amount * 100_000_000.0) // Get raw 8-decimal value
+            let attoflowAmount = UInt(rawUFix64) * 10_000_000_000 // Scale to 18 decimals
+            
+            let balance = EVM.Balance(attoflow: attoflowAmount)
             let vault <- self.coa.withdraw(balance: balance) as! @FlowToken.Vault
             
             return <-vault
@@ -353,12 +373,18 @@ access(all) contract TidalEVMWorker {
         
         /// Bridge funds from Cadence back to EVM user (atomic)
         access(self) fun bridgeFundsToEVMUser(vault: @{FungibleToken.Vault}, recipient: EVM.EVMAddress) {
-            // Convert to EVM balance
-            // TODO - fix amount conversion to not be greater than UFix64 max
-            let balance = EVM.Balance(attoflow: UInt(vault.balance * 1_000_000_000.0))
-            destroy vault
+            // Get amount before destroying vault
+            let amount = vault.balance
             
-            // Deposit directly to recipient's EVM address (atomic!)
+            // Convert UFix64 to attoflow properly
+            let rawUFix64 = UInt64(amount * 100_000_000.0) // Get raw 8-decimal value
+            let attoflowAmount = UInt(rawUFix64) * 10_000_000_000 // Scale to 18 decimals
+            
+            // Deposit the vault into COA first
+            self.coa.deposit(from: <-vault as! @FlowToken.Vault)
+            
+            // Then withdraw and send to recipient
+            let balance = EVM.Balance(attoflow: attoflowAmount)
             recipient.deposit(from: <-self.coa.withdraw(balance: balance))
         }
         
@@ -397,21 +423,37 @@ access(all) contract TidalEVMWorker {
         }
         
         /// Get pending requests from TidalRequests contract
-        access(self) fun getPendingRequestsFromEVM(): [EVMRequest] {
+        access(all) fun getPendingRequestsFromEVM(): [EVMRequest] {
             // Call TidalRequests.getPendingRequests()
             let calldata = EVM.encodeABIWithSignature("getPendingRequests()", [])
             
-            let result = self.coa.call(
+            let callResult = self.coa.dryCall(
                 to: TidalEVMWorker.tidalRequestsAddress!,
                 data: calldata,
-                gasLimit: 500000,
+                gasLimit: 15_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
+
+            log("=== EVM Call Result ===")
+            log("Status: ".concat(callResult.status == EVM.Status.successful ? "SUCCESSFUL" : "FAILED"))
+            log("Error Code: ".concat(callResult.errorCode.toString()))
+            log("Error Message: ".concat(callResult.errorMessage))
+            log("Gas Used: ".concat(callResult.gasUsed.toString()))
+            log("Data Length: ".concat(callResult.data.length.toString()))
+
+            assert(callResult.status == EVM.Status.successful, message: "getPendingRequests call failed")
             
-            assert(result.status == EVM.Status.successful, message: "getPendingRequests call failed")
-            
-            // Decode result - this is simplified, you'll need proper ABI decoding
-            // For PoC, return empty array and test with manual calls
+            // Decode callResult
+            // Decode as array of 8-element tuples
+            // TODO - decode complex struct from Solidity
+            let decoded = EVM.decodeABI(
+                types: [Type<[AnyStruct]>()],
+                // types: [Type<UInt256>(), Type<EVM.EVMAddress>(), Type<UInt8>(), Type<UInt8>(), Type<EVM.EVMAddress>(), Type<UInt256>(), Type<UInt64>(), Type<UInt256>()], //single request decoding
+                data: callResult.data
+            ) 
+
+            log("Decoded result length: ".concat(decoded.length.toString()))
+
             return []
         }
     }
@@ -432,18 +474,20 @@ access(all) contract TidalEVMWorker {
 
     /// Helper: Convert UInt256 (18 decimals) to UFix64 (8 decimals)
     access(self) fun ufix64FromUInt256(_ value: UInt256): UFix64 {
-        // Divide by 10^10 to go from 18 decimals to 8 decimals
+        // Convert from 18 decimals (wei/attoflow) to 8 decimals (UFix64)
+        // 1 FLOW = 10^18 attoflow = 10^8 UFix64 units
+        // So divide by 10^10
         let scaled = value / 10_000_000_000
-        // Convert to UFix64 (which interprets as value * 10^-8)
         return UFix64(scaled)
     }
 
     /// Helper: Convert UFix64 (8 decimals) to UInt256 (18 decimals)
     access(self) fun uint256FromUFix64(_ value: UFix64): UInt256 {
-        // Get the raw fixed-point value (multiply by 10^8)
-        let raw = UInt64(value * 100_000_000.0)
+        // UFix64 internally stores as integer with 8 decimal places
+        // Get raw integer value by multiplying by 10^8
+        let rawValue = UInt64(value * 100_000_000.0)
         // Scale up by 10^10 to get 18 decimals
-        return UInt256(raw) * 10_000_000_000
+        return UInt256(rawValue) * 10_000_000_000
     }
     
     // ========================================
