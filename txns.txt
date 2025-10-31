@@ -14,7 +14,7 @@ A. Terminals
 
     #2. Fund the deployer and userA on the EVM side
     flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc 0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF 50.46
-    flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69 123.12
+    flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69 1234.12
 
     #2. Deploy the TidalRequests Solidity contract:
     forge script ./solidity/script/DeployTidalRequests.s.sol --rpc-url localhost:8545 --broadcast --legacy

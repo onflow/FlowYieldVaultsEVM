@@ -250,10 +250,11 @@ access(all) contract TidalEVMWorker {
 
             // 2. Convert amount from UInt256 to UFix64
             let amount = TidalEVMWorker.ufix64FromUInt256(request.amount)
+            log("Creating Tide for amount: ".concat(amount.toString()))
             
             // 3. Withdraw funds from TidalRequests
             let vault <- self.withdrawFundsFromEVM(amount: amount)
-            
+
             // 4. Validate vault type matches vaultIdentifier
             let vaultType = vault.getType()
             assert(
@@ -403,6 +404,7 @@ access(all) contract TidalEVMWorker {
             )
             
             assert(result.status == EVM.Status.successful, message: "updateRequestStatus call failed")
+            log("Request status updated successfully")
         }
         
         /// Update user balance in TidalRequests
@@ -423,9 +425,10 @@ access(all) contract TidalEVMWorker {
         }
         
         /// Get pending requests from TidalRequests contract
+        /// Get pending requests from TidalRequests contract
         access(all) fun getPendingRequestsFromEVM(): [EVMRequest] {
-            // Call TidalRequests.getPendingRequests()
-            let calldata = EVM.encodeABIWithSignature("getPendingRequests()", [])
+            // Call TidalRequests.getPendingRequestsUnpacked()
+            let calldata = EVM.encodeABIWithSignature("getPendingRequestsUnpacked()", [])
             
             let callResult = self.coa.dryCall(
                 to: TidalEVMWorker.tidalRequestsAddress!,
@@ -441,20 +444,56 @@ access(all) contract TidalEVMWorker {
             log("Gas Used: ".concat(callResult.gasUsed.toString()))
             log("Data Length: ".concat(callResult.data.length.toString()))
 
-            assert(callResult.status == EVM.Status.successful, message: "getPendingRequests call failed")
+            assert(callResult.status == EVM.Status.successful, message: "getPendingRequestsUnpacked call failed")
             
-            // Decode callResult
-            // Decode as array of 8-element tuples
-            // TODO - decode complex struct from Solidity
+            // Decode 8 separate arrays (one for each field in Request struct)
             let decoded = EVM.decodeABI(
-                types: [Type<[AnyStruct]>()],
-                // types: [Type<UInt256>(), Type<EVM.EVMAddress>(), Type<UInt8>(), Type<UInt8>(), Type<EVM.EVMAddress>(), Type<UInt256>(), Type<UInt64>(), Type<UInt256>()], //single request decoding
+                types: [
+                    Type<[UInt256]>(),      // ids
+                    Type<[EVM.EVMAddress]>(), // users
+                    Type<[UInt8]>(),        // requestTypes
+                    Type<[UInt8]>(),        // statuses
+                    Type<[EVM.EVMAddress]>(), // tokenAddresses
+                    Type<[UInt256]>(),      // amounts
+                    Type<[UInt64]>(),       // tideIds
+                    Type<[UInt256]>()       // timestamps
+                ],
                 data: callResult.data
-            ) 
+            )
 
             log("Decoded result length: ".concat(decoded.length.toString()))
-
-            return []
+            
+            // Extract arrays from decoded result
+            let ids = decoded[0] as! [UInt256]
+            let users = decoded[1] as! [EVM.EVMAddress]
+            let requestTypes = decoded[2] as! [UInt8]
+            let statuses = decoded[3] as! [UInt8]
+            let tokenAddresses = decoded[4] as! [EVM.EVMAddress]
+            let amounts = decoded[5] as! [UInt256]
+            let tideIds = decoded[6] as! [UInt64]
+            let timestamps = decoded[7] as! [UInt256]
+            
+            // Reconstruct EVMRequest structs
+            let requests: [EVMRequest] = []
+            var i = 0
+            while i < ids.length {
+                let request = EVMRequest(
+                    id: ids[i],
+                    user: users[i],
+                    requestType: requestTypes[i],
+                    status: statuses[i],
+                    tokenAddress: tokenAddresses[i],
+                    amount: amounts[i],
+                    tideId: tideIds[i],
+                    timestamp: timestamps[i]
+                )
+                requests.append(request)
+                i = i + 1
+            }
+            
+            log("Successfully reconstructed ".concat(requests.length.toString()).concat(" requests"))
+            
+            return requests
         }
     }
     
@@ -474,11 +513,8 @@ access(all) contract TidalEVMWorker {
 
     /// Helper: Convert UInt256 (18 decimals) to UFix64 (8 decimals)
     access(self) fun ufix64FromUInt256(_ value: UInt256): UFix64 {
-        // Convert from 18 decimals (wei/attoflow) to 8 decimals (UFix64)
-        // 1 FLOW = 10^18 attoflow = 10^8 UFix64 units
-        // So divide by 10^10
-        let scaled = value / 10_000_000_000
-        return UFix64(scaled)
+        let scaled = value / 10_000_000_000 // Remove 10 decimals (18 -> 8)
+        return UFix64(scaled) / 100_000_000.0
     }
 
     /// Helper: Convert UFix64 (8 decimals) to UInt256 (18 decimals)

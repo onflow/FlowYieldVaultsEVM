@@ -21,7 +21,7 @@ contract CreateTideRequest is Script {
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
     // Amount to deposit (1 FLOW = 1 ether in wei)
-    uint256 constant AMOUNT = 1 ether;
+    uint256 constant AMOUNT = 123.123456789 ether;
 
     function run() external {
         // Get user A's private key from environment or use default

@@ -341,6 +341,53 @@ contract TidalRequests {
         return requests;
     }
 
+    /// @notice Get pending requests unpacked (for Cadence decoding)
+    /// @return ids Array of request IDs
+    /// @return users Array of user addresses
+    /// @return requestTypes Array of request types
+    /// @return statuses Array of request statuses
+    /// @return tokenAddresses Array of token addresses
+    /// @return amounts Array of amounts
+    /// @return tideIds Array of tide IDs
+    /// @return timestamps Array of timestamps
+    function getPendingRequestsUnpacked()
+        external
+        view
+        returns (
+            uint256[] memory ids,
+            address[] memory users,
+            uint8[] memory requestTypes,
+            uint8[] memory statuses,
+            address[] memory tokenAddresses,
+            uint256[] memory amounts,
+            uint64[] memory tideIds,
+            uint256[] memory timestamps
+        )
+    {
+        uint256 length = pendingRequestIds.length;
+
+        ids = new uint256[](length);
+        users = new address[](length);
+        requestTypes = new uint8[](length);
+        statuses = new uint8[](length);
+        tokenAddresses = new address[](length);
+        amounts = new uint256[](length);
+        tideIds = new uint64[](length);
+        timestamps = new uint256[](length);
+
+        for (uint256 i = 0; i < length; i++) {
+            Request memory req = pendingRequests[pendingRequestIds[i]];
+            ids[i] = req.id;
+            users[i] = req.user;
+            requestTypes[i] = uint8(req.requestType);
+            statuses[i] = uint8(req.status);
+            tokenAddresses[i] = req.tokenAddress;
+            amounts[i] = req.amount;
+            tideIds[i] = req.tideId;
+            timestamps[i] = req.timestamp;
+        }
+    }
+
     /// @notice Get specific request
     function getRequest(
         uint256 requestId
