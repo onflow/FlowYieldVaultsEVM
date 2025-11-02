@@ -6,3 +6,10 @@ db
 lib/**
 
 .env
+
+# Cache files
+cache/
+broadcast/
+
+# Build output
+out/
