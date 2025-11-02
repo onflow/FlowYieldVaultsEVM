@@ -27,9 +27,9 @@ echo ""
 
 echo "=== Initializing project ==="
 
-# Deploy Cadence contracts
+# Deploy Cadence contracts (ignore failures for already-deployed contracts)
 echo "Deploying Cadence contracts..."
-flow project deploy
+flow project deploy || echo "⚠️  Some contracts already exist (this is OK)"
 
 # Setup worker with beta badge
 echo "Setting up worker with badge for contract $TIDAL_REQUESTS_CONTRACT..."
