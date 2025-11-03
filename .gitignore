@@ -1,5 +1,6 @@
 # flow
-emulator-account.pkey
+*.pkey
+!emulator-account.pkey
 
 imports
 db

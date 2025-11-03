@@ -1,25 +1,27 @@
 {
 	"contracts": {
+		"TidalEVMWorker": {
+			"source": "./cadence/contracts/TidalEVMWorker.cdc",
+			"aliases": {
+				"emulator": "f8d6e0586b0a20c7"
+			}
+		},
 		"TidalYield": {
 			"source": "./lib/tidal-sc/cadence/contracts/TidalYield.cdc",
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7",
-				"testing": "0000000000000007"
+				"testing": "0000000000000007",
+				"testnet": "d27920b6384e2a78"
 			}
 		},
 		"TidalYieldClosedBeta": {
 			"source": "./lib/tidal-sc/cadence/contracts/TidalYieldClosedBeta.cdc",
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7",
-				"testing": "0000000000000007"
+				"testing": "0000000000000007",
+				"testnet": "d27920b6384e2a78"
 			}
-		},
-		"TidalEVMWorker": {
-			"source": "./cadence/contracts/TidalEVMWorker.cdc",
-			"aliases": {
-				"emulator": "f8d6e0586b0a20c7"
-      		}
-    	}
+		}
 	},
 	"dependencies": {
 		"BandOracle": {
@@ -58,14 +60,18 @@
 			"source": "mainnet://92195d814edf9cb0.DeFiActions",
 			"hash": "67175b2a2569bdff79c221ec7ac823c79dd59c83bce07582cfc3b675dfbe6207",
 			"aliases": {
-				"mainnet": "92195d814edf9cb0"
+				"emulator": "f8d6e0586b0a20c7",
+				"testing": "0000000000000007",
+				"testnet": "0b11b1848a8aa2c0"
 			}
 		},
 		"DeFiActionsMathUtils": {
 			"source": "mainnet://92195d814edf9cb0.DeFiActionsMathUtils",
 			"hash": "f2ae511846ea9a545380968837f47a4198447c008e575047f3ace3b7cf782067",
 			"aliases": {
-				"mainnet": "92195d814edf9cb0"
+				"emulator": "f8d6e0586b0a20c7",
+				"testing": "0000000000000007",
+				"testnet": "0b11b1848a8aa2c0"
 			}
 		},
 		"DeFiActionsUtils": {
@@ -140,7 +146,9 @@
 			"source": "mainnet://1d9a619393e9fb53.FungibleTokenConnectors",
 			"hash": "01dd4a81d57f079316ff27e3980de1b895e2c50002e47d3c20f68bbf694e54b0",
 			"aliases": {
-				"mainnet": "1d9a619393e9fb53"
+				"emulator": "f8d6e0586b0a20c7",
+				"testing": "0000000000000007",
+				"testnet": "4cd02f8de4122c84"
 			}
 		},
 		"FungibleTokenMetadataViews": {
@@ -209,7 +217,9 @@
 			"source": "mainnet://0bce04a00aedf132.SwapConnectors",
 			"hash": "5cec3b1be3c454d3949686ddfb4cb5dc36e91ae7cec4cca31f3d416cd7772006",
 			"aliases": {
-				"mainnet": "0bce04a00aedf132"
+				"emulator": "f8d6e0586b0a20c7",
+				"testing": "0000000000000007",
+				"testnet": "ad228f1c13a97ec1"
 			}
 		},
 		"SwapError": {
@@ -256,11 +266,7 @@
 			"emulator-account": [
 				"DeFiActionsUtils",
 				"EVMNativeFLOWConnectors",
-				"DeFiActions",
-				"DeFiActionsMathUtils",
 				"IncrementFiStakingConnectors",
-				"FungibleTokenConnectors",
-				"SwapConnectors",
 				"BandOracleConnectors",
 				"Staking",
 				"StakingError",

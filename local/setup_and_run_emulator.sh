@@ -68,5 +68,6 @@ echo "=========================="
 echo ""
 echo "Running tidal-sc setup script..."
 cd ./lib/tidal-sc
+./local/setup_wallets.sh
 ./local/setup_emulator.sh
 cd ../..
