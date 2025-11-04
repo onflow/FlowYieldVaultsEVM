@@ -1,0 +1,49 @@
+name: Tide Creation CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  integration-test:
+    name: End-to-End Tide Creation Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Install Flow CLI
+        run: |
+          sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+      
+      - name: Verify Flow CLI Installation
+        run: flow version
+      
+      - name: Install Flow dependencies
+        run: flow deps install --skip-alias --skip-deployments
+      
+      # Step 1: Start environment & deploy contracts
+      - name: Setup and Deploy Full Stack
+        run: |
+          ./local/setup_and_run_emulator.sh &
+          sleep 15
+          ./local/deploy_full_stack.sh
+      
+      # Step 2: Create yield position from EVM
+      - name: Create Tide Request from EVM
+        run: |
+          cd solidity
+          forge script ./script/CreateTideRequest.s.sol --rpc-url localhost:8545 --broadcast --legacy
+      
+      # Step 3: Process request (Cadence worker)
+      - name: Process Requests
+        run: flow transactions send ./cadence/transactions/process_requests.cdc
