@@ -15,21 +15,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          token: ${{ secrets.GH_PAT }}
           submodules: recursive
       
       - name: Install Flow CLI
-        run: |
-          sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        run: sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
       
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
-      
-      - name: Verify Flow CLI Installation
+      - name: Flow CLI Version
         run: flow version
+      
+      - name: Update PATH
+        run: echo "/root/.local/bin" >> $GITHUB_PATH
       
       - name: Install Flow dependencies
         run: flow deps install --skip-alias --skip-deployments
+      
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
       
       # Step 1: Start environment & deploy contracts
       - name: Setup and Deploy Full Stack
