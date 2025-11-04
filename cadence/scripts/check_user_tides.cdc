@@ -1,5 +1,5 @@
 // check_user_tides.cdc
-import "TidalEVMWorker"
+import "TidalEVM"
 
 /// Script to check what Tide IDs are associated with an EVM address
 ///
@@ -20,7 +20,7 @@ access(all) fun main(evmAddress: String): [UInt64] {
     
     log("Checking Tides for EVM address: ".concat(normalizedAddress))
     
-    let tideIds = TidalEVMWorker.getTideIDsForEVMAddress(normalizedAddress)
+    let tideIds = TidalEVM.getTideIDsForEVMAddress(normalizedAddress)
     
     log("Found ".concat(tideIds.length.toString()).concat(" Tide(s)"))
     for id in tideIds {

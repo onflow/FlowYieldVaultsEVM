@@ -17,7 +17,7 @@ flow transactions send ./cadence/transactions/process_requests.cdc
 ## Architecture
 
 **EVM Side:** Users deposit FLOW to `TidalRequests` contract and submit requests  
-**Cadence Side:** `TidalEVMWorker` processes requests, creates/manages Tide positions  
+**Cadence Side:** `TidalEVM` processes requests, creates/manages Tide positions  
 **Bridge:** COA (Cadence Owned Account) controls fund movement between VMs
 
 ## Request Types

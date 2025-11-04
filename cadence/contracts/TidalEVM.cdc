@@ -5,14 +5,14 @@ import "EVM"
 import "TidalYield"
 import "TidalYieldClosedBeta"
 
-/// TidalEVMWorker: Bridge contract that processes requests from EVM users
+/// TidalEVM: Bridge contract that processes requests from EVM users
 /// and manages their Tide positions in Cadence
 /// 
 /// Security Model:
 /// - Singleton pattern: Worker created in init() and stored in contract account
 /// - Only contract account can set TidalRequests address
 /// - Only contract account can create/access Worker
-access(all) contract TidalEVMWorker {
+access(all) contract TidalEVM {
     
     // ========================================
     // Paths
@@ -43,6 +43,7 @@ access(all) contract TidalEVMWorker {
     access(all) event RequestsProcessed(count: Int, successful: Int, failed: Int)
     access(all) event TideCreatedForEVMUser(evmAddress: String, tideId: UInt64, amount: UFix64)
     access(all) event TideClosedForEVMUser(evmAddress: String, tideId: UInt64, amountReturned: UFix64)
+    access(all) event RequestFailed(requestId: UInt256, reason: String)
 
     // ========================================
     // Structs
@@ -58,6 +59,7 @@ access(all) contract TidalEVMWorker {
         access(all) let amount: UInt256
         access(all) let tideId: UInt64
         access(all) let timestamp: UInt256
+        access(all) let message: String
         
         init(
             id: UInt256,
@@ -67,7 +69,8 @@ access(all) contract TidalEVMWorker {
             tokenAddress: EVM.EVMAddress,
             amount: UInt256,
             tideId: UInt64,
-            timestamp: UInt256
+            timestamp: UInt256,
+            message: String
         ) {
             self.id = id
             self.user = user
@@ -77,16 +80,19 @@ access(all) contract TidalEVMWorker {
             self.amount = amount
             self.tideId = tideId
             self.timestamp = timestamp
+            self.message = message
         }
     }
     
     access(all) struct ProcessResult {
         access(all) let success: Bool
         access(all) let tideId: UInt64
+        access(all) let message: String
         
-        init(success: Bool, tideId: UInt64) {
+        init(success: Bool, tideId: UInt64, message: String) {
             self.success = success
             self.tideId = tideId
+            self.message = message
         }
     }
     
@@ -99,9 +105,9 @@ access(all) contract TidalEVMWorker {
     access(all) resource Admin {
         access(all) fun setTidalRequestsAddress(_ address: EVM.EVMAddress) {
             pre {
-                TidalEVMWorker.tidalRequestsAddress == nil: "TidalRequests address already set"
+                TidalEVM.tidalRequestsAddress == nil: "TidalRequests address already set"
             }
-            TidalEVMWorker.tidalRequestsAddress = address
+            TidalEVM.tidalRequestsAddress = address
             emit TidalRequestsAddressSet(address: address.toString())
         }
         
@@ -159,7 +165,7 @@ access(all) contract TidalEVMWorker {
         /// Process all pending requests from TidalRequests contract
         access(all) fun processRequests() {
             pre {
-                TidalEVMWorker.tidalRequestsAddress != nil: "TidalRequests address not set"
+                TidalEVM.tidalRequestsAddress != nil: "TidalRequests address not set"
             }
             
             // 1. Get pending requests from TidalRequests
@@ -184,6 +190,7 @@ access(all) contract TidalEVMWorker {
                 log("Token Address: ".concat(request.tokenAddress.toString()))
                 log("Tide ID: ".concat(request.tideId.toString()))
                 log("Timestamp: ".concat(request.timestamp.toString()))
+                log("Message: ".concat(request.message))
 
                 let success = self.processRequestSafely(request)
                 if success {
@@ -202,24 +209,30 @@ access(all) contract TidalEVMWorker {
             self.updateRequestStatus(
                 requestId: request.id,
                 status: 1, // PROCESSING
-                tideId: 0
+                tideId: 0,
+                message: "Processing request"
             )
             
             // Try to process based on type
             var success = false
             var tideId: UInt64 = 0
+            var message = ""
             
             switch request.requestType {
                 case 0: // CREATE_TIDE
                     let result = self.processCreateTide(request)
                     success = result.success
                     tideId = result.tideId
+                    message = result.message
                 case 3: // CLOSE_TIDE
-                    success = self.processCloseTide(request)
+                    let result = self.processCloseTideWithMessage(request)
+                    success = result.success
                     tideId = request.tideId
+                    message = result.message
                 default:
                     // Other types not implemented yet
                     success = false
+                    message = "Request type not implemented"
             }
             
             // Update request status
@@ -227,8 +240,13 @@ access(all) contract TidalEVMWorker {
             self.updateRequestStatus(
                 requestId: request.id,
                 status: UInt8(finalStatus),
-                tideId: tideId
+                tideId: tideId,
+                message: message
             )
+            
+            if !success {
+                emit RequestFailed(requestId: request.id, reason: message)
+            }
             
             return success
         }
@@ -249,7 +267,7 @@ access(all) contract TidalEVMWorker {
             let strategyIdentifier = "A.f8d6e0586b0a20c7.TidalYieldStrategies.TracerStrategy"
 
             // 2. Convert amount from UInt256 to UFix64
-            let amount = TidalEVMWorker.ufix64FromUInt256(request.amount)
+            let amount = TidalEVM.ufix64FromUInt256(request.amount)
             log("Creating Tide for amount: ".concat(amount.toString()))
             
             // 3. Withdraw funds from TidalRequests
@@ -257,26 +275,37 @@ access(all) contract TidalEVMWorker {
 
             // 4. Validate vault type matches vaultIdentifier
             let vaultType = vault.getType()
-            assert(
-                vaultType.identifier == vaultIdentifier,
-                message: "Vault type mismatch: expected ".concat(vaultIdentifier).concat(" but got ").concat(vaultType.identifier)
-            )
+            if vaultType.identifier != vaultIdentifier {
+                destroy vault
+                return ProcessResult(
+                    success: false, 
+                    tideId: 0, 
+                    message: "Vault type mismatch: expected ".concat(vaultIdentifier).concat(" but got ").concat(vaultType.identifier)
+                )
+            }
             
             // 5. Create the Strategy Type
             let strategyType = CompositeType(strategyIdentifier)
-                ?? panic("Invalid strategyIdentifier ".concat(strategyIdentifier))
+            if strategyType == nil {
+                destroy vault
+                return ProcessResult(
+                    success: false, 
+                    tideId: 0, 
+                    message: "Invalid strategyIdentifier: ".concat(strategyIdentifier)
+                )
+            }
             
             // 6. Get beta reference
             let betaRef = self.getBetaReference()
             
-             // 7. Get current tide IDs before creating new tide
+            // 7. Get current tide IDs before creating new tide
             let tidesBeforeCreate = self.tideManager.getIDs()
             
             // 8. Create Tide with proper parameters matching the transaction
             // Note: createTide returns Void, so we need to find the new tide ID
             self.tideManager.createTide(
                 betaRef: betaRef,
-                strategyType: strategyType,
+                strategyType: strategyType!,
                 withVault: <-vault
             )
             
@@ -290,14 +319,20 @@ access(all) contract TidalEVMWorker {
                 }
             }
             
-            assert(tideId != UInt64.max, message: "Failed to find newly created Tide ID")
+            if tideId == UInt64.max {
+                return ProcessResult(
+                    success: false, 
+                    tideId: 0, 
+                    message: "Failed to find newly created Tide ID"
+                )
+            }
             
             // 10. Store mapping
             let evmAddr = request.user.toString()
-            if TidalEVMWorker.tidesByEVMAddress[evmAddr] == nil {
-                TidalEVMWorker.tidesByEVMAddress[evmAddr] = []
+            if TidalEVM.tidesByEVMAddress[evmAddr] == nil {
+                TidalEVM.tidesByEVMAddress[evmAddr] = []
             }
-            TidalEVMWorker.tidesByEVMAddress[evmAddr]!.append(tideId)
+            TidalEVM.tidesByEVMAddress[evmAddr]!.append(tideId)
             
             // 11. Update user balance in TidalRequests
             self.updateUserBalance(
@@ -308,20 +343,32 @@ access(all) contract TidalEVMWorker {
             
             emit TideCreatedForEVMUser(evmAddress: evmAddr, tideId: tideId, amount: amount)
             
-            return ProcessResult(success: true, tideId: tideId)
+            return ProcessResult(
+                success: true, 
+                tideId: tideId, 
+                message: "Tide created successfully"
+            )
         }
         
-        /// Process CLOSE_TIDE request
-        access(self) fun processCloseTide(_ request: EVMRequest): Bool {
+        /// Process CLOSE_TIDE request with message support
+        access(self) fun processCloseTideWithMessage(_ request: EVMRequest): ProcessResult {
             let evmAddr = request.user.toString()
             
             // 1. Verify user owns this Tide
-            if let userTides = TidalEVMWorker.tidesByEVMAddress[evmAddr] {
+            if let userTides = TidalEVM.tidesByEVMAddress[evmAddr] {
                 if !userTides.contains(request.tideId) {
-                    return false // User doesn't own this Tide
+                    return ProcessResult(
+                        success: false, 
+                        tideId: 0, 
+                        message: "User does not own Tide ID ".concat(request.tideId.toString())
+                    )
                 }
             } else {
-                return false // User has no Tides
+                return ProcessResult(
+                    success: false, 
+                    tideId: 0, 
+                    message: "User has no Tides"
+                )
             }
             
             // 2. Close Tide and get vault
@@ -332,18 +379,22 @@ access(all) contract TidalEVMWorker {
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user)
             
             // 4. Remove from mapping
-            if let index = TidalEVMWorker.tidesByEVMAddress[evmAddr]!.firstIndex(of: request.tideId) {
-                TidalEVMWorker.tidesByEVMAddress[evmAddr]!.remove(at: index)
+            if let index = TidalEVM.tidesByEVMAddress[evmAddr]!.firstIndex(of: request.tideId) {
+                TidalEVM.tidesByEVMAddress[evmAddr]!.remove(at: index)
             }
             
             emit TideClosedForEVMUser(evmAddress: evmAddr, tideId: request.tideId, amountReturned: amount)
             
-            return true
+            return ProcessResult(
+                success: true, 
+                tideId: request.tideId, 
+                message: "Tide closed successfully, returned ".concat(amount.toString()).concat(" FLOW")
+            )
         }
         
         /// Withdraw funds from TidalRequests contract via COA
         access(self) fun withdrawFundsFromEVM(amount: UFix64): @{FungibleToken.Vault} {
-            let amountUInt256 = TidalEVMWorker.uint256FromUFix64(amount)
+            let amountUInt256 = TidalEVM.uint256FromUFix64(amount)
             let nativeFlowAddress = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF")
             
             let calldata = EVM.encodeABIWithSignature(
@@ -352,7 +403,7 @@ access(all) contract TidalEVMWorker {
             )
             
             let result = self.coa.call(
-                to: TidalEVMWorker.tidalRequestsAddress!,
+                to: TidalEVM.tidalRequestsAddress!,
                 data: calldata,
                 gasLimit: 100000,
                 value: EVM.Balance(attoflow: 0)
@@ -390,21 +441,21 @@ access(all) contract TidalEVMWorker {
         }
         
         /// Update request status in TidalRequests
-        access(self) fun updateRequestStatus(requestId: UInt256, status: UInt8, tideId: UInt64) {
+        access(self) fun updateRequestStatus(requestId: UInt256, status: UInt8, tideId: UInt64, message: String) {
             let calldata = EVM.encodeABIWithSignature(
-                "updateRequestStatus(uint256,uint8,uint64)",
-                [requestId, status, tideId]
+                "updateRequestStatus(uint256,uint8,uint64,string)",
+                [requestId, status, tideId, message]
             )
             
             let result = self.coa.call(
-                to: TidalEVMWorker.tidalRequestsAddress!,
+                to: TidalEVM.tidalRequestsAddress!,
                 data: calldata,
-                gasLimit: 100000,
+                gasLimit: 150000, // Increased for string parameter
                 value: EVM.Balance(attoflow: 0)
             )
             
             assert(result.status == EVM.Status.successful, message: "updateRequestStatus call failed")
-            log("Request status updated successfully")
+            log("Request status updated successfully: ".concat(message))
         }
         
         /// Update user balance in TidalRequests
@@ -415,7 +466,7 @@ access(all) contract TidalEVMWorker {
             )
             
             let result = self.coa.call(
-                to: TidalEVMWorker.tidalRequestsAddress!,
+                to: TidalEVM.tidalRequestsAddress!,
                 data: calldata,
                 gasLimit: 100000,
                 value: EVM.Balance(attoflow: 0)
@@ -425,13 +476,12 @@ access(all) contract TidalEVMWorker {
         }
         
         /// Get pending requests from TidalRequests contract
-        /// Get pending requests from TidalRequests contract
         access(all) fun getPendingRequestsFromEVM(): [EVMRequest] {
             // Call TidalRequests.getPendingRequestsUnpacked()
             let calldata = EVM.encodeABIWithSignature("getPendingRequestsUnpacked()", [])
             
             let callResult = self.coa.dryCall(
-                to: TidalEVMWorker.tidalRequestsAddress!,
+                to: TidalEVM.tidalRequestsAddress!,
                 data: calldata,
                 gasLimit: 15_000_000,
                 value: EVM.Balance(attoflow: 0)
@@ -446,7 +496,7 @@ access(all) contract TidalEVMWorker {
 
             assert(callResult.status == EVM.Status.successful, message: "getPendingRequestsUnpacked call failed")
             
-            // Decode 8 separate arrays (one for each field in Request struct)
+            // Decode 9 separate arrays (one for each field in Request struct)
             let decoded = EVM.decodeABI(
                 types: [
                     Type<[UInt256]>(),      // ids
@@ -456,7 +506,8 @@ access(all) contract TidalEVMWorker {
                     Type<[EVM.EVMAddress]>(), // tokenAddresses
                     Type<[UInt256]>(),      // amounts
                     Type<[UInt64]>(),       // tideIds
-                    Type<[UInt256]>()       // timestamps
+                    Type<[UInt256]>(),      // timestamps
+                    Type<[String]>()        // messages
                 ],
                 data: callResult.data
             )
@@ -472,6 +523,7 @@ access(all) contract TidalEVMWorker {
             let amounts = decoded[5] as! [UInt256]
             let tideIds = decoded[6] as! [UInt64]
             let timestamps = decoded[7] as! [UInt256]
+            let messages = decoded[8] as! [String]
             
             // Reconstruct EVMRequest structs
             let requests: [EVMRequest] = []
@@ -485,7 +537,8 @@ access(all) contract TidalEVMWorker {
                     tokenAddress: tokenAddresses[i],
                     amount: amounts[i],
                     tideId: tideIds[i],
-                    timestamp: timestamps[i]
+                    timestamp: timestamps[i],
+                    message: messages[i]
                 )
                 requests.append(request)
                 i = i + 1
@@ -532,9 +585,9 @@ access(all) contract TidalEVMWorker {
     
     init() {
         // Setup paths
-        self.WorkerStoragePath = /storage/tidalEVMWorker
-        self.WorkerPublicPath = /public/tidalEVMWorker
-        self.AdminStoragePath = /storage/tidalEVMWorkerAdmin
+        self.WorkerStoragePath = /storage/tidalEVM
+        self.WorkerPublicPath = /public/tidalEVM
+        self.AdminStoragePath = /storage/tidalEVMAdmin
         
         // Initialize state
         self.tidesByEVMAddress = {}

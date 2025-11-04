@@ -1,7 +1,7 @@
 {
 	"contracts": {
-		"TidalEVMWorker": {
-			"source": "./cadence/contracts/TidalEVMWorker.cdc",
+		"TidalEVM": {
+			"source": "./cadence/contracts/TidalEVM.cdc",
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7"
 			}
@@ -277,7 +277,7 @@
 				"BandOracle",
 				"TidalYieldClosedBeta",
 				"TidalYield",
-				"TidalEVMWorker"
+				"TidalEVM"
 			]
 		}
 	}

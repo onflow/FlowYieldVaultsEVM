@@ -4,7 +4,7 @@ pragma solidity 0.8.18;
 /**
  * @title TidalRequests
  * @notice Request queue and fund escrow for EVM users to interact with Tidal Cadence protocol
- * @dev This contract holds user funds in escrow until processed by TidalEVMWorker
+ * @dev This contract holds user funds in escrow until processed by TidalEVM
  */
 contract TidalRequests {
     // ============================================
@@ -47,6 +47,7 @@ contract TidalRequests {
         uint256 amount;
         uint64 tideId; // Only used for DEPOSIT/WITHDRAW/CLOSE
         uint256 timestamp;
+        string message; // Error message or status details
     }
 
     // ============================================
@@ -56,7 +57,7 @@ contract TidalRequests {
     /// @notice Auto-incrementing request ID counter
     uint256 private _requestIdCounter;
 
-    /// @notice Authorized COA address (controlled by TidalEVMWorker)
+    /// @notice Authorized COA address (controlled by TidalEVM)
     address public authorizedCOA;
 
     /// @notice Owner of the contract (for admin functions)
@@ -65,8 +66,9 @@ contract TidalRequests {
     /// @notice User request history: user address => array of requests
     mapping(address => Request[]) public userRequests;
 
-    /// @notice User balances: user address => token address => balance
-    mapping(address => mapping(address => uint256)) public userBalances;
+    /// @notice Pending user balances: user address => token address => balance
+    /// @dev These are funds in escrow waiting to be converted to Tides
+    mapping(address => mapping(address => uint256)) public pendingUserBalances;
 
     /// @notice Pending requests for efficient worker processing
     mapping(uint256 => Request) public pendingRequests;
@@ -88,7 +90,8 @@ contract TidalRequests {
     event RequestProcessed(
         uint256 indexed requestId,
         RequestStatus status,
-        uint64 tideId
+        uint64 tideId,
+        string message
     );
 
     event BalanceUpdated(
@@ -138,7 +141,7 @@ contract TidalRequests {
     // ============================================
 
     /// @notice Set the authorized COA address (can only be called by owner)
-    /// @param _coa The COA address controlled by TidalEVMWorker
+    /// @param _coa The COA address controlled by TidalEVM
     function setAuthorizedCOA(address _coa) external onlyOwner {
         require(_coa != address(0), "TidalRequests: invalid COA address");
         address oldCOA = authorizedCOA;
@@ -219,7 +222,7 @@ contract TidalRequests {
     }
 
     // ============================================
-    // COA Functions (called by TidalEVMWorker)
+    // COA Functions (called by TidalEVM)
     // ============================================
 
     /// @notice Withdraw funds from contract (only authorized COA)
@@ -250,10 +253,12 @@ contract TidalRequests {
     /// @param requestId Request ID to update
     /// @param status New status
     /// @param tideId Associated Tide ID (if applicable)
+    /// @param message Status message (e.g., error reason if failed)
     function updateRequestStatus(
         uint256 requestId,
         RequestStatus status,
-        uint64 tideId
+        uint64 tideId,
+        string calldata message
     ) external onlyAuthorizedCOA {
         Request storage request = pendingRequests[requestId];
         require(request.id == requestId, "TidalRequests: request not found");
@@ -264,6 +269,7 @@ contract TidalRequests {
         );
 
         request.status = status;
+        request.message = message;
         if (tideId > 0) {
             request.tideId = tideId;
         }
@@ -273,6 +279,7 @@ contract TidalRequests {
         for (uint256 i = 0; i < userReqs.length; i++) {
             if (userReqs[i].id == requestId) {
                 userReqs[i].status = status;
+                userReqs[i].message = message;
                 if (tideId > 0) {
                     userReqs[i].tideId = tideId;
                 }
@@ -287,7 +294,7 @@ contract TidalRequests {
             _removePendingRequest(requestId);
         }
 
-        emit RequestProcessed(requestId, status, tideId);
+        emit RequestProcessed(requestId, status, tideId, message);
     }
 
     /// @notice Update user balance (only authorized COA)
@@ -299,7 +306,7 @@ contract TidalRequests {
         address tokenAddress,
         uint256 newBalance
     ) external onlyAuthorizedCOA {
-        userBalances[user][tokenAddress] = newBalance;
+        pendingUserBalances[user][tokenAddress] = newBalance;
         emit BalanceUpdated(user, tokenAddress, newBalance);
     }
 
@@ -319,12 +326,12 @@ contract TidalRequests {
         return userRequests[user];
     }
 
-    /// @notice Get user's balance for a token
+    /// @notice Get user's pending balance for a token
     function getUserBalance(
         address user,
         address tokenAddress
     ) external view returns (uint256) {
-        return userBalances[user][tokenAddress];
+        return pendingUserBalances[user][tokenAddress];
     }
 
     /// @notice Get all pending request IDs
@@ -350,6 +357,7 @@ contract TidalRequests {
     /// @return amounts Array of amounts
     /// @return tideIds Array of tide IDs
     /// @return timestamps Array of timestamps
+    /// @return messages Array of status messages
     function getPendingRequestsUnpacked()
         external
         view
@@ -361,7 +369,8 @@ contract TidalRequests {
             address[] memory tokenAddresses,
             uint256[] memory amounts,
             uint64[] memory tideIds,
-            uint256[] memory timestamps
+            uint256[] memory timestamps,
+            string[] memory messages
         )
     {
         uint256 length = pendingRequestIds.length;
@@ -374,6 +383,7 @@ contract TidalRequests {
         amounts = new uint256[](length);
         tideIds = new uint64[](length);
         timestamps = new uint256[](length);
+        messages = new string[](length);
 
         for (uint256 i = 0; i < length; i++) {
             Request memory req = pendingRequests[pendingRequestIds[i]];
@@ -385,6 +395,7 @@ contract TidalRequests {
             amounts[i] = req.amount;
             tideIds[i] = req.tideId;
             timestamps[i] = req.timestamp;
+            messages[i] = req.message;
         }
     }
 
@@ -416,7 +427,8 @@ contract TidalRequests {
             tokenAddress: tokenAddress,
             amount: amount,
             tideId: tideId,
-            timestamp: block.timestamp
+            timestamp: block.timestamp,
+            message: "" // Empty message initially
         });
 
         // Store in user's request array
@@ -426,13 +438,13 @@ contract TidalRequests {
         pendingRequests[requestId] = newRequest;
         pendingRequestIds.push(requestId);
 
-        // Update user balance if depositing
+        // Update pending user balance if depositing
         if (requestType == RequestType.CREATE_TIDE) {
-            userBalances[user][tokenAddress] += amount;
+            pendingUserBalances[user][tokenAddress] += amount;
             emit BalanceUpdated(
                 user,
                 tokenAddress,
-                userBalances[user][tokenAddress]
+                pendingUserBalances[user][tokenAddress]
             );
         }
 

@@ -1,5 +1,5 @@
 // setup_worker_with_badge.cdc
-import "TidalEVMWorker"
+import "TidalEVM"
 import "TidalYieldClosedBeta"
 import "EVM"
 
@@ -44,10 +44,10 @@ transaction(tidalRequestsAddress: String) {
         
         // Step 2: Setup the Worker
         
-        // Get the TidalEVMWorker Admin resource
-        let admin = signer.storage.borrow<&TidalEVMWorker.Admin>(
-            from: TidalEVMWorker.AdminStoragePath
-        ) ?? panic("Could not borrow TidalEVMWorker Admin")
+        // Get the TidalEVM Admin resource
+        let admin = signer.storage.borrow<&TidalEVM.Admin>(
+            from: TidalEVM.AdminStoragePath
+        ) ?? panic("Could not borrow TidalEVM Admin")
         
         // Load the existing COA from standard storage path
         let coa <- signer.storage.load<@EVM.CadenceOwnedAccount>(from: /storage/evm)
@@ -59,7 +59,7 @@ transaction(tidalRequestsAddress: String) {
         let worker <- admin.createWorker(coa: <-coa, betaBadgeCap: betaBadgeCap!)
         
         // Save worker to storage
-        signer.storage.save(<-worker, to: TidalEVMWorker.WorkerStoragePath)
+        signer.storage.save(<-worker, to: TidalEVM.WorkerStoragePath)
         
         // Set TidalRequests contract address
         let evmAddress = EVM.addressFromString(tidalRequestsAddress)
