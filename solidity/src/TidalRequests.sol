@@ -94,6 +94,12 @@ contract TidalRequests {
         string message
     );
 
+    event RequestCancelled(
+        uint256 indexed requestId,
+        address indexed user,
+        uint256 refundAmount
+    );
+
     event BalanceUpdated(
         address indexed user,
         address indexed tokenAddress,
@@ -221,6 +227,76 @@ contract TidalRequests {
         return requestId;
     }
 
+    /// @notice Cancel a pending request and reclaim funds
+    /// @param requestId The request ID to cancel
+    function cancelRequest(uint256 requestId) external {
+        Request storage request = pendingRequests[requestId];
+
+        require(request.id == requestId, "TidalRequests: request not found");
+        require(request.user == msg.sender, "TidalRequests: not request owner");
+        require(
+            request.status == RequestStatus.PENDING,
+            "TidalRequests: can only cancel pending requests"
+        );
+
+        // Update status to FAILED with cancellation message
+        request.status = RequestStatus.FAILED;
+        request.message = "Cancelled by user";
+
+        // Update in user's request array
+        Request[] storage userReqs = userRequests[msg.sender];
+        for (uint256 i = 0; i < userReqs.length; i++) {
+            if (userReqs[i].id == requestId) {
+                userReqs[i].status = RequestStatus.FAILED;
+                userReqs[i].message = "Cancelled by user";
+                break;
+            }
+        }
+
+        // Remove from pending queue
+        _removePendingRequest(requestId);
+
+        // Refund funds if this was a CREATE_TIDE request
+        uint256 refundAmount = 0;
+        if (
+            request.requestType == RequestType.CREATE_TIDE && request.amount > 0
+        ) {
+            refundAmount = request.amount;
+
+            // Decrease pending balance
+            pendingUserBalances[msg.sender][request.tokenAddress] -= request
+                .amount;
+            emit BalanceUpdated(
+                msg.sender,
+                request.tokenAddress,
+                pendingUserBalances[msg.sender][request.tokenAddress]
+            );
+
+            // Refund the funds
+            if (isNativeFlow(request.tokenAddress)) {
+                (bool success, ) = msg.sender.call{value: request.amount}("");
+                require(success, "TidalRequests: refund failed");
+            } else {
+                // TODO: Transfer ERC20 tokens (Phase 2)
+                revert("TidalRequests: ERC20 not supported yet");
+            }
+
+            emit FundsWithdrawn(
+                msg.sender,
+                request.tokenAddress,
+                request.amount
+            );
+        }
+
+        emit RequestCancelled(requestId, msg.sender, refundAmount);
+        emit RequestProcessed(
+            requestId,
+            RequestStatus.FAILED,
+            request.tideId,
+            "Cancelled by user"
+        );
+    }
+
     // ============================================
     // COA Functions (called by TidalEVM)
     // ============================================
@@ -251,12 +327,12 @@ contract TidalRequests {
 
     /// @notice Update request status (only authorized COA)
     /// @param requestId Request ID to update
-    /// @param status New status
+    /// @param status New status (as uint8: 0=PENDING, 1=PROCESSING, 2=COMPLETED, 3=FAILED)
     /// @param tideId Associated Tide ID (if applicable)
     /// @param message Status message (e.g., error reason if failed)
     function updateRequestStatus(
         uint256 requestId,
-        RequestStatus status,
+        uint8 status,
         uint64 tideId,
         string calldata message
     ) external onlyAuthorizedCOA {
@@ -268,7 +344,8 @@ contract TidalRequests {
             "TidalRequests: request already finalized"
         );
 
-        request.status = status;
+        // Convert uint8 to RequestStatus
+        request.status = RequestStatus(status);
         request.message = message;
         if (tideId > 0) {
             request.tideId = tideId;
@@ -278,7 +355,7 @@ contract TidalRequests {
         Request[] storage userReqs = userRequests[request.user];
         for (uint256 i = 0; i < userReqs.length; i++) {
             if (userReqs[i].id == requestId) {
-                userReqs[i].status = status;
+                userReqs[i].status = RequestStatus(status);
                 userReqs[i].message = message;
                 if (tideId > 0) {
                     userReqs[i].tideId = tideId;
@@ -289,12 +366,18 @@ contract TidalRequests {
 
         // If completed or failed, remove from pending queue
         if (
-            status == RequestStatus.COMPLETED || status == RequestStatus.FAILED
+            status == uint8(RequestStatus.COMPLETED) ||
+            status == uint8(RequestStatus.FAILED)
         ) {
             _removePendingRequest(requestId);
         }
 
-        emit RequestProcessed(requestId, status, tideId, message);
+        emit RequestProcessed(
+            requestId,
+            RequestStatus(status),
+            tideId,
+            message
+        );
     }
 
     /// @notice Update user balance (only authorized COA)

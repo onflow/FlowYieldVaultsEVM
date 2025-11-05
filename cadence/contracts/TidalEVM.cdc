@@ -110,6 +110,12 @@ access(all) contract TidalEVM {
             TidalEVM.tidalRequestsAddress = address
             emit TidalRequestsAddressSet(address: address.toString())
         }
+
+        access(all) fun updateTidalRequestsAddress(_ address: EVM.EVMAddress) {
+            // Pas de précondition - permet la mise à jour
+            TidalEVM.tidalRequestsAddress = address
+            emit TidalRequestsAddressSet(address: address.toString())
+        }
         
         /// Create a new Worker with a capability instead of reference
         access(all) fun createWorker(
@@ -245,7 +251,13 @@ access(all) contract TidalEVM {
             )
             
             if !success {
-                emit RequestFailed(requestId: request.id, reason: message)
+                // emit RequestFailed(requestId: request.id, reason: message)
+                panic("Request Processing Failed\n"
+                    .concat("Request ID: ").concat(request.id.toString())
+                    .concat("\nRequest Type: ").concat(request.requestType.toString())
+                    .concat("\nUser: ").concat(request.user.toString())
+                    .concat("\nAmount: ").concat(request.amount.toString())
+                    .concat("\nReason: ").concat(message))
             }
             
             return success
@@ -259,12 +271,12 @@ access(all) contract TidalEVM {
 
             // TODO - Pass those params more elegantly
             // // testnet
-            // let vaultIdentifier = "A.7e60df042a9c0868.FlowToken.Vault"
-            // let strategyIdentifier = "A.d27920b6384e2a78.TidalYieldStrategies.TracerStrategy"
+            let vaultIdentifier = "A.7e60df042a9c0868.FlowToken.Vault"
+            let strategyIdentifier = "A.d27920b6384e2a78.TidalYieldStrategies.TracerStrategy"
 
             // emulator
-            let vaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
-            let strategyIdentifier = "A.f8d6e0586b0a20c7.TidalYieldStrategies.TracerStrategy"
+            // let vaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
+            // let strategyIdentifier = "A.f8d6e0586b0a20c7.TidalYieldStrategies.TracerStrategy"
 
             // 2. Convert amount from UInt256 to UFix64
             let amount = TidalEVM.ufix64FromUInt256(request.amount)
@@ -454,7 +466,30 @@ access(all) contract TidalEVM {
                 value: EVM.Balance(attoflow: 0)
             )
             
-            assert(result.status == EVM.Status.successful, message: "updateRequestStatus call failed")
+            // If failed, try to decode the revert reason
+            var revertReason = ""
+            if result.status != EVM.Status.successful && result.data.length > 0 {
+                // Try to decode Error(string) which is the standard revert format
+                // Error selector is 0x08c379a0
+                if result.data.length >= 4 {
+                    let decodedRevert = EVM.decodeABI(types: [Type<String>()], data: result.data.slice(from: 4, upTo: result.data.length))
+                    if decodedRevert.length > 0 {
+                        revertReason = " - Revert Reason: ".concat(decodedRevert[0] as? String ?? "unable to decode")
+                    }
+                }
+            }
+            
+            assert(
+                result.status == EVM.Status.successful, 
+                message: "updateRequestStatus call failed - Error Code: "
+                    .concat(result.errorCode.toString())
+                    .concat(", Error Message: ")
+                    .concat(result.errorMessage)
+                    .concat(", Gas Used: ")
+                    .concat(result.gasUsed.toString())
+                    .concat(revertReason)
+            )
+            
             log("Request status updated successfully: ".concat(message))
         }
         
