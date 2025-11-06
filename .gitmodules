@@ -1,5 +1,5 @@
-[submodule "lib/tidal-sc"]
-	path = lib/tidal-sc
+[submodule "lib/flow-vaults-sc"]
+	path = lib/flow-vaults-sc
 	url = https://github.com/onflow/FlowVaults-sc.git
 [submodule "solidity/lib/forge-std"]
 	path = solidity/lib/forge-std

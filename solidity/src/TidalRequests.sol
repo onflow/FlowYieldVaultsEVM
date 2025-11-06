@@ -417,12 +417,18 @@ contract TidalRequests {
         return pendingUserBalances[user][tokenAddress];
     }
 
-    /// @notice Get all pending request IDs
+    /// @notice Get count of pending requests (most gas-efficient)
+    function getPendingRequestCount() external view returns (uint256) {
+        return pendingRequestIds.length;
+    }
+
+    /// @notice Get all pending request IDs (for counting/scheduling)
     function getPendingRequestIds() external view returns (uint256[] memory) {
         return pendingRequestIds;
     }
 
     /// @notice Get pending requests (for worker to process)
+    /// @dev This function is kept for backward compatibility but getPendingRequestsUnpacked(limit) is preferred
     function getPendingRequests() external view returns (Request[] memory) {
         Request[] memory requests = new Request[](pendingRequestIds.length);
         for (uint256 i = 0; i < pendingRequestIds.length; i++) {
@@ -431,7 +437,8 @@ contract TidalRequests {
         return requests;
     }
 
-    /// @notice Get pending requests unpacked (for Cadence decoding)
+    /// @notice Get pending requests unpacked with limit (OPTIMIZED for Cadence)
+    /// @param limit Maximum number of requests to return (0 = return all)
     /// @return ids Array of request IDs
     /// @return users Array of user addresses
     /// @return requestTypes Array of request types
@@ -441,7 +448,9 @@ contract TidalRequests {
     /// @return tideIds Array of tide IDs
     /// @return timestamps Array of timestamps
     /// @return messages Array of status messages
-    function getPendingRequestsUnpacked()
+    function getPendingRequestsUnpacked(
+        uint256 limit
+    )
         external
         view
         returns (
@@ -456,19 +465,28 @@ contract TidalRequests {
             string[] memory messages
         )
     {
-        uint256 length = pendingRequestIds.length;
+        // Determine actual size: min(limit, total pending)
+        // If limit is 0, return all requests
+        uint256 size = limit == 0
+            ? pendingRequestIds.length
+            : (
+                limit < pendingRequestIds.length
+                    ? limit
+                    : pendingRequestIds.length
+            );
 
-        ids = new uint256[](length);
-        users = new address[](length);
-        requestTypes = new uint8[](length);
-        statuses = new uint8[](length);
-        tokenAddresses = new address[](length);
-        amounts = new uint256[](length);
-        tideIds = new uint64[](length);
-        timestamps = new uint256[](length);
-        messages = new string[](length);
+        ids = new uint256[](size);
+        users = new address[](size);
+        requestTypes = new uint8[](size);
+        statuses = new uint8[](size);
+        tokenAddresses = new address[](size);
+        amounts = new uint256[](size);
+        tideIds = new uint64[](size);
+        timestamps = new uint256[](size);
+        messages = new string[](size);
 
-        for (uint256 i = 0; i < length; i++) {
+        // Populate arrays up to size
+        for (uint256 i = 0; i < size; i++) {
             Request memory req = pendingRequests[pendingRequestIds[i]];
             ids[i] = req.id;
             users[i] = req.user;
