@@ -1,6 +1,6 @@
 // check_tidemanager_status.cdc
-import "TidalYield"
-import "TidalEVM"
+import "FlowVaults"
+import "FlowVaultsEVM"
 
 /// Script to get comprehensive TideManager status and health check
 ///
@@ -13,26 +13,26 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     
     // === Contract Configuration ===
     result["contractAddress"] = accountAddress.toString()
-    result["tidalRequestsAddress"] = TidalEVM.getTidalRequestsAddress()?.toString() ?? "not set"
+    result["flowVaultsRequestsAddress"] = FlowVaultsEVM.getFlowVaultsRequestsAddress()?.toString() ?? "not set"
     
     // === Storage Paths ===
     let paths: {String: String} = {}
-    paths["workerStorage"] = TidalEVM.WorkerStoragePath.toString()
-    paths["workerPublic"] = TidalEVM.WorkerPublicPath.toString()
-    paths["adminStorage"] = TidalEVM.AdminStoragePath.toString()
-    paths["tideManagerStorage"] = TidalYield.TideManagerStoragePath.toString()
-    paths["tideManagerPublic"] = TidalYield.TideManagerPublicPath.toString()
+    paths["workerStorage"] = FlowVaultsEVM.WorkerStoragePath.toString()
+    paths["workerPublic"] = FlowVaultsEVM.WorkerPublicPath.toString()
+    paths["adminStorage"] = FlowVaultsEVM.AdminStoragePath.toString()
+    paths["tideManagerStorage"] = FlowVaults.TideManagerStoragePath.toString()
+    paths["tideManagerPublic"] = FlowVaults.TideManagerPublicPath.toString()
     result["paths"] = paths
     
     // === EVM Address Mappings ===
-    let tidesByEVM = TidalEVM.tidesByEVMAddress
+    let tidesByEVM = FlowVaultsEVM.tidesByEVMAddress
     result["totalEVMAddresses"] = tidesByEVM.keys.length
     
     var totalTidesMapped = 0
     let evmDetails: [{String: AnyStruct}] = []
     
     for evmAddr in tidesByEVM.keys {
-        let tides = TidalEVM.getTideIDsForEVMAddress(evmAddr)
+        let tides = FlowVaultsEVM.getTideIDsForEVMAddress(evmAddr)
         totalTidesMapped = totalTidesMapped + tides.length
         
         evmDetails.append({
@@ -46,11 +46,11 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     result["totalMappedTides"] = totalTidesMapped
     
     // === Strategy Information ===
-    let strategies = TidalYield.getSupportedStrategies()
+    let strategies = FlowVaults.getSupportedStrategies()
     let strategyInfo: [{String: AnyStruct}] = []
     
     for strategy in strategies {
-        let initVaults = TidalYield.getSupportedInitializationVaults(forStrategy: strategy)
+        let initVaults = FlowVaults.getSupportedInitializationVaults(forStrategy: strategy)
         
         let vaultTypes: [String] = []
         for vaultType in initVaults.keys {
@@ -82,8 +82,8 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     let publicPaths: [String] = []
 
     let knownPublicPaths: [PublicPath] = [
-        TidalEVM.WorkerPublicPath,
-        TidalYield.TideManagerPublicPath
+        FlowVaultsEVM.WorkerPublicPath,
+        FlowVaults.TideManagerPublicPath
     ]
 
     for publicPath in knownPublicPaths {
@@ -100,11 +100,11 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     // === Health Checks ===
     let healthChecks: {String: String} = {}
     
-    // Check TidalRequests address
-    if TidalEVM.getTidalRequestsAddress() != nil {
-        healthChecks["tidalRequestsAddress"] = "✅ SET"
+    // Check FlowVaultsRequests address
+    if FlowVaultsEVM.getFlowVaultsRequestsAddress() != nil {
+        healthChecks["flowVaultsRequestsAddress"] = "✅ SET"
     } else {
-        healthChecks["tidalRequestsAddress"] = "❌ NOT SET"
+        healthChecks["flowVaultsRequestsAddress"] = "❌ NOT SET"
     }
     
     // Check strategies
@@ -117,7 +117,7 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     // Check Worker exists (look for Worker in storage paths)
     var workerExists = false
     for path in storagePaths {
-        if path.contains("TidalEVM.Worker") {
+        if path.contains("FlowVaultsEVM.Worker") {
             workerExists = true
             break
         }
@@ -146,7 +146,7 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     result["healthChecks"] = healthChecks
     
     // === Overall Status ===
-    let criticalChecks = TidalEVM.getTidalRequestsAddress() != nil && strategies.length > 0 && workerExists
+    let criticalChecks = FlowVaultsEVM.getFlowVaultsRequestsAddress() != nil && strategies.length > 0 && workerExists
     
     if criticalChecks && totalTidesMapped > 0 {
         result["status"] = "🟢 OPERATIONAL"

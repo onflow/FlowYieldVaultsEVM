@@ -1,8 +1,8 @@
-# Tidal Cross-VM Bridge: EVM ↔ Cadence Design Document
+# Flow Vaults Cross-VM Bridge: EVM ↔ Cadence Design Document
 
 ## Executive Summary
 
-This document outlines the architecture for enabling Flow EVM users to interact with Tidal's Cadence-based yield protocol through a scheduled cross-VM bridge pattern.
+This document outlines the architecture for enabling Flow EVM users to interact with Flow Vaults's Cadence-based yield protocol through a scheduled cross-VM bridge pattern.
 
 **Key Innovation**: EVM users deposit funds and submit requests to a Solidity contract, which are periodically processed by a Cadence worker that bridges funds and manages Tide positions on their behalf.
 
@@ -12,7 +12,7 @@ This document outlines the architecture for enabling Flow EVM users to interact 
 
 ### Components
 
-#### 1. **TidalRequests** (Solidity - Flow EVM)
+#### 1. **FlowVaultsRequests** (Solidity - Flow EVM)
 - **Purpose**: Request queue and fund escrow for EVM users
 - **Location**: Flow EVM
 - **Responsibilities**:
@@ -22,27 +22,27 @@ This document outlines the architecture for enabling Flow EVM users to interact 
   - Track escrowed funds awaiting processing (not actual Tide balances)
   - Only allow fund withdrawals by the authorized COA
 
-#### 2. **TidalEVM** (Cadence)
+#### 2. **FlowVaultsEVM** (Cadence)
 - **Purpose**: Scheduled processor that executes EVM user requests on Cadence
 - **Location**: Flow Cadence
 - **Responsibilities**:
-  - Poll TidalRequests contract at regular intervals (e.g., every 2 minutes or 1 hour)
+  - Poll FlowVaultsRequests contract at regular intervals (e.g., every 2 minutes or 1 hour)
   - Own and control the COA resource
   - Bridge funds between EVM and Cadence
   - Create and manage Tide positions tagged by EVM user address
-  - Update request statuses and user balances in TidalRequests
+  - Update request statuses and user balances in FlowVaultsRequests
   - Emit events for traceability
 
 #### 3. **COA (Cadence Owned Account)**
-- **Purpose**: Bridge account controlled by TidalEVM
-- **Ownership**: TidalEVM holds the resource
+- **Purpose**: Bridge account controlled by FlowVaultsEVM
+- **Ownership**: FlowVaultsEVM holds the resource
 - **Responsibilities**:
-  - Withdraw funds from TidalRequests (via Solidity `onlyAuthorizedCOA` modifier)
+  - Withdraw funds from FlowVaultsRequests (via Solidity `onlyAuthorizedCOA` modifier)
   - Bridge funds from EVM to Cadence
   - Bridge funds from Cadence back to EVM for withdrawals (directly and atomically to user's EVM address)
 
 
-![Tidal EVM Bridge Design](./create_tide.png)
+![Flow Vaults EVM Bridge Design](./create_tide.png)
 
 *This diagram illustrates the complete flow for creating a new position (tide), from the user's initial request in the EVM environment through to the creation of the tide in Cadence.*
 
@@ -50,10 +50,10 @@ This document outlines the architecture for enabling Flow EVM users to interact 
 
 ## Data Structures
 
-### TidalRequests (Solidity)
+### FlowVaultsRequests (Solidity)
 
 ```solidity
-contract TidalRequests {
+contract FlowVaultsRequests {
     // ============================================
     // Constants
     // ============================================
@@ -103,7 +103,7 @@ contract TidalRequests {
     /// @notice Auto-incrementing request ID counter
     uint256 private _requestIdCounter;
 
-    /// @notice Authorized COA address (controlled by TidalEVM)
+    /// @notice Authorized COA address (controlled by FlowVaultsEVM)
     address public authorizedCOA;
 
     /// @notice Owner of the contract (for admin functions)
@@ -162,13 +162,13 @@ contract TidalRequests {
     modifier onlyAuthorizedCOA() {
         require(
             msg.sender == authorizedCOA,
-            "TidalRequests: caller is not authorized COA"
+            "FlowVaultsRequests: caller is not authorized COA"
         );
         _;
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "TidalRequests: caller is not owner");
+        require(msg.sender == owner, "FlowVaultsRequests: caller is not owner");
         _;
     }
 
@@ -214,10 +214,10 @@ contract TidalRequests {
 }
 ```
 
-### TidalEVM (Cadence)
+### FlowVaultsEVM (Cadence)
 
 ```cadence
-access(all) contract TidalEVM {
+access(all) contract FlowVaultsEVM {
     
     // ========================================
     // Paths
@@ -235,16 +235,16 @@ access(all) contract TidalEVM {
     /// Example: "0x1234..." => [1, 5, 12]
     access(all) let tidesByEVMAddress: {String: [UInt64]}
     
-    /// TidalRequests contract address on EVM side
+    /// FlowVaultsRequests contract address on EVM side
     /// Can only be set by Admin
-    access(all) var tidalRequestsAddress: EVM.EVMAddress?
+    access(all) var flowVaultsRequestsAddress: EVM.EVMAddress?
     
     // ========================================
     // Events
     // ========================================
     
     access(all) event WorkerInitialized(coaAddress: String)
-    access(all) event TidalRequestsAddressSet(address: String)
+    access(all) event FlowVaultsRequestsAddressSet(address: String)
     access(all) event RequestsProcessed(count: Int, successful: Int, failed: Int)
     access(all) event TideCreatedForEVMUser(evmAddress: String, tideId: UInt64, amount: UFix64)
     access(all) event TideClosedForEVMUser(evmAddress: String, tideId: UInt64, amountReturned: UFix64)
@@ -308,12 +308,12 @@ access(all) contract TidalEVM {
     /// Admin capability for managing the bridge
     /// Only the contract account should hold this
     access(all) resource Admin {
-        access(all) fun setTidalRequestsAddress(_ address: EVM.EVMAddress)
+        access(all) fun setFlowVaultsRequestsAddress(_ address: EVM.EVMAddress)
         
         /// Create a new Worker with a capability instead of reference
         access(all) fun createWorker(
             coa: @EVM.CadenceOwnedAccount, 
-            betaBadgeCap: Capability<auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge>
+            betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         ): @Worker
     }
     
@@ -326,15 +326,15 @@ access(all) contract TidalEVM {
         access(self) let coa: @EVM.CadenceOwnedAccount
         
         /// TideManager to hold Tides for EVM users
-        access(self) let tideManager: @TidalYield.TideManager
+        access(self) let tideManager: @FlowVaults.TideManager
         
         /// Capability to beta badge (instead of reference)
-        access(self) let betaBadgeCap: Capability<auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge>
+        access(self) let betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         
         /// Get COA's EVM address as string
         access(all) fun getCOAAddressString(): String
         
-        /// Process all pending requests from TidalRequests contract
+        /// Process all pending requests from FlowVaultsRequests contract
         access(all) fun processRequests()
         
         /// Process CREATE_TIDE request
@@ -343,19 +343,19 @@ access(all) contract TidalEVM {
         /// Process CLOSE_TIDE request
         access(self) fun processCloseTide(_ request: EVMRequest): ProcessResult
         
-        /// Withdraw funds from TidalRequests contract via COA
+        /// Withdraw funds from FlowVaultsRequests contract via COA
         access(self) fun withdrawFundsFromEVM(amount: UFix64): @{FungibleToken.Vault}
         
         /// Bridge funds from Cadence back to EVM user (atomic)
         access(self) fun bridgeFundsToEVMUser(vault: @{FungibleToken.Vault}, recipient: EVM.EVMAddress)
         
-        /// Update request status in TidalRequests
+        /// Update request status in FlowVaultsRequests
         access(self) fun updateRequestStatus(requestId: UInt256, status: UInt8, tideId: UInt64, message: String)
         
-        /// Update user balance in TidalRequests
+        /// Update user balance in FlowVaultsRequests
         access(self) fun updateUserBalance(user: EVM.EVMAddress, tokenAddress: EVM.EVMAddress, newBalance: UInt256)
         
-        /// Get pending requests from TidalRequests contract
+        /// Get pending requests from FlowVaultsRequests contract
         access(all) fun getPendingRequestsFromEVM(): [EVMRequest]
     }
     
@@ -366,8 +366,8 @@ access(all) contract TidalEVM {
     /// Get Tide IDs for an EVM address
     access(all) fun getTideIDsForEVMAddress(_ evmAddress: String): [UInt64]
     
-    /// Get TidalRequests address (read-only)
-    access(all) fun getTidalRequestsAddress(): EVM.EVMAddress?
+    /// Get FlowVaultsRequests address (read-only)
+    access(all) fun getFlowVaultsRequestsAddress(): EVM.EVMAddress?
 
     /// Helper: Convert UInt256 (18 decimals) to UFix64 (8 decimals)
     access(self) fun ufix64FromUInt256(_ value: UInt256): UFix64
@@ -384,7 +384,7 @@ access(all) contract TidalEVM {
 ### 1. CREATE_TIDE Flow
 
 ```
-EVM User A                TidalRequests          TidalEVM           TidalYield         FlowScheduler
+EVM User A                FlowVaultsRequests          FlowVaultsEVM           FlowVaults         FlowScheduler
     |                          |                       |                      |                    |
     |                          |                       |                      |                    |
     | 1. createRequest()       |                       |                      |                    |
@@ -474,7 +474,7 @@ EVM User A                TidalRequests          TidalEVM           TidalYield  
 ### 2. WITHDRAW_FROM_TIDE Flow
 
 ```
-EVM User A                TidalRequests          TidalEVM           TidalYield         FlowScheduler
+EVM User A                FlowVaultsRequests          FlowVaultsEVM           FlowVaults         FlowScheduler
     |                          |                       |                      |                    |
     | 1. createRequest()       |                       |                      |                    |
     |--(WITHDRAW, 0.5, tid=42)-|                       |                      |                    |
@@ -556,30 +556,30 @@ EVM User A                TidalRequests          TidalEVM           TidalYield  
 
 ### Overview
 
-The TidalEVM uses **Flow's scheduled transaction capability** to periodically process pending requests from the EVM side. This is a key architectural component that enables the asynchronous bridge pattern.
+The FlowVaultsEVM uses **Flow's scheduled transaction capability** to periodically process pending requests from the EVM side. This is a key architectural component that enables the asynchronous bridge pattern.
 
 ### Scheduling Mechanism
 
 The scheduling mechanism uses Flow's built-in scheduled transaction system with a **handler pattern** that stores a capability to the Worker resource.
 
-#### 1. TidalTransactionHandler Contract
+#### 1. FlowVaultsTransactionHandler Contract
 
 First, create a handler contract that implements the `FlowTransactionScheduler.TransactionHandler` interface:
 
 ```cadence
 import "FlowTransactionScheduler"
-import "TidalEVM"
+import "FlowVaultsEVM"
 
-access(all) contract TidalTransactionHandler {
+access(all) contract FlowVaultsTransactionHandler {
 
     /// Handler resource that implements the Scheduled Transaction interface
     access(all) resource Handler: FlowTransactionScheduler.TransactionHandler {
         
-        /// Capability to the TidalEVM Worker
+        /// Capability to the FlowVaultsEVM Worker
         /// This is stored in the handler to avoid direct storage borrowing
-        access(self) let workerCap: Capability<&TidalEVM.Worker>
+        access(self) let workerCap: Capability<&FlowVaultsEVM.Worker>
         
-        init(workerCap: Capability<&TidalEVM.Worker>) {
+        init(workerCap: Capability<&FlowVaultsEVM.Worker>) {
             self.workerCap = workerCap
         }
         
@@ -591,7 +591,7 @@ access(all) contract TidalTransactionHandler {
             // Execute the actual processing logic
             worker.processRequests()
             
-            log("TidalEVM scheduled transaction executed (id: ".concat(id.toString()).concat(")"))
+            log("FlowVaultsEVM scheduled transaction executed (id: ".concat(id.toString()).concat(")"))
         }
 
         access(all) view fun getViews(): [Type] {
@@ -601,9 +601,9 @@ access(all) contract TidalTransactionHandler {
         access(all) fun resolveView(_ view: Type): AnyStruct? {
             switch view {
                 case Type<StoragePath>():
-                    return /storage/TidalTransactionHandler
+                    return /storage/FlowVaultsTransactionHandler
                 case Type<PublicPath>():
-                    return /public/TidalTransactionHandler
+                    return /public/FlowVaultsTransactionHandler
                 default:
                     return nil
             }
@@ -611,7 +611,7 @@ access(all) contract TidalTransactionHandler {
     }
 
     /// Factory for the handler resource
-    access(all) fun createHandler(workerCap: Capability<&TidalEVM.Worker>): @Handler {
+    access(all) fun createHandler(workerCap: Capability<&FlowVaultsEVM.Worker>): @Handler {
         return <- create Handler(workerCap: workerCap)
     }
 }
@@ -620,30 +620,30 @@ access(all) contract TidalTransactionHandler {
 #### 2. Initialize Handler (One-time Setup)
 
 ```cadence
-import "TidalTransactionHandler"
+import "FlowVaultsTransactionHandler"
 import "FlowTransactionScheduler"
-import "TidalEVM"
+import "FlowVaultsEVM"
 
 transaction() {
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
         // Create a capability to the Worker
         let workerCap = signer.capabilities.storage
-            .issue<&TidalEVM.Worker>(TidalEVM.WorkerStoragePath)
+            .issue<&FlowVaultsEVM.Worker>(FlowVaultsEVM.WorkerStoragePath)
         
         // Create and save the handler with the worker capability
-        if signer.storage.borrow<&AnyResource>(from: /storage/TidalTransactionHandler) == nil {
-            let handler <- TidalTransactionHandler.createHandler(workerCap: workerCap)
-            signer.storage.save(<-handler, to: /storage/TidalTransactionHandler)
+        if signer.storage.borrow<&AnyResource>(from: /storage/FlowVaultsTransactionHandler) == nil {
+            let handler <- FlowVaultsTransactionHandler.createHandler(workerCap: workerCap)
+            signer.storage.save(<-handler, to: /storage/FlowVaultsTransactionHandler)
         }
 
         // Issue an entitled capability for the scheduler to call executeTransaction
         let _ = signer.capabilities.storage
-            .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(/storage/TidalTransactionHandler)
+            .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(/storage/FlowVaultsTransactionHandler)
 
         // Issue a public capability for general access
         let publicCap = signer.capabilities.storage
-            .issue<&{FlowTransactionScheduler.TransactionHandler}>(/storage/TidalTransactionHandler)
-        signer.capabilities.publish(publicCap, at: /public/TidalTransactionHandler)
+            .issue<&{FlowTransactionScheduler.TransactionHandler}>(/storage/FlowVaultsTransactionHandler)
+        signer.capabilities.publish(publicCap, at: /public/FlowVaultsTransactionHandler)
     }
 }
 ```
@@ -656,7 +656,7 @@ import "FlowTransactionSchedulerUtils"
 import "FlowToken"
 import "FungibleToken"
 
-/// Schedule TidalEVM request processing at a future timestamp
+/// Schedule FlowVaultsEVM request processing at a future timestamp
 transaction(
     delaySeconds: UFix64,        // e.g., 120.0 for 2 minutes
     priority: UInt8,             // 0=High, 1=Medium, 2=Low
@@ -673,7 +673,7 @@ transaction(
 
         // Get the entitled handler capability
         var handlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>? = nil
-        let controllers = signer.capabilities.storage.getControllers(forPath: /storage/TidalTransactionHandler)
+        let controllers = signer.capabilities.storage.getControllers(forPath: /storage/FlowVaultsTransactionHandler)
         
         for controller in controllers {
             if let cap = controller.capability as? Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}> {
@@ -722,7 +722,7 @@ transaction(
             fees: <-fees
         )
 
-        log("Scheduled TidalEVM processing (id: "
+        log("Scheduled FlowVaultsEVM processing (id: "
             .concat(transactionId.toString())
             .concat(") at ")
             .concat(future.toString()))
@@ -760,7 +760,7 @@ Instead of assuming unlimited capacity, the system uses a **self-scheduling patt
 #### 1. Batch Processing Constant
 
 ```cadence
-access(all) contract TidalEVM {
+access(all) contract FlowVaultsEVM {
     /// Maximum requests to process per transaction (determined by gas benchmarking)
     access(all) let MAX_REQUESTS_PER_TX: Int
     
@@ -776,16 +776,16 @@ access(all) contract TidalEVM {
 ```cadence
 access(all) fun processRequests() {
     pre {
-        TidalEVM.tidalRequestsAddress != nil: "TidalRequests address not set"
+        FlowVaultsEVM.flowVaultsRequestsAddress != nil: "FlowVaultsRequests address not set"
     }
     
-    // 1. Get pending requests from TidalRequests
+    // 1. Get pending requests from FlowVaultsRequests
     let allRequests = self.getPendingRequestsFromEVM()
     
     // 2. Process only up to MAX_REQUESTS_PER_TX
-    let batchSize = allRequests.length < TidalEVM.MAX_REQUESTS_PER_TX 
+    let batchSize = allRequests.length < FlowVaultsEVM.MAX_REQUESTS_PER_TX 
         ? allRequests.length 
-        : TidalEVM.MAX_REQUESTS_PER_TX
+        : FlowVaultsEVM.MAX_REQUESTS_PER_TX
     
     var successCount = 0
     var failCount = 0
@@ -866,7 +866,7 @@ access(self) fun scheduleNextExecution(remainingCount: Int) {
 
 #### 4. Get Pending Count (New Function)
 
-Add to TidalRequests Solidity contract:
+Add to FlowVaultsRequests Solidity contract:
 
 ```solidity
 /// @notice Get count of pending requests (gas-efficient)
@@ -935,13 +935,13 @@ access(all) event RequestFailed(
 ---
 
 ### 1. **Request Queue Pattern**
-- **Decision**: Use a pull-based model where TidalEVM polls for requests
+- **Decision**: Use a pull-based model where FlowVaultsEVM polls for requests
 - **Rationale**: 
   - fully on-chain no off-chain event listeners
   - Worker can process multiple requests in one transaction (if gas < 9999, need some tests to estimate)
 
-### 2. **Fund Escrow in TidalRequests**
-- **Decision**: Funds remain in TidalRequests until processed
+### 2. **Fund Escrow in FlowVaultsRequests**
+- **Decision**: Funds remain in FlowVaultsRequests until processed
 - **Rationale**:
   - Security: Only authorized COA can withdraw
   - Transparency: Easy to audit locked funds
@@ -949,8 +949,8 @@ access(all) event RequestFailed(
 
 ### 3. **Separated State Management Across VMs**
 - **Decision**: Each VM maintains its own relevant state independently
-  - **EVM (TidalRequests)**: Tracks escrowed funds awaiting processing via `userBalances`
-  - **Cadence (TidalEVM)**: Holds actual Tide positions and real-time balances
+  - **EVM (FlowVaultsRequests)**: Tracks escrowed funds awaiting processing via `userBalances`
+  - **Cadence (FlowVaultsEVM)**: Holds actual Tide positions and real-time balances
 - **Rationale**:
   - The Solidity contract cannot track real-time Tide balances from Cadence
   - Maintaining duplicate state across VMs is neither necessary nor feasible given the asynchronous bridge design
@@ -960,7 +960,7 @@ access(all) event RequestFailed(
   - Simpler architecture without cross-VM synchronization complexity
 
 ### 4. **Tide Storage by EVM Address**
-- **Decision**: Store Tides in TidalEVM tagged by EVM address string
+- **Decision**: Store Tides in FlowVaultsEVM tagged by EVM address string
 - **Rationale**:
   - Clear ownership mapping
   - Efficient lookups for subsequent operations
@@ -982,7 +982,7 @@ access(all) event RequestFailed(
 
 The bridge maintains **independent state on each VM** rather than attempting real-time synchronization:
 
-#### EVM Side (TidalRequests)
+#### EVM Side (FlowVaultsRequests)
 ```solidity
 // Query escrowed funds awaiting processing
 function getUserBalance(address user, address token) external view returns (uint256) {
@@ -992,12 +992,12 @@ function getUserBalance(address user, address token) external view returns (uint
 
 **Use case**: Check how much FLOW a user has deposited but not yet processed into a Tide
 
-#### Cadence Side (TidalEVM / TidalYield)
+#### Cadence Side (FlowVaultsEVM / FlowVaults)
 ```cadence
 // Query actual Tide positions and balances
 access(all) fun getTideIDsForEVMAddress(_ evmAddress: String): [UInt64]
 
-// Users can then query individual Tide details through TidalYield
+// Users can then query individual Tide details through FlowVaults
 access(all) fun getTideBalance(tideId: UInt64): UFix64
 ```
 
@@ -1034,14 +1034,14 @@ Users need to query **both sides** to get a complete picture:
 
 ### 3. **Balance Queries**
 - **Clarification**: The system maintains separated state:
-  - EVM users query `TidalRequests.getUserBalance()` for escrowed funds awaiting processing
+  - EVM users query `FlowVaultsRequests.getUserBalance()` for escrowed funds awaiting processing
   - For actual Tide balances, users must query Cadence directly (e.g., via read-only Cadence scripts)
   - No real-time cross-VM balance synchronization
 - **Question**: Should we provide a unified balance query interface that aggregates both?
   - Potential solution: Off-chain indexer or frontend aggregation
 
 ### 4. **State Consistency**
-- **Question**: What happens if TidalEVM updates Cadence state but fails to update TidalRequests?
+- **Question**: What happens if FlowVaultsEVM updates Cadence state but fails to update FlowVaultsRequests?
   - Retry mechanism?
   - Manual reconciliation?
 
@@ -1056,8 +1056,8 @@ Users need to query **both sides** to get a complete picture:
 ## Security Considerations
 
 ### Access Control
-1. **COA Authorization**: Only TidalEVM can control the COA
-2. **Withdrawal Authorization**: Only COA can withdraw from TidalRequests
+1. **COA Authorization**: Only FlowVaultsEVM can control the COA
+2. **Withdrawal Authorization**: Only COA can withdraw from FlowVaultsRequests
 3. **Tide Ownership**: Tides are tagged by EVM address and non-transferable
 4. **Request Validation**: Prevent duplicate processing of requests
 
@@ -1077,8 +1077,8 @@ Users need to query **both sides** to get a complete picture:
 ## Implementation Phases
 
 ### Phase 1: MVP (Native $FLOW only)
-- Deploy TidalRequests contract to Flow EVM
-- Deploy TidalEVM to Cadence
+- Deploy FlowVaultsRequests contract to Flow EVM
+- Deploy FlowVaultsEVM to Cadence
 - Support CREATE_TIDE and CLOSE_TIDE operations
 - Manual trigger for processRequests()
 
@@ -1113,16 +1113,16 @@ Users need to query **both sides** to get a complete picture:
 
 ---
 
-## Comparison with Existing Tidal Transactions
+## Comparison with Existing FlowVaults Transactions
 
 The Cadence transactions provided (`create_tide.cdc`, `deposit_to_tide.cdc`, `withdraw_from_tide.cdc`, `close_tide.cdc`) demonstrate the native Cadence flow. Key differences in the EVM bridge approach:
 
 | Aspect | Native Cadence | EVM Bridge |
 |--------|----------------|------------|
 | User Identity | Flow account with BetaBadge | EVM address |
-| Transaction Signer | User's Flow account | TidalEVM (on behalf of user) |
-| Fund Source | User's Cadence vault | TidalRequests escrow |
-| Tide Storage | User's TideManager | TidalEVM (tagged by EVM address) |
+| Transaction Signer | User's Flow account | FlowVaultsEVM (on behalf of user) |
+| Fund Source | User's Cadence vault | FlowVaultsRequests escrow |
+| Tide Storage | User's TideManager | FlowVaultsEVM (tagged by EVM address) |
 | Processing | Immediate (single txn) | Asynchronous (scheduled polling) |
 | Beta Access | User holds BetaBadge | COA/Worker holds BetaBadge |
 
@@ -1134,7 +1134,7 @@ The Cadence transactions provided (`create_tide.cdc`, `deposit_to_tide.cdc`, `wi
 2. **Technical Specification**: Detailed function signatures and state machine diagrams
 3. **Prototype Development**: Implement Phase 1 MVP on testnet
 4. **Security Audit**: Review design with security team before mainnet deployment
-5. **Documentation**: User-facing guides for EVM users interacting with Tidal
+5. **Documentation**: User-facing guides for EVM users interacting with FlowVaults
 
 ---
 

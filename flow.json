@@ -1,21 +1,21 @@
 {
 	"contracts": {
-		"TidalEVM": {
-			"source": "./cadence/contracts/TidalEVM.cdc",
+		"FlowVaultsEVM": {
+			"source": "./cadence/contracts/FlowVaultsEVM.cdc",
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7"
 			}
 		},
-		"TidalYield": {
-			"source": "./lib/tidal-sc/cadence/contracts/TidalYield.cdc",
+		"FlowVaults": {
+			"source": "./lib/flow-vaults-sc/cadence/contracts/FlowVaults.cdc",
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7",
 				"testing": "0000000000000007",
 				"testnet": "d27920b6384e2a78"
 			}
 		},
-		"TidalYieldClosedBeta": {
-			"source": "./lib/tidal-sc/cadence/contracts/TidalYieldClosedBeta.cdc",
+		"FlowVaultsClosedBeta": {
+			"source": "./lib/flow-vaults-sc/cadence/contracts/FlowVaultsClosedBeta.cdc",
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7",
 				"testing": "0000000000000007",
@@ -275,9 +275,9 @@
 				"SwapError",
 				"StableSwapFactory",
 				"BandOracle",
-				"TidalYieldClosedBeta",
-				"TidalYield",
-				"TidalEVM"
+				"FlowVaultsClosedBeta",
+				"FlowVaults",
+				"FlowVaultsEVM"
 			]
 		}
 	}

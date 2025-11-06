@@ -2,10 +2,10 @@
 pragma solidity 0.8.18;
 
 import "forge-std/Test.sol";
-import "../src/TidalRequests.sol";
+import "../src/FlowVaultsRequests.sol";
 
-contract TidalRequestsTest is Test {
-    TidalRequests public tidalRequests;
+contract FlowVaultsRequestsTest is Test {
+    FlowVaultsRequests public flowVaultsRequests;
 
     address public owner;
     address public user1;
@@ -18,14 +18,14 @@ contract TidalRequestsTest is Test {
     event RequestCreated(
         uint256 indexed requestId,
         address indexed user,
-        TidalRequests.RequestType indexed requestType,
+        FlowVaultsRequests.RequestType indexed requestType,
         address token,
         uint256 amount
     );
 
     event RequestProcessed(
         uint256 indexed requestId,
-        TidalRequests.RequestStatus status,
+        FlowVaultsRequests.RequestStatus status,
         uint64 tideId
     );
 
@@ -52,8 +52,8 @@ contract TidalRequestsTest is Test {
         vm.deal(user2, 100 ether);
         vm.deal(coa, 10 ether);
 
-        // Deploy TidalRequests
-        tidalRequests = new TidalRequests(coa);
+        // Deploy FlowVaultsRequests
+        flowVaultsRequests = new FlowVaultsRequests(coa);
     }
 
     // ============================================
@@ -69,13 +69,13 @@ contract TidalRequestsTest is Test {
         emit RequestCreated(
             1,
             user1,
-            TidalRequests.RequestType.CREATE_TIDE,
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount
         );
 
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0 // tideId (0 for CREATE)
@@ -84,15 +84,14 @@ contract TidalRequestsTest is Test {
         vm.stopPrank();
 
         // Verify request was created
-        TidalRequests.Request[] memory requests = tidalRequests.getUserRequests(
-            user1
-        );
+        FlowVaultsRequests.Request[] memory requests = flowVaultsRequests
+            .getUserRequests(user1);
         assertEq(requests.length, 1);
         assertEq(requests[0].id, 1);
         assertEq(requests[0].user, user1);
         assertEq(
             uint8(requests[0].requestType),
-            uint8(TidalRequests.RequestType.CREATE_TIDE)
+            uint8(FlowVaultsRequests.RequestType.CREATE_TIDE)
         );
         assertEq(requests[0].amount, amount);
     }
@@ -106,13 +105,13 @@ contract TidalRequestsTest is Test {
         emit RequestCreated(
             1,
             user1,
-            TidalRequests.RequestType.CLOSE_TIDE,
+            FlowVaultsRequests.RequestType.CLOSE_TIDE,
             NATIVE_FLOW,
             0
         );
 
-        tidalRequests.createRequest(
-            TidalRequests.RequestType.CLOSE_TIDE,
+        flowVaultsRequests.createRequest(
+            FlowVaultsRequests.RequestType.CLOSE_TIDE,
             NATIVE_FLOW,
             0, // amount not needed for close
             tideId
@@ -120,14 +119,13 @@ contract TidalRequestsTest is Test {
 
         vm.stopPrank();
 
-        TidalRequests.Request[] memory requests = tidalRequests.getUserRequests(
-            user1
-        );
+        FlowVaultsRequests.Request[] memory requests = flowVaultsRequests
+            .getUserRequests(user1);
         assertEq(requests.length, 1);
         assertEq(requests[0].tideId, tideId);
         assertEq(
             uint8(requests[0].requestType),
-            uint8(TidalRequests.RequestType.CLOSE_TIDE)
+            uint8(FlowVaultsRequests.RequestType.CLOSE_TIDE)
         );
     }
 
@@ -136,9 +134,9 @@ contract TidalRequestsTest is Test {
 
         vm.startPrank(user1);
 
-        vm.expectRevert("TidalRequests: incorrect native token amount");
-        tidalRequests.createRequest(
-            TidalRequests.RequestType.CREATE_TIDE,
+        vm.expectRevert("FlowVaultsRequests: incorrect native token amount");
+        flowVaultsRequests.createRequest(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
@@ -152,9 +150,9 @@ contract TidalRequestsTest is Test {
 
         vm.startPrank(user1);
 
-        vm.expectRevert("TidalRequests: incorrect native token amount");
-        tidalRequests.createRequest{value: 0.5 ether}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        vm.expectRevert("FlowVaultsRequests: incorrect native token amount");
+        flowVaultsRequests.createRequest{value: 0.5 ether}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
@@ -171,15 +169,15 @@ contract TidalRequestsTest is Test {
         uint256 amount = 1 ether;
 
         vm.startPrank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
         vm.stopPrank();
 
-        uint256 balance = tidalRequests.getUserBalance(user1, NATIVE_FLOW);
+        uint256 balance = flowVaultsRequests.getUserBalance(user1, NATIVE_FLOW);
         assertEq(balance, amount);
     }
 
@@ -189,15 +187,15 @@ contract TidalRequestsTest is Test {
 
         vm.startPrank(user1);
 
-        tidalRequests.createRequest{value: amount1}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount1}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount1,
             0
         );
 
-        tidalRequests.createRequest{value: amount2}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount2}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount2,
             0
@@ -205,7 +203,7 @@ contract TidalRequestsTest is Test {
 
         vm.stopPrank();
 
-        uint256 balance = tidalRequests.getUserBalance(user1, NATIVE_FLOW);
+        uint256 balance = flowVaultsRequests.getUserBalance(user1, NATIVE_FLOW);
         assertEq(balance, amount1 + amount2);
     }
 
@@ -213,24 +211,24 @@ contract TidalRequestsTest is Test {
         uint256 amount = 1 ether;
 
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
 
         vm.prank(user2);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
 
-        TidalRequests.Request[] memory user1Requests = tidalRequests
+        FlowVaultsRequests.Request[] memory user1Requests = flowVaultsRequests
             .getUserRequests(user1);
-        TidalRequests.Request[] memory user2Requests = tidalRequests
+        FlowVaultsRequests.Request[] memory user2Requests = flowVaultsRequests
             .getUserRequests(user2);
 
         assertEq(user1Requests[0].id, 1);
@@ -246,8 +244,8 @@ contract TidalRequestsTest is Test {
 
         // User creates request
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
@@ -261,7 +259,7 @@ contract TidalRequestsTest is Test {
         vm.expectEmit(true, true, false, true);
         emit FundsWithdrawn(coa, NATIVE_FLOW, amount);
 
-        tidalRequests.withdrawFunds(NATIVE_FLOW, amount);
+        flowVaultsRequests.withdrawFunds(NATIVE_FLOW, amount);
 
         vm.stopPrank();
 
@@ -273,8 +271,8 @@ contract TidalRequestsTest is Test {
         uint256 amount = 1 ether;
 
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
@@ -282,8 +280,8 @@ contract TidalRequestsTest is Test {
 
         vm.startPrank(user2);
 
-        vm.expectRevert("TidalRequests: caller is not authorized COA");
-        tidalRequests.withdrawFunds(NATIVE_FLOW, amount);
+        vm.expectRevert("FlowVaultsRequests: caller is not authorized COA");
+        flowVaultsRequests.withdrawFunds(NATIVE_FLOW, amount);
 
         vm.stopPrank();
     }
@@ -293,8 +291,8 @@ contract TidalRequestsTest is Test {
         uint64 tideId = 42;
 
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
@@ -303,22 +301,25 @@ contract TidalRequestsTest is Test {
         vm.startPrank(coa);
 
         vm.expectEmit(true, false, false, true);
-        emit RequestProcessed(1, TidalRequests.RequestStatus.COMPLETED, tideId);
-
-        tidalRequests.updateRequestStatus(
+        emit RequestProcessed(
             1,
-            TidalRequests.RequestStatus.COMPLETED,
+            FlowVaultsRequests.RequestStatus.COMPLETED,
+            tideId
+        );
+
+        flowVaultsRequests.updateRequestStatus(
+            1,
+            FlowVaultsRequests.RequestStatus.COMPLETED,
             tideId
         );
 
         vm.stopPrank();
 
-        TidalRequests.Request[] memory requests = tidalRequests.getUserRequests(
-            user1
-        );
+        FlowVaultsRequests.Request[] memory requests = flowVaultsRequests
+            .getUserRequests(user1);
         assertEq(
             uint8(requests[0].status),
-            uint8(TidalRequests.RequestStatus.COMPLETED)
+            uint8(FlowVaultsRequests.RequestStatus.COMPLETED)
         );
         assertEq(requests[0].tideId, tideId);
     }
@@ -327,8 +328,8 @@ contract TidalRequestsTest is Test {
         uint256 amount = 1 ether;
 
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
@@ -336,10 +337,10 @@ contract TidalRequestsTest is Test {
 
         vm.startPrank(user2);
 
-        vm.expectRevert("TidalRequests: caller is not authorized COA");
-        tidalRequests.updateRequestStatus(
+        vm.expectRevert("FlowVaultsRequests: caller is not authorized COA");
+        flowVaultsRequests.updateRequestStatus(
             1,
-            TidalRequests.RequestStatus.COMPLETED,
+            FlowVaultsRequests.RequestStatus.COMPLETED,
             42
         );
 
@@ -351,8 +352,8 @@ contract TidalRequestsTest is Test {
         uint256 newBalance = 0.5 ether;
 
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
@@ -363,11 +364,11 @@ contract TidalRequestsTest is Test {
         vm.expectEmit(true, true, false, true);
         emit BalanceUpdated(user1, NATIVE_FLOW, newBalance);
 
-        tidalRequests.updateUserBalance(user1, NATIVE_FLOW, newBalance);
+        flowVaultsRequests.updateUserBalance(user1, NATIVE_FLOW, newBalance);
 
         vm.stopPrank();
 
-        uint256 balance = tidalRequests.getUserBalance(user1, NATIVE_FLOW);
+        uint256 balance = flowVaultsRequests.getUserBalance(user1, NATIVE_FLOW);
         assertEq(balance, newBalance);
     }
 
@@ -379,14 +380,14 @@ contract TidalRequestsTest is Test {
         uint256 amount = 1 ether;
 
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
 
-        uint256[] memory pendingIds = tidalRequests.getPendingRequestIds();
+        uint256[] memory pendingIds = flowVaultsRequests.getPendingRequestIds();
         assertEq(pendingIds.length, 1);
         assertEq(pendingIds[0], 1);
     }
@@ -395,21 +396,21 @@ contract TidalRequestsTest is Test {
         uint256 amount = 1 ether;
 
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
 
         vm.prank(coa);
-        tidalRequests.updateRequestStatus(
+        flowVaultsRequests.updateRequestStatus(
             1,
-            TidalRequests.RequestStatus.COMPLETED,
+            FlowVaultsRequests.RequestStatus.COMPLETED,
             42
         );
 
-        uint256[] memory pendingIds = tidalRequests.getPendingRequestIds();
+        uint256[] memory pendingIds = flowVaultsRequests.getPendingRequestIds();
         assertEq(pendingIds.length, 0);
     }
 
@@ -417,21 +418,21 @@ contract TidalRequestsTest is Test {
         uint256 amount = 1 ether;
 
         vm.startPrank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
         vm.stopPrank();
 
-        uint256[] memory pendingIds = tidalRequests.getPendingRequestIds();
+        uint256[] memory pendingIds = flowVaultsRequests.getPendingRequestIds();
         assertEq(pendingIds.length, 2);
         assertEq(pendingIds[0], 1);
         assertEq(pendingIds[1], 2);
@@ -442,40 +443,39 @@ contract TidalRequestsTest is Test {
     // ============================================
 
     function test_IsNativeFlow() public view {
-        assertTrue(tidalRequests.isNativeFlow(NATIVE_FLOW));
-        assertFalse(tidalRequests.isNativeFlow(address(0)));
-        assertFalse(tidalRequests.isNativeFlow(user1));
+        assertTrue(flowVaultsRequests.isNativeFlow(NATIVE_FLOW));
+        assertFalse(flowVaultsRequests.isNativeFlow(address(0)));
+        assertFalse(flowVaultsRequests.isNativeFlow(user1));
     }
 
     function test_GetUserRequests() public {
         uint256 amount = 1 ether;
 
         vm.startPrank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
-        tidalRequests.createRequest(
-            TidalRequests.RequestType.CLOSE_TIDE,
+        flowVaultsRequests.createRequest(
+            FlowVaultsRequests.RequestType.CLOSE_TIDE,
             NATIVE_FLOW,
             0,
             42
         );
         vm.stopPrank();
 
-        TidalRequests.Request[] memory requests = tidalRequests.getUserRequests(
-            user1
-        );
+        FlowVaultsRequests.Request[] memory requests = flowVaultsRequests
+            .getUserRequests(user1);
         assertEq(requests.length, 2);
         assertEq(
             uint8(requests[0].requestType),
-            uint8(TidalRequests.RequestType.CREATE_TIDE)
+            uint8(FlowVaultsRequests.RequestType.CREATE_TIDE)
         );
         assertEq(
             uint8(requests[1].requestType),
-            uint8(TidalRequests.RequestType.CLOSE_TIDE)
+            uint8(FlowVaultsRequests.RequestType.CLOSE_TIDE)
         );
     }
 
@@ -489,53 +489,52 @@ contract TidalRequestsTest is Test {
 
         // 1. User creates request
         vm.prank(user1);
-        tidalRequests.createRequest{value: amount}(
-            TidalRequests.RequestType.CREATE_TIDE,
+        flowVaultsRequests.createRequest{value: amount}(
+            FlowVaultsRequests.RequestType.CREATE_TIDE,
             NATIVE_FLOW,
             amount,
             0
         );
 
         // Verify initial state
-        assertEq(tidalRequests.getUserBalance(user1, NATIVE_FLOW), amount);
-        uint256[] memory pending = tidalRequests.getPendingRequestIds();
+        assertEq(flowVaultsRequests.getUserBalance(user1, NATIVE_FLOW), amount);
+        uint256[] memory pending = flowVaultsRequests.getPendingRequestIds();
         assertEq(pending.length, 1);
 
         // 2. COA marks as processing
         vm.prank(coa);
-        tidalRequests.updateRequestStatus(
+        flowVaultsRequests.updateRequestStatus(
             1,
-            TidalRequests.RequestStatus.PROCESSING,
+            FlowVaultsRequests.RequestStatus.PROCESSING,
             0
         );
 
         // 3. COA withdraws funds
         vm.prank(coa);
-        tidalRequests.withdrawFunds(NATIVE_FLOW, amount);
+        flowVaultsRequests.withdrawFunds(NATIVE_FLOW, amount);
 
         // 4. COA updates balance to 0 (funds now in Cadence)
         vm.prank(coa);
-        tidalRequests.updateUserBalance(user1, NATIVE_FLOW, 0);
+        flowVaultsRequests.updateUserBalance(user1, NATIVE_FLOW, 0);
 
         // 5. COA marks as completed with tide ID
         vm.prank(coa);
-        tidalRequests.updateRequestStatus(
+        flowVaultsRequests.updateRequestStatus(
             1,
-            TidalRequests.RequestStatus.COMPLETED,
+            FlowVaultsRequests.RequestStatus.COMPLETED,
             tideId
         );
 
         // Verify final state
-        assertEq(tidalRequests.getUserBalance(user1, NATIVE_FLOW), 0);
-        pending = tidalRequests.getPendingRequestIds();
+        assertEq(flowVaultsRequests.getUserBalance(user1, NATIVE_FLOW), 0);
+        pending = flowVaultsRequests.getPendingRequestIds();
         assertEq(pending.length, 0);
 
-        TidalRequests.Request[] memory requests = tidalRequests.getUserRequests(
-            user1
-        );
+        FlowVaultsRequests.Request[] memory requests = flowVaultsRequests
+            .getUserRequests(user1);
         assertEq(
             uint8(requests[0].status),
-            uint8(TidalRequests.RequestStatus.COMPLETED)
+            uint8(FlowVaultsRequests.RequestStatus.COMPLETED)
         );
         assertEq(requests[0].tideId, tideId);
     }
@@ -546,8 +545,8 @@ contract TidalRequestsTest is Test {
 
         // 1. User creates close request
         vm.prank(user1);
-        tidalRequests.createRequest(
-            TidalRequests.RequestType.CLOSE_TIDE,
+        flowVaultsRequests.createRequest(
+            FlowVaultsRequests.RequestType.CLOSE_TIDE,
             NATIVE_FLOW,
             0,
             tideId
@@ -555,30 +554,29 @@ contract TidalRequestsTest is Test {
 
         // 2. COA marks as processing
         vm.prank(coa);
-        tidalRequests.updateRequestStatus(
+        flowVaultsRequests.updateRequestStatus(
             1,
-            TidalRequests.RequestStatus.PROCESSING,
+            FlowVaultsRequests.RequestStatus.PROCESSING,
             0
         );
 
         // 3. COA receives funds from Cadence (simulate)
-        vm.deal(address(tidalRequests), returnAmount);
+        vm.deal(address(flowVaultsRequests), returnAmount);
 
         // 4. COA marks as completed
         vm.prank(coa);
-        tidalRequests.updateRequestStatus(
+        flowVaultsRequests.updateRequestStatus(
             1,
-            TidalRequests.RequestStatus.COMPLETED,
+            FlowVaultsRequests.RequestStatus.COMPLETED,
             tideId
         );
 
         // Verify
-        TidalRequests.Request[] memory requests = tidalRequests.getUserRequests(
-            user1
-        );
+        FlowVaultsRequests.Request[] memory requests = flowVaultsRequests
+            .getUserRequests(user1);
         assertEq(
             uint8(requests[0].status),
-            uint8(TidalRequests.RequestStatus.COMPLETED)
+            uint8(FlowVaultsRequests.RequestStatus.COMPLETED)
         );
     }
 }

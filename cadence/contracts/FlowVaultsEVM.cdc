@@ -2,17 +2,17 @@ import "FungibleToken"
 import "FlowToken"
 import "EVM"
 
-import "TidalYield"
-import "TidalYieldClosedBeta"
+import "FlowVaults"
+import "FlowVaultsClosedBeta"
 
-/// TidalEVM: Bridge contract that processes requests from EVM users
+/// FlowVaultsEVM: Bridge contract that processes requests from EVM users
 /// and manages their Tide positions in Cadence
 /// 
 /// Security Model:
 /// - Singleton pattern: Worker created in init() and stored in contract account
-/// - Only contract account can set TidalRequests address
+/// - Only contract account can set FlowVaultsRequests address
 /// - Only contract account can create/access Worker
-access(all) contract TidalEVM {
+access(all) contract FlowVaultsEVM {
     
     // ========================================
     // Paths
@@ -30,16 +30,16 @@ access(all) contract TidalEVM {
     /// Example: "0x1234..." => [1, 5, 12]
     access(all) let tidesByEVMAddress: {String: [UInt64]}
     
-    /// TidalRequests contract address on EVM side
+    /// FlowVaultsRequests contract address on EVM side
     /// Can only be set by Admin
-    access(all) var tidalRequestsAddress: EVM.EVMAddress?
+    access(all) var flowVaultsRequestsAddress: EVM.EVMAddress?
     
     // ========================================
     // Events
     // ========================================
     
     access(all) event WorkerInitialized(coaAddress: String)
-    access(all) event TidalRequestsAddressSet(address: String)
+    access(all) event FlowVaultsRequestsAddressSet(address: String)
     access(all) event RequestsProcessed(count: Int, successful: Int, failed: Int)
     access(all) event TideCreatedForEVMUser(evmAddress: String, tideId: UInt64, amount: UFix64)
     access(all) event TideClosedForEVMUser(evmAddress: String, tideId: UInt64, amountReturned: UFix64)
@@ -103,24 +103,24 @@ access(all) contract TidalEVM {
     /// Admin capability for managing the bridge
     /// Only the contract account should hold this
     access(all) resource Admin {
-        access(all) fun setTidalRequestsAddress(_ address: EVM.EVMAddress) {
+        access(all) fun setFlowVaultsRequestsAddress(_ address: EVM.EVMAddress) {
             pre {
-                TidalEVM.tidalRequestsAddress == nil: "TidalRequests address already set"
+                FlowVaultsEVM.flowVaultsRequestsAddress == nil: "FlowVaultsRequests address already set"
             }
-            TidalEVM.tidalRequestsAddress = address
-            emit TidalRequestsAddressSet(address: address.toString())
+            FlowVaultsEVM.flowVaultsRequestsAddress = address
+            emit FlowVaultsRequestsAddressSet(address: address.toString())
         }
 
-        access(all) fun updateTidalRequestsAddress(_ address: EVM.EVMAddress) {
+        access(all) fun updateFlowVaultsRequestsAddress(_ address: EVM.EVMAddress) {
             // Pas de précondition - permet la mise à jour
-            TidalEVM.tidalRequestsAddress = address
-            emit TidalRequestsAddressSet(address: address.toString())
+            FlowVaultsEVM.flowVaultsRequestsAddress = address
+            emit FlowVaultsRequestsAddressSet(address: address.toString())
         }
         
         /// Create a new Worker with a capability instead of reference
         access(all) fun createWorker(
             coa: @EVM.CadenceOwnedAccount, 
-            betaBadgeCap: Capability<auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge>
+            betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         ): @Worker {
             let worker <- create Worker(coa: <-coa, betaBadgeCap: betaBadgeCap)
             emit WorkerInitialized(coaAddress: worker.getCOAAddressString())
@@ -137,14 +137,14 @@ access(all) contract TidalEVM {
         access(self) let coa: @EVM.CadenceOwnedAccount
         
         /// TideManager to hold Tides for EVM users
-        access(self) let tideManager: @TidalYield.TideManager
+        access(self) let tideManager: @FlowVaults.TideManager
         
         /// Capability to beta badge (instead of reference)
-        access(self) let betaBadgeCap: Capability<auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge>
+        access(self) let betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         
         init(
             coa: @EVM.CadenceOwnedAccount, 
-            betaBadgeCap: Capability<auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge>
+            betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         ) {
             self.coa <- coa
             self.betaBadgeCap = betaBadgeCap
@@ -154,11 +154,11 @@ access(all) contract TidalEVM {
                 ?? panic("Could not borrow beta badge capability")
             
             // Create TideManager for holding EVM user Tides
-            self.tideManager <- TidalYield.createTideManager(betaRef: betaBadge)
+            self.tideManager <- FlowVaults.createTideManager(betaRef: betaBadge)
         }
         
         /// Get beta reference by borrowing from capability
-        access(self) fun getBetaReference(): auth(TidalYieldClosedBeta.Beta) &TidalYieldClosedBeta.BetaBadge {
+        access(self) fun getBetaReference(): auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge {
             return self.betaBadgeCap.borrow()
                 ?? panic("Could not borrow beta badge capability")
         }
@@ -168,13 +168,13 @@ access(all) contract TidalEVM {
             return self.coa.address().toString()
         }
         
-        /// Process all pending requests from TidalRequests contract
+        /// Process all pending requests from FlowVaultsRequests contract
         access(all) fun processRequests() {
             pre {
-                TidalEVM.tidalRequestsAddress != nil: "TidalRequests address not set"
+                FlowVaultsEVM.flowVaultsRequestsAddress != nil: "FlowVaultsRequests address not set"
             }
             
-            // 1. Get pending requests from TidalRequests
+            // 1. Get pending requests from FlowVaultsRequests
             let requests = self.getPendingRequestsFromEVM()
             
             if requests.length == 0 {
@@ -272,17 +272,17 @@ access(all) contract TidalEVM {
             // TODO - Pass those params more elegantly
             // // testnet
             let vaultIdentifier = "A.7e60df042a9c0868.FlowToken.Vault"
-            let strategyIdentifier = "A.d27920b6384e2a78.TidalYieldStrategies.TracerStrategy"
+            let strategyIdentifier = "A.d27920b6384e2a78.FlowVaultsStrategies.TracerStrategy"
 
             // emulator
             // let vaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
-            // let strategyIdentifier = "A.f8d6e0586b0a20c7.TidalYieldStrategies.TracerStrategy"
+            // let strategyIdentifier = "A.f8d6e0586b0a20c7.FlowVaultsStrategies.TracerStrategy"
 
             // 2. Convert amount from UInt256 to UFix64
-            let amount = TidalEVM.ufix64FromUInt256(request.amount)
+            let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
             log("Creating Tide for amount: ".concat(amount.toString()))
             
-            // 3. Withdraw funds from TidalRequests
+            // 3. Withdraw funds from FlowVaultsRequests
             let vault <- self.withdrawFundsFromEVM(amount: amount)
 
             // 4. Validate vault type matches vaultIdentifier
@@ -341,12 +341,12 @@ access(all) contract TidalEVM {
             
             // 10. Store mapping
             let evmAddr = request.user.toString()
-            if TidalEVM.tidesByEVMAddress[evmAddr] == nil {
-                TidalEVM.tidesByEVMAddress[evmAddr] = []
+            if FlowVaultsEVM.tidesByEVMAddress[evmAddr] == nil {
+                FlowVaultsEVM.tidesByEVMAddress[evmAddr] = []
             }
-            TidalEVM.tidesByEVMAddress[evmAddr]!.append(tideId)
+            FlowVaultsEVM.tidesByEVMAddress[evmAddr]!.append(tideId)
             
-            // 11. Update user balance in TidalRequests
+            // 11. Update user balance in FlowVaultsRequests
             self.updateUserBalance(
                 user: request.user,
                 tokenAddress: request.tokenAddress,
@@ -367,7 +367,7 @@ access(all) contract TidalEVM {
             let evmAddr = request.user.toString()
             
             // 1. Verify user owns this Tide
-            if let userTides = TidalEVM.tidesByEVMAddress[evmAddr] {
+            if let userTides = FlowVaultsEVM.tidesByEVMAddress[evmAddr] {
                 if !userTides.contains(request.tideId) {
                     return ProcessResult(
                         success: false, 
@@ -391,8 +391,8 @@ access(all) contract TidalEVM {
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user)
             
             // 4. Remove from mapping
-            if let index = TidalEVM.tidesByEVMAddress[evmAddr]!.firstIndex(of: request.tideId) {
-                TidalEVM.tidesByEVMAddress[evmAddr]!.remove(at: index)
+            if let index = FlowVaultsEVM.tidesByEVMAddress[evmAddr]!.firstIndex(of: request.tideId) {
+                FlowVaultsEVM.tidesByEVMAddress[evmAddr]!.remove(at: index)
             }
             
             emit TideClosedForEVMUser(evmAddress: evmAddr, tideId: request.tideId, amountReturned: amount)
@@ -404,9 +404,9 @@ access(all) contract TidalEVM {
             )
         }
         
-        /// Withdraw funds from TidalRequests contract via COA
+        /// Withdraw funds from FlowVaultsRequests contract via COA
         access(self) fun withdrawFundsFromEVM(amount: UFix64): @{FungibleToken.Vault} {
-            let amountUInt256 = TidalEVM.uint256FromUFix64(amount)
+            let amountUInt256 = FlowVaultsEVM.uint256FromUFix64(amount)
             let nativeFlowAddress = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF")
             
             let calldata = EVM.encodeABIWithSignature(
@@ -415,7 +415,7 @@ access(all) contract TidalEVM {
             )
             
             let result = self.coa.call(
-                to: TidalEVM.tidalRequestsAddress!,
+                to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 100000,
                 value: EVM.Balance(attoflow: 0)
@@ -452,7 +452,7 @@ access(all) contract TidalEVM {
             recipient.deposit(from: <-self.coa.withdraw(balance: balance))
         }
         
-        /// Update request status in TidalRequests
+        /// Update request status in FlowVaultsRequests
         access(self) fun updateRequestStatus(requestId: UInt256, status: UInt8, tideId: UInt64, message: String) {
             let calldata = EVM.encodeABIWithSignature(
                 "updateRequestStatus(uint256,uint8,uint64,string)",
@@ -460,7 +460,7 @@ access(all) contract TidalEVM {
             )
             
             let result = self.coa.call(
-                to: TidalEVM.tidalRequestsAddress!,
+                to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 150000, // Increased for string parameter
                 value: EVM.Balance(attoflow: 0)
@@ -493,7 +493,7 @@ access(all) contract TidalEVM {
             log("Request status updated successfully: ".concat(message))
         }
         
-        /// Update user balance in TidalRequests
+        /// Update user balance in FlowVaultsRequests
         access(self) fun updateUserBalance(user: EVM.EVMAddress, tokenAddress: EVM.EVMAddress, newBalance: UInt256) {
             let calldata = EVM.encodeABIWithSignature(
                 "updateUserBalance(address,address,uint256)",
@@ -501,7 +501,7 @@ access(all) contract TidalEVM {
             )
             
             let result = self.coa.call(
-                to: TidalEVM.tidalRequestsAddress!,
+                to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 100000,
                 value: EVM.Balance(attoflow: 0)
@@ -510,13 +510,13 @@ access(all) contract TidalEVM {
             assert(result.status == EVM.Status.successful, message: "updateUserBalance call failed")
         }
         
-        /// Get pending requests from TidalRequests contract
+        /// Get pending requests from FlowVaultsRequests contract
         access(all) fun getPendingRequestsFromEVM(): [EVMRequest] {
-            // Call TidalRequests.getPendingRequestsUnpacked()
+            // Call FlowVaultsRequests.getPendingRequestsUnpacked()
             let calldata = EVM.encodeABIWithSignature("getPendingRequestsUnpacked()", [])
             
             let callResult = self.coa.dryCall(
-                to: TidalEVM.tidalRequestsAddress!,
+                to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 15_000_000,
                 value: EVM.Balance(attoflow: 0)
@@ -594,9 +594,9 @@ access(all) contract TidalEVM {
         return self.tidesByEVMAddress[evmAddress] ?? []
     }
     
-    /// Get TidalRequests address (read-only)
-    access(all) fun getTidalRequestsAddress(): EVM.EVMAddress? {
-        return self.tidalRequestsAddress
+    /// Get FlowVaultsRequests address (read-only)
+    access(all) fun getFlowVaultsRequestsAddress(): EVM.EVMAddress? {
+        return self.flowVaultsRequestsAddress
     }
 
     /// Helper: Convert UInt256 (18 decimals) to UFix64 (8 decimals)
@@ -620,13 +620,13 @@ access(all) contract TidalEVM {
     
     init() {
         // Setup paths
-        self.WorkerStoragePath = /storage/tidalEVM
-        self.WorkerPublicPath = /public/tidalEVM
-        self.AdminStoragePath = /storage/tidalEVMAdmin
+        self.WorkerStoragePath = /storage/flowVaultsEVM
+        self.WorkerPublicPath = /public/flowVaultsEVM
+        self.AdminStoragePath = /storage/flowVaultsEVMAdmin
         
         // Initialize state
         self.tidesByEVMAddress = {}
-        self.tidalRequestsAddress = nil
+        self.flowVaultsRequestsAddress = nil
         
         // Create and save Admin resource (singleton)
         let admin <- create Admin()

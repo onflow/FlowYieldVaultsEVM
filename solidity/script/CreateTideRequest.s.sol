@@ -2,22 +2,22 @@
 pragma solidity 0.8.18;
 
 import "forge-std/Script.sol";
-import "../src/TidalRequests.sol";
+import "../src/FlowVaultsRequests.sol";
 
 /**
  * @title CreateTideRequest
  * @notice Script for user A to create a tide request on EVM side
  * @dev This script:
  *      1. Creates a request to create a tide with 1 FLOW
- *      2. Sends the request to TidalRequests contract
+ *      2. Sends the request to FlowVaultsRequests contract
  *      3. Logs the request ID for tracking
  */
 contract CreateTideRequest is Script {
-    // TidalRequests contract address on emulator
-    address constant TIDAL_REQUESTS =
+    // FlowVaultsRequests contract address on emulator
+    address constant FLOW_VAULTS_REQUESTS =
         0x153b84F377C6C7a7D93Bd9a717E48097Ca6Cfd11; // Got the address from emulator after deployment
 
-    // NATIVE_FLOW constant (must match TidalRequests.sol)
+    // NATIVE_FLOW constant (must match FlowVaultsRequests.sol)
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
     // Amount to deposit (1 FLOW = 1 ether in wei)
@@ -36,8 +36,10 @@ contract CreateTideRequest is Script {
         // Start broadcasting transactions as user A
         vm.startBroadcast(userPrivateKey);
 
-        // Create TidalRequests interface
-        TidalRequests tidalRequests = TidalRequests(payable(TIDAL_REQUESTS));
+        // Create FlowVaultsRequests interface
+        FlowVaultsRequests flowVaultsRequests = FlowVaultsRequests(
+            payable(FLOW_VAULTS_REQUESTS)
+        );
 
         console.log("\n=== Creating Tide Request ===");
         console.log("Amount:", AMOUNT);
@@ -47,7 +49,7 @@ contract CreateTideRequest is Script {
         require(userA.balance >= AMOUNT, "Insufficient balance");
 
         // Create the tide request
-        uint256 requestId = tidalRequests.createTide{value: AMOUNT}(
+        uint256 requestId = flowVaultsRequests.createTide{value: AMOUNT}(
             NATIVE_FLOW,
             AMOUNT
         );
@@ -57,9 +59,8 @@ contract CreateTideRequest is Script {
         console.log("User balance after:", userA.balance);
 
         // Get and display request details
-        TidalRequests.Request memory request = tidalRequests.getRequest(
-            requestId
-        );
+        FlowVaultsRequests.Request memory request = flowVaultsRequests
+            .getRequest(requestId);
         console.log("\n=== Request Details ===");
         console.log("Request ID:", request.id);
         console.log("User:", request.user);
@@ -70,12 +71,15 @@ contract CreateTideRequest is Script {
         console.log("Timestamp:", request.timestamp);
 
         // Get pending requests count
-        uint256[] memory pendingIds = tidalRequests.getPendingRequestIds();
+        uint256[] memory pendingIds = flowVaultsRequests.getPendingRequestIds();
         console.log("\n=== Pending Requests ===");
         console.log("Total pending:", pendingIds.length);
 
         // Get user's balance in contract
-        uint256 userBalance = tidalRequests.getUserBalance(userA, NATIVE_FLOW);
+        uint256 userBalance = flowVaultsRequests.getUserBalance(
+            userA,
+            NATIVE_FLOW
+        );
         console.log("\n=== User Balance in Contract ===");
         console.log("Balance:", userBalance);
 

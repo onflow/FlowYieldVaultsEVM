@@ -2,10 +2,10 @@
 pragma solidity 0.8.18;
 
 import "forge-std/Script.sol";
-import "../src/TidalRequests.sol";
+import "../src/FlowVaultsRequests.sol";
 
-contract DeployTidalRequests is Script {
-    function run() external returns (TidalRequests) {
+contract DeployFlowVaultsRequests is Script {
+    function run() external returns (FlowVaultsRequests) {
         // IMPORTANT: Get the private key for broadcasting
         uint256 deployerPrivateKey = vm.envOr(
             "DEPLOYER_PRIVATE_KEY",
@@ -20,13 +20,16 @@ contract DeployTidalRequests is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         address coa = 0x000000000000000000000002f595dA99775532Ee;
-        TidalRequests tidalRequests = new TidalRequests(coa);
+        FlowVaultsRequests flowVaultsRequests = new FlowVaultsRequests(coa);
 
-        console.log("TidalRequests deployed at:", address(tidalRequests));
-        console.log("NATIVE_FLOW constant:", tidalRequests.NATIVE_FLOW());
+        console.log(
+            "FlowVaultsRequests deployed at:",
+            address(flowVaultsRequests)
+        );
+        console.log("NATIVE_FLOW constant:", flowVaultsRequests.NATIVE_FLOW());
 
         vm.stopBroadcast();
 
-        return tidalRequests;
+        return flowVaultsRequests;
     }
 }

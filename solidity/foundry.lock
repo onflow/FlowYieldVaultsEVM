@@ -1,5 +1,5 @@
 {
-  "../lib/tidal-sc": {
+  "../lib/flow-vaults-sc": {
     "rev": "e2cc62f75907abf7a9aee667edd7fca4aa77ccf7"
   },
   "lib/forge-std": {

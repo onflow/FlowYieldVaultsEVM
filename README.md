@@ -1,4 +1,4 @@
-# Tidal EVM Integration
+# Flow Vaults EVM Integration
 
 Bridge Flow EVM users to Cadence-based yield farming through asynchronous cross-VM requests.
 
@@ -16,8 +16,8 @@ flow transactions send ./cadence/transactions/process_requests.cdc
 
 ## Architecture
 
-**EVM Side:** Users deposit FLOW to `TidalRequests` contract and submit requests  
-**Cadence Side:** `TidalEVM` processes requests, creates/manages Tide positions  
+**EVM Side:** Users deposit FLOW to `FlowVaultsRequests` contract and submit requests  
+**Cadence Side:** `FlowVaultsEVM` processes requests, creates/manages Tide positions  
 **Bridge:** COA (Cadence Owned Account) controls fund movement between VMs
 
 ## Request Types
@@ -32,13 +32,13 @@ flow transactions send ./cadence/transactions/process_requests.cdc
 | Component | Address |
 |-----------|---------|
 | RPC | `localhost:8545` |
-| TidalRequests | `0x153b84F377C6C7a7D93Bd9a717E48097Ca6Cfd11` |
+| FlowVaultsRequests | `0x153b84F377C6C7a7D93Bd9a717E48097Ca6Cfd11` |
 | Deployer | `0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF` |
 | User A | `0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69` |
 
 ## How It Works
 ```
-EVM User → TidalRequests (escrow FLOW) → Worker polls requests → 
+EVM User → FlowVaultsRequests (escrow FLOW) → Worker polls requests → 
 COA bridges funds → Create Tide on Cadence → Update EVM state
 ```
 

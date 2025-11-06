@@ -2,11 +2,11 @@
 pragma solidity 0.8.18;
 
 /**
- * @title TidalRequests
- * @notice Request queue and fund escrow for EVM users to interact with Tidal Cadence protocol
- * @dev This contract holds user funds in escrow until processed by TidalEVM
+ * @title FlowVaultsRequests
+ * @notice Request queue and fund escrow for EVM users to interact with Flow Vaults Cadence protocol
+ * @dev This contract holds user funds in escrow until processed by FlowVaultsEVM
  */
-contract TidalRequests {
+contract FlowVaultsRequests {
     // ============================================
     // Constants
     // ============================================
@@ -57,7 +57,7 @@ contract TidalRequests {
     /// @notice Auto-incrementing request ID counter
     uint256 private _requestIdCounter;
 
-    /// @notice Authorized COA address (controlled by TidalEVM)
+    /// @notice Authorized COA address (controlled by FlowVaultsEVM)
     address public authorizedCOA;
 
     /// @notice Owner of the contract (for admin functions)
@@ -121,13 +121,13 @@ contract TidalRequests {
     modifier onlyAuthorizedCOA() {
         require(
             msg.sender == authorizedCOA,
-            "TidalRequests: caller is not authorized COA"
+            "FlowVaultsRequests: caller is not authorized COA"
         );
         _;
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "TidalRequests: caller is not owner");
+        require(msg.sender == owner, "FlowVaultsRequests: caller is not owner");
         _;
     }
 
@@ -147,9 +147,9 @@ contract TidalRequests {
     // ============================================
 
     /// @notice Set the authorized COA address (can only be called by owner)
-    /// @param _coa The COA address controlled by TidalEVM
+    /// @param _coa The COA address controlled by FlowVaultsEVM
     function setAuthorizedCOA(address _coa) external onlyOwner {
-        require(_coa != address(0), "TidalRequests: invalid COA address");
+        require(_coa != address(0), "FlowVaultsRequests: invalid COA address");
         address oldCOA = authorizedCOA;
         authorizedCOA = _coa;
         emit AuthorizedCOAUpdated(oldCOA, _coa);
@@ -166,20 +166,23 @@ contract TidalRequests {
         address tokenAddress,
         uint256 amount
     ) external payable returns (uint256) {
-        require(amount > 0, "TidalRequests: amount must be greater than 0");
+        require(
+            amount > 0,
+            "FlowVaultsRequests: amount must be greater than 0"
+        );
 
         if (isNativeFlow(tokenAddress)) {
             require(
                 msg.value == amount,
-                "TidalRequests: msg.value must equal amount"
+                "FlowVaultsRequests: msg.value must equal amount"
             );
         } else {
             require(
                 msg.value == 0,
-                "TidalRequests: msg.value must be 0 for ERC20"
+                "FlowVaultsRequests: msg.value must be 0 for ERC20"
             );
             // TODO: Transfer ERC20 tokens (Phase 2)
-            revert("TidalRequests: ERC20 not supported yet");
+            revert("FlowVaultsRequests: ERC20 not supported yet");
         }
 
         uint256 requestId = createRequest(
@@ -199,8 +202,11 @@ contract TidalRequests {
         uint64 tideId,
         uint256 amount
     ) external returns (uint256) {
-        require(amount > 0, "TidalRequests: amount must be greater than 0");
-        require(tideId > 0, "TidalRequests: invalid tide ID");
+        require(
+            amount > 0,
+            "FlowVaultsRequests: amount must be greater than 0"
+        );
+        require(tideId > 0, "FlowVaultsRequests: invalid tide ID");
 
         uint256 requestId = createRequest(
             RequestType.WITHDRAW_FROM_TIDE,
@@ -215,7 +221,7 @@ contract TidalRequests {
     /// @notice Close Tide and withdraw all funds
     /// @param tideId The Tide ID to close
     function closeTide(uint64 tideId) external returns (uint256) {
-        require(tideId > 0, "TidalRequests: invalid tide ID");
+        require(tideId > 0, "FlowVaultsRequests: invalid tide ID");
 
         uint256 requestId = createRequest(
             RequestType.CLOSE_TIDE,
@@ -232,11 +238,17 @@ contract TidalRequests {
     function cancelRequest(uint256 requestId) external {
         Request storage request = pendingRequests[requestId];
 
-        require(request.id == requestId, "TidalRequests: request not found");
-        require(request.user == msg.sender, "TidalRequests: not request owner");
+        require(
+            request.id == requestId,
+            "FlowVaultsRequests: request not found"
+        );
+        require(
+            request.user == msg.sender,
+            "FlowVaultsRequests: not request owner"
+        );
         require(
             request.status == RequestStatus.PENDING,
-            "TidalRequests: can only cancel pending requests"
+            "FlowVaultsRequests: can only cancel pending requests"
         );
 
         // Update status to FAILED with cancellation message
@@ -275,10 +287,10 @@ contract TidalRequests {
             // Refund the funds
             if (isNativeFlow(request.tokenAddress)) {
                 (bool success, ) = msg.sender.call{value: request.amount}("");
-                require(success, "TidalRequests: refund failed");
+                require(success, "FlowVaultsRequests: refund failed");
             } else {
                 // TODO: Transfer ERC20 tokens (Phase 2)
-                revert("TidalRequests: ERC20 not supported yet");
+                revert("FlowVaultsRequests: ERC20 not supported yet");
             }
 
             emit FundsWithdrawn(
@@ -298,7 +310,7 @@ contract TidalRequests {
     }
 
     // ============================================
-    // COA Functions (called by TidalEVM)
+    // COA Functions (called by FlowVaultsEVM)
     // ============================================
 
     /// @notice Withdraw funds from contract (only authorized COA)
@@ -308,18 +320,21 @@ contract TidalRequests {
         address tokenAddress,
         uint256 amount
     ) external onlyAuthorizedCOA {
-        require(amount > 0, "TidalRequests: amount must be greater than 0");
+        require(
+            amount > 0,
+            "FlowVaultsRequests: amount must be greater than 0"
+        );
 
         if (isNativeFlow(tokenAddress)) {
             require(
                 address(this).balance >= amount,
-                "TidalRequests: insufficient balance"
+                "FlowVaultsRequests: insufficient balance"
             );
             (bool success, ) = msg.sender.call{value: amount}("");
-            require(success, "TidalRequests: transfer failed");
+            require(success, "FlowVaultsRequests: transfer failed");
         } else {
             // TODO: Transfer ERC20 tokens (Phase 2)
-            revert("TidalRequests: ERC20 not supported yet");
+            revert("FlowVaultsRequests: ERC20 not supported yet");
         }
 
         emit FundsWithdrawn(msg.sender, tokenAddress, amount);
@@ -337,11 +352,14 @@ contract TidalRequests {
         string calldata message
     ) external onlyAuthorizedCOA {
         Request storage request = pendingRequests[requestId];
-        require(request.id == requestId, "TidalRequests: request not found");
+        require(
+            request.id == requestId,
+            "FlowVaultsRequests: request not found"
+        );
         require(
             request.status == RequestStatus.PENDING ||
                 request.status == RequestStatus.PROCESSING,
-            "TidalRequests: request already finalized"
+            "FlowVaultsRequests: request already finalized"
         );
 
         // Convert uint8 to RequestStatus

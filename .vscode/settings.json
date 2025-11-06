@@ -1,22 +1,3 @@
 {
-    "wake.compiler.solc.remappings": [
-        "@openzeppelin-53/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/openzeppelin-contracts-53/",
-        "@openzeppelin/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/openzeppelin-contracts/",
-        "@uniswap/lib/contracts/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/uniswap-lib/contracts/",
-        "base64-sol/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/base64/",
-        "base64/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/base64/",
-        "ds-test/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/solmate/lib/ds-test/src/",
-        "erc4626-tests/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/openzeppelin-contracts-53/lib/erc4626-tests/",
-        "flow-sol-utils/=lib/tidal-sc/lib/TidalProtocol/DeFiActions/solidity/lib/flow-sol-utils/src/",
-        "forge-std/=lib/tidal-sc/solidity/lib/forge-std/src/",
-        "halmos-cheatcodes/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/openzeppelin-contracts-53/lib/halmos-cheatcodes/src/",
-        "openzeppelin-contracts-53/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/openzeppelin-contracts-53/",
-        "openzeppelin-contracts/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/openzeppelin-contracts/contracts/",
-        "punch-swap-v3-contracts/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/",
-        "solmate/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/solmate/",
-        "tidal-sc/=lib/tidal-sc/./solidity/src/",
-        "uniswap-lib/=lib/tidal-sc/solidity/lib/punch-swap-v3-contracts/lib/uniswap-lib/contracts/",
-        "v2-core/=lib/tidal-sc/lib/TidalProtocol/DeFiActions/solidity/lib/v2-core/contracts/",
-        "v2-periphery/=lib/tidal-sc/lib/TidalProtocol/DeFiActions/solidity/lib/v2-periphery/contracts/"
-    ]
+    "wake.compiler.solc.remappings": []
 }
