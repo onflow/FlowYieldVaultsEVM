@@ -1,8 +1,11 @@
 import "FlowTransactionScheduler"
+import "FlowTransactionSchedulerUtils"
 import "FlowVaultsEVM"
+import "FlowToken"
+import "FungibleToken"
 
 /// Handler contract for scheduled FlowVaultsEVM request processing
-/// Intermediate version: 5 delay levels for simplicity
+/// WITH AUTO-SCHEDULING: After each execution, automatically schedules the next one
 access(all) contract FlowVaultsTransactionHandler {
 
     // ========================================
@@ -80,7 +83,75 @@ access(all) contract FlowVaultsTransactionHandler {
                 nextExecutionDelay: nextDelay
             )
             
+            // AUTO-SCHEDULE: Schedule the next execution based on remaining workload
+            self.scheduleNextExecution(nextDelay: nextDelay, pendingRequests: pendingRequestsAfter)
+            
             log("=== FlowVaultsEVM Scheduled Execution Complete ===")
+        }
+        
+        /// Schedule the next execution automatically
+        access(self) fun scheduleNextExecution(nextDelay: UFix64, pendingRequests: Int) {
+            log("=== Auto-Scheduling Next Execution ===")
+            
+            let future = getCurrentBlock().timestamp + nextDelay
+            let priority = FlowTransactionScheduler.Priority.Medium
+            let executionEffort: UInt64 = 7499
+            
+            // Estimate fees for the next execution
+            let estimate = FlowTransactionScheduler.estimate(
+                data: nil,
+                timestamp: future,
+                priority: priority,
+                executionEffort: executionEffort
+            )
+            
+            // Validate the estimate
+            assert(
+                estimate.timestamp != nil || priority == FlowTransactionScheduler.Priority.Low,
+                message: estimate.error ?? "estimation failed"
+            )
+            
+            // Withdraw fees from contract account
+            let vaultRef = FlowVaultsTransactionHandler.account.storage
+                .borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
+                ?? panic("missing FlowToken vault on contract account")
+            
+            let fees <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
+            
+            // Get the manager from contract account storage
+            let manager = FlowVaultsTransactionHandler.account.storage
+                .borrow<auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}>(
+                    from: FlowTransactionSchedulerUtils.managerStoragePath
+                )
+                ?? panic("Could not borrow Manager reference from contract account")
+            
+            // Get the handler type identifier - use the first (and should be only) handler type
+            let handlerTypeIdentifiers = manager.getHandlerTypeIdentifiers()
+            assert(handlerTypeIdentifiers.keys.length > 0, message: "No handler types found in manager")
+            let handlerTypeIdentifier = handlerTypeIdentifiers.keys[0]
+            
+            // Schedule using the existing handler
+            let transactionId = manager.scheduleByHandler(
+                handlerTypeIdentifier: handlerTypeIdentifier,
+                handlerUUID: nil,
+                data: nil,
+                timestamp: future,
+                priority: priority,
+                executionEffort: executionEffort,
+                fees: <-fees
+            )
+            
+            emit NextExecutionScheduled(
+                transactionId: transactionId,
+                scheduledFor: future,
+                delaySeconds: nextDelay,
+                pendingRequests: pendingRequests
+            )
+            
+            log("Next execution scheduled for: ".concat(future.toString()))
+            log("Transaction ID: ".concat(transactionId.toString()))
+            log("Delay: ".concat(nextDelay.toString()).concat(" seconds"))
+            log("=== Auto-Scheduling Complete ===")
         }
 
         access(all) view fun getViews(): [Type] {
@@ -99,7 +170,7 @@ access(all) contract FlowVaultsTransactionHandler {
         }
         
         access(self) fun getPendingRequestCount(_ worker: &FlowVaultsEVM.Worker): Int {
-            let requests = worker.getPendingRequestsFromEVM()
+            let requests = worker.getPendingRequestIdsFromEVM()
             return requests.length
         }
         

@@ -428,7 +428,7 @@ access(all) contract FlowVaultsEVM {
             let result = self.coa.call(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 150000,
+                gasLimit: 1_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
             
@@ -459,7 +459,7 @@ access(all) contract FlowVaultsEVM {
             let callResult = self.coa.dryCall(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 1_000_000,
+                gasLimit: 500000,
                 value: EVM.Balance(attoflow: 0)
             )
             

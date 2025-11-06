@@ -34,12 +34,11 @@ transaction() {
             log("Handler already exists in storage")
         }
 
-        // Issue an entitled capability for the scheduler to call executeTransaction
+        // Issue an entitled capability for the scheduler to call executeTransaction - VALIDATION for future calls
         let entitledCap = signer.capabilities.storage
             .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(
                 FlowVaultsTransactionHandler.HandlerStoragePath
             )
-        log("Entitled handler capability created for scheduler")
 
         // Issue a public capability for general access
         let publicCap = signer.capabilities.storage

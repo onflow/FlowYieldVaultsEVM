@@ -12,7 +12,7 @@ import "FlowVaultsEVM"
 /// Arguments:
 /// - delaySeconds: Initial delay before first execution (e.g., 5.0 for 5 seconds)
 /// - priority: 0=High, 1=Medium, 2=Low (recommend Medium for automated processing)
-/// - executionEffort: Computation units (recommend 5000+ for safety)
+/// - executionEffort: Computation units (recommend 6000+ for safety)
 ///
 transaction(
     delaySeconds: UFix64,
