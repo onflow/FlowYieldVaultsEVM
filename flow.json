@@ -5,7 +5,7 @@
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7",
 				"testing": "0000000000000007",
-				"testnet": "d27920b6384e2a78"
+				"testnet": "3bda2f90274dbc9b"
 			}
 		},
 		"FlowVaultsClosedBeta": {
@@ -13,19 +13,21 @@
 			"aliases": {
 				"emulator": "f8d6e0586b0a20c7",
 				"testing": "0000000000000007",
-				"testnet": "d27920b6384e2a78"
+				"testnet": "3bda2f90274dbc9b"
 			}
 		},
 		"FlowVaultsEVM": {
 			"source": "./cadence/contracts/FlowVaultsEVM.cdc",
 			"aliases": {
-				"emulator": "f8d6e0586b0a20c7"
+				"emulator": "f8d6e0586b0a20c7",
+				"testnet": "1253f60e289fd08"
 			}
 		},
 		"FlowVaultsTransactionHandler": {
 			"source": "./cadence/contracts/FlowVaultsTransactionHandler.cdc",
 			"aliases": {
-				"emulator": "f8d6e0586b0a20c7"
+				"emulator": "f8d6e0586b0a20c7",
+				"testnet": "1253f60e289fd08"
 			}
 		}
 	},
