@@ -56,7 +56,7 @@ RPC_PORT="${RPC_PORT:-8545}"
 
 # Install dependencies - auto-answer yes to all prompts
 echo "Installing Flow dependencies..."
-yes | flow deps install
+yes | flow deps install --skip-alias --skip-deployments
 
 # Start Flow emulator in the background
 flow emulator &
