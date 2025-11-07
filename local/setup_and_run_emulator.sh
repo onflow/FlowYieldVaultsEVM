@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # install Flow Vaults submodule as dependency
-git submodule update --init --recursive
+git submodule update --init --recursive -f
 
 # ============================================
 # CLEANUP SECTION - All cleanup operations
