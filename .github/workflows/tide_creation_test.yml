@@ -21,31 +21,76 @@ jobs:
       - name: Install Flow CLI
         run: sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
       
-      - name: Flow CLI Version
-        run: flow version
-      
       - name: Update PATH
-        run: echo "/root/.local/bin" >> $GITHUB_PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
       
-      - name: Install Flow dependencies
-        run: flow deps install --skip-alias --skip-deployments
+      - name: Verify Flow CLI Installation
+        run: flow version
       
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
       
-      # Step 1: Start environment & deploy contracts
-      - name: Setup and Deploy Full Stack
+      - name: Make scripts executable
+        run: |
+          chmod +x ./local/setup_and_run_emulator.sh
+          chmod +x ./local/deploy_full_stack.sh
+          chmod +x ./local/setup_accounts.sh
+          chmod +x ./local/deploy_and_initialize.sh
+      
+      # Step 1: Setup environment and run emulator in background
+      - name: Setup and Run Emulator
         run: |
           ./local/setup_and_run_emulator.sh &
-          sleep 15
-          ./local/deploy_full_stack.sh
+          EMULATOR_PID=$!
+          echo "EMULATOR_PID=$EMULATOR_PID" >> $GITHUB_ENV
+          
+          # Wait for emulator to be fully ready
+          echo "Waiting for emulator to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8080 > /dev/null 2>&1; then
+              echo "Emulator is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+          
+          # Wait for RPC to be ready
+          echo "Waiting for RPC to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8545 > /dev/null 2>&1; then
+              echo "RPC is ready!"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
       
-      # Step 2: Create yield position from EVM
+      # Step 2: Deploy full stack
+      - name: Deploy Full Stack
+        run: ./local/deploy_full_stack.sh
+      
+      # Step 3: Create yield position from EVM
       - name: Create Tide Request from EVM
         run: |
-          cd solidity
-          forge script ./script/CreateTideRequest.s.sol --rpc-url localhost:8545 --broadcast --legacy
+          forge script ./solidity/script/CreateTideRequest.s.sol \
+            --rpc-url localhost:8545 \
+            --broadcast \
+            --legacy
       
-      # Step 3: Process request (Cadence worker)
+      # Step 4: Process request (Cadence worker)
       - name: Process Requests
         run: flow transactions send ./cadence/transactions/process_requests.cdc
+      
+      # Cleanup
+      - name: Cleanup
+        if: always()
+        run: |
+          if [ ! -z "$EMULATOR_PID" ]; then
+            kill $EMULATOR_PID 2>/dev/null || true
+          fi
+          # Kill any remaining processes
+          lsof -ti :8080 | xargs kill -9 2>/dev/null || true
+          lsof -ti :8545 | xargs kill -9 2>/dev/null || true
+          lsof -ti :3569 | xargs kill -9 2>/dev/null || true
+          lsof -ti :8888 | xargs kill -9 2>/dev/null || true
