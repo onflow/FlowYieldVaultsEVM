@@ -268,8 +268,15 @@ access(all) contract FlowVaultsEVM {
         }
         
         access(self) fun processCreateTide(_ request: EVMRequest): ProcessResult {
-            let vaultIdentifier = "A.7e60df042a9c0868.FlowToken.Vault"
-            let strategyIdentifier = "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy"
+            // TODO - make configurable according to network, tokens or strategy
+            // testnet
+            // let vaultIdentifier = "A.7e60df042a9c0868.FlowToken.Vault"
+            // let strategyIdentifier = "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy"
+
+            // emulator
+            let vaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
+            let strategyIdentifier = "A.f8d6e0586b0a20c7.FlowVaultsStrategies.TracerStrategy"
+
 
             let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
             log("Creating Tide for amount: ".concat(amount.toString()))
