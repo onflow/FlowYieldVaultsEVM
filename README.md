@@ -11,7 +11,7 @@ Bridge Flow EVM users to Cadence-based yield farming through asynchronous cross-
 forge script ./solidity/script/CreateTideRequest.s.sol --rpc-url localhost:8545 --broadcast --legacy
 
 # 3. Process request (Cadence worker)
-flow transactions send ./cadence/transactions/process_requests.cdc
+flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
 ```
 
 ## Architecture

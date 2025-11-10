@@ -6,20 +6,22 @@ import "../src/FlowVaultsRequests.sol";
 
 contract DeployFlowVaultsRequests is Script {
     function run() external returns (FlowVaultsRequests) {
-        // IMPORTANT: Get the private key for broadcasting
         uint256 deployerPrivateKey = vm.envOr(
             "DEPLOYER_PRIVATE_KEY",
             uint256(0x2)
         );
 
         address deployer = vm.addr(deployerPrivateKey);
-        console.log("Deployer address:", deployer); //0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF
+        console.log("Deployer address:", deployer);
         console.log("Deployer balance:", deployer.balance);
+
+        // Read COA address from environment variable
+        address coa = vm.envAddress("COA_ADDRESS");
+        console.log("Using COA address:", coa);
 
         // Start broadcast with private key
         vm.startBroadcast(deployerPrivateKey);
 
-        address coa = 0x000000000000000000000002f595dA99775532Ee;
         FlowVaultsRequests flowVaultsRequests = new FlowVaultsRequests(coa);
 
         console.log(

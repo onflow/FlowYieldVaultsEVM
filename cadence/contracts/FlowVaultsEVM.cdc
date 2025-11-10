@@ -7,12 +7,6 @@ import "FlowVaultsClosedBeta"
 
 /// FlowVaultsEVM: Bridge contract that processes requests from EVM users
 /// and manages their Tide positions in Cadence
-/// 
-/// This is the INTERMEDIATE version:
-/// - Minimal changes to original contract
-/// - Adds updatable MAX_REQUESTS_PER_TX
-/// - Works with external FlowVaultsTransactionHandler for scheduling
-/// - No self-scheduling logic (kept simple)
 access(all) contract FlowVaultsEVM {
     
     // ========================================
@@ -275,7 +269,7 @@ access(all) contract FlowVaultsEVM {
 
             // emulator
             let vaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
-            let strategyIdentifier = "A.f8d6e0586b0a20c7.FlowVaultsStrategies.TracerStrategy"
+            let strategyIdentifier = "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy"
 
 
             let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
@@ -403,7 +397,12 @@ access(all) contract FlowVaultsEVM {
                 value: EVM.Balance(attoflow: 0)
             )
             
-            assert(result.status == EVM.Status.successful, message: "withdrawFunds call failed")
+            // If EVM call fails, decode error and panic
+            // This causes the entire transaction to revert
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowVaultsEVM.decodeEVMError(result.data)
+                panic("withdrawFunds call failed: ".concat(errorMsg))
+            }
             
             let rawUFix64 = UInt64(amount * 100_000_000.0)
             let attoflowAmount = UInt(rawUFix64) * 10_000_000_000
@@ -439,7 +438,12 @@ access(all) contract FlowVaultsEVM {
                 value: EVM.Balance(attoflow: 0)
             )
             
-            assert(result.status == EVM.Status.successful, message: "updateRequestStatus call failed")
+            // If EVM call fails, decode error and panic
+            // This causes the entire transaction to revert
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowVaultsEVM.decodeEVMError(result.data)
+                panic("updateRequestStatus call failed: ".concat(errorMsg))
+            }
         }
         
         access(self) fun updateUserBalance(user: EVM.EVMAddress, tokenAddress: EVM.EVMAddress, newBalance: UInt256) {
@@ -455,7 +459,12 @@ access(all) contract FlowVaultsEVM {
                 value: EVM.Balance(attoflow: 0)
             )
             
-            assert(result.status == EVM.Status.successful, message: "updateUserBalance call failed")
+            // If EVM call fails, decode error and panic
+            // This causes the entire transaction to revert
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowVaultsEVM.decodeEVMError(result.data)
+                panic("updateUserBalance call failed: ".concat(errorMsg))
+            }
         }
         
         /// Get pending request IDs from FlowVaultsRequests contract (lightweight)
@@ -470,7 +479,11 @@ access(all) contract FlowVaultsEVM {
                 value: EVM.Balance(attoflow: 0)
             )
             
-            assert(callResult.status == EVM.Status.successful, message: "getPendingRequestIds call failed")
+            // If EVM call fails, decode error and panic
+            if callResult.status != EVM.Status.successful {
+                let errorMsg = FlowVaultsEVM.decodeEVMError(callResult.data)
+                panic("getPendingRequestIds call failed: ".concat(errorMsg))
+            }
             
             let decoded = EVM.decodeABI(
                 types: [Type<[UInt256]>()],
@@ -500,7 +513,11 @@ access(all) contract FlowVaultsEVM {
             log("Gas Used: ".concat(callResult.gasUsed.toString()))
             log("Data Length: ".concat(callResult.data.length.toString()))
 
-            assert(callResult.status == EVM.Status.successful, message: "getPendingRequestsUnpacked call failed")
+            // If EVM call fails, decode error and panic
+            if callResult.status != EVM.Status.successful {
+                let errorMsg = FlowVaultsEVM.decodeEVMError(callResult.data)
+                panic("getPendingRequestsUnpacked call failed: ".concat(errorMsg))
+            }
             
             let decoded = EVM.decodeABI(
                 types: [
@@ -569,6 +586,27 @@ access(all) contract FlowVaultsEVM {
     access(self) fun uint256FromUFix64(_ value: UFix64): UInt256 {
         let rawValue = UInt64(value * 100_000_000.0)
         return UInt256(rawValue) * 10_000_000_000
+    }
+
+    /// Decode error message from EVM revert data
+    /// EVM reverts typically encode as: Error(string) selector (0x08c379a0) + ABI-encoded string
+    access(self) fun decodeEVMError(_ data: [UInt8]): String {
+        // Check if data starts with Error(string) selector: 0x08c379a0
+        if data.length >= 4 {
+            let selector = (UInt32(data[0]) << 24) | (UInt32(data[1]) << 16) | (UInt32(data[2]) << 8) | UInt32(data[3])
+            if selector == 0x08c379a0 && data.length > 4 {
+                // Try to decode the ABI-encoded string
+                let payload = data.slice(from: 4, upTo: data.length)
+                let decoded = EVM.decodeABI(types: [Type<String>()], data: payload)
+                if decoded.length > 0 {
+                    if let errorMsg = decoded[0] as? String {
+                        return errorMsg
+                    }
+                }
+            }
+        }
+        // Fallback: return hex representation of revert data
+        return "EVM revert data: 0x".concat(String.encodeHex(data))
     }
     
     // ========================================

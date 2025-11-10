@@ -1,7 +1,3 @@
-# flow
-*.pkey
-!emulator-account.pkey
-
 imports
 db
 

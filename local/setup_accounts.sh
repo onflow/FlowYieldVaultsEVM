@@ -17,10 +17,6 @@ fi
 
 echo "=== Setting up accounts ==="
 
-# Setup emulator account COA
-echo "Setting up COA..."
-flow transactions send ./cadence/transactions/setup_coa.cdc
-
 # Fund deployer on EVM side
 echo "Funding deployer account ($DEPLOYER_EOA) with $DEPLOYER_FUNDING FLOW..."
 flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc \
