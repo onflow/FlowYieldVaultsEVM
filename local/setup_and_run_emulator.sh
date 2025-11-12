@@ -124,9 +124,9 @@ flow evm gateway \
 GATEWAY_PID=$!
 echo "EVM Gateway PID: $GATEWAY_PID"
 
-# Wait for EVM Gateway to be ready
-echo "Waiting for EVM Gateway to be ready..."
-MAX_WAIT=30
+# Wait for EVM Gateway to be ready - Phase 1: Basic RPC response
+echo "Waiting for EVM Gateway RPC to respond..."
+MAX_WAIT=60
 COUNTER=0
 until curl -s -X POST http://localhost:$RPC_PORT \
   -H "Content-Type: application/json" \
@@ -137,11 +137,33 @@ until curl -s -X POST http://localhost:$RPC_PORT \
     kill $EMULATOR_PID 2>/dev/null || true
     exit 1
   fi
-  echo "Waiting for EVM Gateway... ($COUNTER/$MAX_WAIT)"
+  echo "Waiting for EVM Gateway RPC... ($COUNTER/$MAX_WAIT)"
   sleep 1
   COUNTER=$((COUNTER + 1))
 done
-echo "✓ EVM Gateway is ready!"
+echo "✓ EVM Gateway RPC is responding"
+
+# Wait for EVM Gateway to be ready - Phase 2: Full initialization
+echo "Verifying EVM Gateway full initialization..."
+COUNTER=0
+until curl -s -X POST http://localhost:$RPC_PORT \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' | grep -q "0x"; do
+  if [ $COUNTER -ge 30 ]; then
+    echo "ERROR: EVM Gateway not fully initialized within 30 seconds"
+    kill $GATEWAY_PID 2>/dev/null || true
+    kill $EMULATOR_PID 2>/dev/null || true
+    exit 1
+  fi
+  echo "Waiting for full initialization... ($COUNTER/30)"
+  sleep 1
+  COUNTER=$((COUNTER + 1))
+done
+
+# Give it a couple more seconds to settle completely
+echo "Allowing EVM Gateway to settle..."
+sleep 3
+echo "✓ EVM Gateway is fully ready!"
 
 echo ""
 echo "========================================="
