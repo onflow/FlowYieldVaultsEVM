@@ -70,6 +70,8 @@ contract FlowVaultsRequests {
         uint64 tideId; // Only used for DEPOSIT/WITHDRAW/CLOSE
         uint256 timestamp;
         string message; // Error message or status details
+        string vaultIdentifier; // Cadence vault type identifier (e.g., "A.7e60df042a9c0868.FlowToken.Vault")
+        string strategyIdentifier; // Cadence strategy type identifier (e.g., "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy")
     }
 
     // ============================================
@@ -236,9 +238,13 @@ contract FlowVaultsRequests {
     /// @notice Create a new Tide (deposit funds to create position)
     /// @param tokenAddress Address of token (use NATIVE_FLOW for native $FLOW)
     /// @param amount Amount to deposit
+    /// @param vaultIdentifier Cadence vault type identifier (e.g., "A.7e60df042a9c0868.FlowToken.Vault")
+    /// @param strategyIdentifier Cadence strategy type identifier (e.g., "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy")
     function createTide(
         address tokenAddress,
-        uint256 amount
+        uint256 amount,
+        string calldata vaultIdentifier,
+        string calldata strategyIdentifier
     ) external payable onlyWhitelisted returns (uint256) {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
 
@@ -254,7 +260,9 @@ contract FlowVaultsRequests {
             RequestType.CREATE_TIDE,
             tokenAddress,
             amount,
-            0 // No tideId yet
+            0, // No tideId yet
+            vaultIdentifier,
+            strategyIdentifier
         );
 
         return requestId;
@@ -284,7 +292,9 @@ contract FlowVaultsRequests {
             RequestType.DEPOSIT_TO_TIDE,
             tokenAddress,
             amount,
-            tideId
+            tideId,
+            "", // No vault identifier needed for deposit
+            "" // No strategy identifier needed for deposit
         );
 
         return requestId;
@@ -304,7 +314,9 @@ contract FlowVaultsRequests {
             RequestType.WITHDRAW_FROM_TIDE,
             NATIVE_FLOW, // Assume FLOW for MVP
             amount,
-            tideId
+            tideId,
+            "", // No vault identifier needed for withdraw
+            "" // No strategy identifier needed for withdraw
         );
 
         return requestId;
@@ -321,7 +333,9 @@ contract FlowVaultsRequests {
             RequestType.CLOSE_TIDE,
             NATIVE_FLOW,
             0, // Amount will be determined by Cadence
-            tideId
+            tideId,
+            "", // No vault identifier needed for close
+            "" // No strategy identifier needed for close
         );
 
         return requestId;
@@ -557,6 +571,8 @@ contract FlowVaultsRequests {
     /// @return tideIds Array of tide IDs
     /// @return timestamps Array of timestamps
     /// @return messages Array of status messages
+    /// @return vaultIdentifiers Array of vault identifiers
+    /// @return strategyIdentifiers Array of strategy identifiers
     function getPendingRequestsUnpacked(
         uint256 limit
     )
@@ -571,7 +587,9 @@ contract FlowVaultsRequests {
             uint256[] memory amounts,
             uint64[] memory tideIds,
             uint256[] memory timestamps,
-            string[] memory messages
+            string[] memory messages,
+            string[] memory vaultIdentifiers,
+            string[] memory strategyIdentifiers
         )
     {
         // Determine actual size: min(limit, total pending)
@@ -593,6 +611,8 @@ contract FlowVaultsRequests {
         tideIds = new uint64[](size);
         timestamps = new uint256[](size);
         messages = new string[](size);
+        vaultIdentifiers = new string[](size);
+        strategyIdentifiers = new string[](size);
 
         // Populate arrays up to size
         for (uint256 i = 0; i < size; i++) {
@@ -606,6 +626,8 @@ contract FlowVaultsRequests {
             tideIds[i] = req.tideId;
             timestamps[i] = req.timestamp;
             messages[i] = req.message;
+            vaultIdentifiers[i] = req.vaultIdentifier;
+            strategyIdentifiers[i] = req.strategyIdentifier;
         }
     }
 
@@ -624,7 +646,9 @@ contract FlowVaultsRequests {
         RequestType requestType,
         address tokenAddress,
         uint256 amount,
-        uint64 tideId
+        uint64 tideId,
+        string memory vaultIdentifier,
+        string memory strategyIdentifier
     ) internal returns (uint256) {
         address user = msg.sender;
         uint256 requestId = _requestIdCounter++;
@@ -638,7 +662,9 @@ contract FlowVaultsRequests {
             amount: amount,
             tideId: tideId,
             timestamp: block.timestamp,
-            message: "" // Empty message initially
+            message: "", // Empty message initially
+            vaultIdentifier: vaultIdentifier,
+            strategyIdentifier: strategyIdentifier
         });
 
         // Store in user's request array

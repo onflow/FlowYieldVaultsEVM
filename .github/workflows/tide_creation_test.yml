@@ -48,7 +48,8 @@ jobs:
       # Step 3: Create yield position from EVM
       - name: Create Tide Request from EVM
         run: |
-          forge script ./solidity/script/CreateTideRequest.s.sol \
+          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+            --sig "runCreateTide()" \
             --rpc-url localhost:8545 \
             --broadcast \
             --legacy

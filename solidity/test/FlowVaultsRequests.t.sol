@@ -10,6 +10,11 @@ contract FlowVaultsRequestsTest is Test {
     address coa = makeAddr("coa");
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
+    // Test vault and strategy identifiers for testnet
+    string constant VAULT_IDENTIFIER = "A.7e60df042a9c0868.FlowToken.Vault";
+    string constant STRATEGY_IDENTIFIER =
+        "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy";
+
     // Event declarations for testing
     event RequestCreated(
         uint256 indexed requestId,
@@ -55,7 +60,12 @@ contract FlowVaultsRequestsTest is Test {
     // ============================================
     function test_CreateTide() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         assertEq(reqId, 1);
         assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
@@ -73,13 +83,23 @@ contract FlowVaultsRequestsTest is Test {
         vm.expectRevert(
             FlowVaultsRequests.AmountMustBeGreaterThanZero.selector
         );
-        c.createTide{value: 0}(NATIVE_FLOW, 0);
+        c.createTide{value: 0}(
+            NATIVE_FLOW,
+            0,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
     }
 
     function test_CreateTide_RevertMsgValueMismatch() public {
         vm.prank(user);
         vm.expectRevert(FlowVaultsRequests.MsgValueMustEqualAmount.selector);
-        c.createTide{value: 0.5 ether}(NATIVE_FLOW, 1 ether); // Mismatch
+        c.createTide{value: 0.5 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        ); // Mismatch
     }
 
     // DEPOSIT_TO_TIDE Tests
@@ -147,7 +167,12 @@ contract FlowVaultsRequestsTest is Test {
     // ============================================
     function test_CancelRequest() public {
         vm.startPrank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         uint256 balBefore = user.balance;
         c.cancelRequest(reqId);
@@ -160,7 +185,12 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_CancelRequest_RevertNotOwner() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         vm.prank(makeAddr("other"));
         vm.expectRevert();
@@ -170,7 +200,12 @@ contract FlowVaultsRequestsTest is Test {
     function test_DoubleRefund_Prevention() public {
         // User creates tide
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         uint256 balBefore = user.balance;
 
@@ -194,7 +229,12 @@ contract FlowVaultsRequestsTest is Test {
     // ============================================
     function test_COA_WithdrawFunds() public {
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         vm.prank(coa);
         c.withdrawFunds(NATIVE_FLOW, 1 ether);
@@ -204,7 +244,12 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_COA_UpdateRequestStatus() public {
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         vm.prank(coa);
         c.updateRequestStatus(
@@ -225,7 +270,12 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_COA_UpdateUserBalance() public {
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         vm.prank(coa);
         c.updateUserBalance(user, NATIVE_FLOW, 0.5 ether);
@@ -245,7 +295,12 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_GetPendingRequestsUnpacked() public {
         vm.startPrank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
         c.depositToTide{value: 0.5 ether}(42, NATIVE_FLOW, 0.5 ether);
         vm.stopPrank();
 
@@ -256,6 +311,8 @@ contract FlowVaultsRequestsTest is Test {
             ,
             ,
             uint256[] memory amounts,
+            ,
+            ,
             ,
             ,
 
@@ -269,14 +326,28 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_GetPendingRequestsUnpacked_WithLimit() public {
         vm.startPrank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
-        c.createTide{value: 2 ether}(NATIVE_FLOW, 2 ether);
-        c.createTide{value: 3 ether}(NATIVE_FLOW, 3 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
+        c.createTide{value: 2 ether}(
+            NATIVE_FLOW,
+            2 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
+        c.createTide{value: 3 ether}(
+            NATIVE_FLOW,
+            3 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
         vm.stopPrank();
 
-        (uint256[] memory ids, , , , , , , , ) = c.getPendingRequestsUnpacked(
-            2
-        );
+        (uint256[] memory ids, , , , , , , , , , ) = c
+            .getPendingRequestsUnpacked(2);
 
         assertEq(ids.length, 2); // Limited to 2
     }
@@ -291,11 +362,21 @@ contract FlowVaultsRequestsTest is Test {
 
         // User 1 creates tide
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         // User 2 creates tide
         vm.prank(user2);
-        c.createTide{value: 2 ether}(NATIVE_FLOW, 2 ether);
+        c.createTide{value: 2 ether}(
+            NATIVE_FLOW,
+            2 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         // Verify balances are separate
         assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
@@ -314,7 +395,12 @@ contract FlowVaultsRequestsTest is Test {
 
         // User 1 creates tide
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         // User 2 tries to cancel User 1's request
         vm.prank(user2);
@@ -333,7 +419,12 @@ contract FlowVaultsRequestsTest is Test {
     function test_UserBalance_AfterFailedRequest() public {
         // User creates tide
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         // Initial balance
         assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
@@ -371,7 +462,12 @@ contract FlowVaultsRequestsTest is Test {
     function test_FullCreateTideFlow() public {
         // 1. User creates tide
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         // 2. COA processes
         vm.startPrank(coa);
@@ -445,7 +541,12 @@ contract FlowVaultsRequestsTest is Test {
             0 // tideId
         );
 
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
     }
 
     function test_Events_BalanceUpdated() public {
@@ -454,12 +555,22 @@ contract FlowVaultsRequestsTest is Test {
         vm.expectEmit(true, true, false, true);
         emit BalanceUpdated(user, NATIVE_FLOW, 1 ether);
 
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
     }
 
     function test_Events_RequestProcessed() public {
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         vm.prank(coa);
 
@@ -481,7 +592,12 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_Events_RequestCancelled() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         vm.prank(user);
 
@@ -493,7 +609,12 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_Events_FundsWithdrawn() public {
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
 
         vm.prank(coa);
 
@@ -654,7 +775,12 @@ contract FlowVaultsRequestsTest is Test {
     function test_Whitelist_CreateTide_WhitelistDisabled() public {
         // Whitelist is disabled by default, so anyone can create
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
         assertEq(reqId, 1);
     }
 
@@ -666,7 +792,12 @@ contract FlowVaultsRequestsTest is Test {
 
         vm.prank(user);
         vm.expectRevert(FlowVaultsRequests.NotWhitelisted.selector);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
     }
 
     function test_Whitelist_CreateTide_WhitelistEnabled_Whitelisted() public {
@@ -683,7 +814,12 @@ contract FlowVaultsRequestsTest is Test {
 
         // User should be able to create tide
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
         assertEq(reqId, 1);
     }
 
@@ -786,7 +922,12 @@ contract FlowVaultsRequestsTest is Test {
 
         // User can create tide
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
         assertEq(reqId, 1);
 
         // Remove from whitelist
@@ -797,7 +938,12 @@ contract FlowVaultsRequestsTest is Test {
         // User cannot create tide anymore
         vm.prank(user);
         vm.expectRevert(FlowVaultsRequests.NotWhitelisted.selector);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether);
+        c.createTide{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            VAULT_IDENTIFIER,
+            STRATEGY_IDENTIFIER
+        );
     }
 
     function test_Whitelist_Events_WhitelistEnabled() public {

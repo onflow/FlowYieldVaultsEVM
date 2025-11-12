@@ -62,6 +62,8 @@ access(all) contract FlowVaultsEVM {
         access(all) let tideId: UInt64
         access(all) let timestamp: UInt256
         access(all) let message: String
+        access(all) let vaultIdentifier: String
+        access(all) let strategyIdentifier: String
         
         init(
             id: UInt256,
@@ -72,7 +74,9 @@ access(all) contract FlowVaultsEVM {
             amount: UInt256,
             tideId: UInt64,
             timestamp: UInt256,
-            message: String
+            message: String,
+            vaultIdentifier: String,
+            strategyIdentifier: String
         ) {
             self.id = id
             self.user = user
@@ -83,6 +87,8 @@ access(all) contract FlowVaultsEVM {
             self.tideId = tideId
             self.timestamp = timestamp
             self.message = message
+            self.vaultIdentifier = vaultIdentifier
+            self.strategyIdentifier = strategyIdentifier
         }
     }
     
@@ -282,15 +288,8 @@ access(all) contract FlowVaultsEVM {
         }
         
         access(self) fun processCreateTide(_ request: EVMRequest): ProcessResult {
-            // TODO - make configurable according to network, tokens or strategy
-            // testnet
-            // let vaultIdentifier = "A.7e60df042a9c0868.FlowToken.Vault"
-            // let strategyIdentifier = "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy"
-
-            // emulator
-            let vaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
-            let strategyIdentifier = "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy"
-
+            let vaultIdentifier = request.vaultIdentifier
+            let strategyIdentifier = request.strategyIdentifier
 
             let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
             log("Creating Tide for amount: ".concat(amount.toString()))
@@ -634,6 +633,8 @@ access(all) contract FlowVaultsEVM {
                     Type<[UInt256]>(),
                     Type<[UInt64]>(),
                     Type<[UInt256]>(),
+                    Type<[String]>(),
+                    Type<[String]>(),
                     Type<[String]>()
                 ],
                 data: callResult.data
@@ -648,6 +649,8 @@ access(all) contract FlowVaultsEVM {
             let tideIds = decoded[6] as! [UInt64]
             let timestamps = decoded[7] as! [UInt256]
             let messages = decoded[8] as! [String]
+            let vaultIdentifiers = decoded[9] as! [String]
+            let strategyIdentifiers = decoded[10] as! [String]
             
             let requests: [EVMRequest] = []
             var i = 0
@@ -661,7 +664,9 @@ access(all) contract FlowVaultsEVM {
                     amount: amounts[i],
                     tideId: tideIds[i],
                     timestamp: timestamps[i],
-                    message: messages[i]
+                    message: messages[i],
+                    vaultIdentifier: vaultIdentifiers[i],
+                    strategyIdentifier: strategyIdentifiers[i]
                 )
                 requests.append(request)
                 i = i + 1

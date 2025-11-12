@@ -20,6 +20,7 @@
 			"source": "./cadence/contracts/FlowVaultsEVM.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
+				"testing": "0000000000000007",
 				"testnet": "adadd122c1e95c4a"
 			}
 		},
@@ -27,6 +28,7 @@
 			"source": "./cadence/contracts/FlowVaultsTransactionHandler.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
+				"testing": "0000000000000007",
 				"testnet": "adadd122c1e95c4a"
 			}
 		}
