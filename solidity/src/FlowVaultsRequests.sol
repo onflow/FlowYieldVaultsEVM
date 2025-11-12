@@ -8,6 +8,28 @@ pragma solidity 0.8.18;
  */
 contract FlowVaultsRequests {
     // ============================================
+    // Custom Errors
+    // ============================================
+
+    error NotAuthorizedCOA();
+    error NotOwner();
+    error NotWhitelisted();
+    error InvalidCOAAddress();
+    error EmptyAddressArray();
+    error CannotWhitelistZeroAddress();
+    error AmountMustBeGreaterThanZero();
+    error MsgValueMustEqualAmount();
+    error MsgValueMustBeZero();
+    error ERC20NotSupported();
+    error InvalidTideId();
+    error RequestNotFound();
+    error NotRequestOwner();
+    error CanOnlyCancelPending();
+    error RequestAlreadyFinalized();
+    error InsufficientBalance();
+    error TransferFailed();
+
+    // ============================================
     // Constants
     // ============================================
 
@@ -63,6 +85,12 @@ contract FlowVaultsRequests {
     /// @notice Owner of the contract (for admin functions)
     address public owner;
 
+    /// @notice Whitelist enabled flag
+    bool public whitelistEnabled;
+
+    /// @notice Whitelisted addresses mapping
+    mapping(address => bool) public whitelisted;
+
     /// @notice User request history: user address => array of requests
     mapping(address => Request[]) public userRequests;
 
@@ -114,20 +142,29 @@ contract FlowVaultsRequests {
 
     event AuthorizedCOAUpdated(address indexed oldCOA, address indexed newCOA);
 
+    event WhitelistEnabled(bool enabled);
+
+    event AddressesAddedToWhitelist(address[] indexed addresses);
+
+    event AddressesRemovedFromWhitelist(address[] indexed addresses);
+
     // ============================================
     // Modifiers
     // ============================================
 
     modifier onlyAuthorizedCOA() {
-        require(
-            msg.sender == authorizedCOA,
-            "FlowVaultsRequests: caller is not authorized COA"
-        );
+        if (msg.sender != authorizedCOA) revert NotAuthorizedCOA();
         _;
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "FlowVaultsRequests: caller is not owner");
+        if (msg.sender != owner) revert NotOwner();
+        _;
+    }
+
+    modifier onlyWhitelisted() {
+        if (whitelistEnabled && !whitelisted[msg.sender])
+            revert NotWhitelisted();
         _;
     }
 
@@ -149,10 +186,47 @@ contract FlowVaultsRequests {
     /// @notice Set the authorized COA address (can only be called by owner)
     /// @param _coa The COA address controlled by FlowVaultsEVM
     function setAuthorizedCOA(address _coa) external onlyOwner {
-        require(_coa != address(0), "FlowVaultsRequests: invalid COA address");
+        if (_coa == address(0)) revert InvalidCOAAddress();
         address oldCOA = authorizedCOA;
         authorizedCOA = _coa;
         emit AuthorizedCOAUpdated(oldCOA, _coa);
+    }
+
+    /// @notice Enable or disable whitelist enforcement
+    /// @param _enabled True to enable whitelist, false to disable
+    function setWhitelistEnabled(bool _enabled) external onlyOwner {
+        whitelistEnabled = _enabled;
+        emit WhitelistEnabled(_enabled);
+    }
+
+    /// @notice Add multiple addresses to whitelist
+    /// @param _addresses Array of addresses to whitelist
+    function batchAddToWhitelist(
+        address[] calldata _addresses
+    ) external onlyOwner {
+        if (_addresses.length == 0) revert EmptyAddressArray();
+
+        for (uint256 i = 0; i < _addresses.length; i++) {
+            if (_addresses[i] == address(0))
+                revert CannotWhitelistZeroAddress();
+            whitelisted[_addresses[i]] = true;
+        }
+
+        emit AddressesAddedToWhitelist(_addresses);
+    }
+
+    /// @notice Remove multiple addresses from whitelist
+    /// @param _addresses Array of addresses to remove from whitelist
+    function batchRemoveFromWhitelist(
+        address[] calldata _addresses
+    ) external onlyOwner {
+        if (_addresses.length == 0) revert EmptyAddressArray();
+
+        for (uint256 i = 0; i < _addresses.length; i++) {
+            whitelisted[_addresses[i]] = false;
+        }
+
+        emit AddressesRemovedFromWhitelist(_addresses);
     }
 
     // ============================================
@@ -165,24 +239,15 @@ contract FlowVaultsRequests {
     function createTide(
         address tokenAddress,
         uint256 amount
-    ) external payable returns (uint256) {
-        require(
-            amount > 0,
-            "FlowVaultsRequests: amount must be greater than 0"
-        );
+    ) external payable onlyWhitelisted returns (uint256) {
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
 
         if (isNativeFlow(tokenAddress)) {
-            require(
-                msg.value == amount,
-                "FlowVaultsRequests: msg.value must equal amount"
-            );
+            if (msg.value != amount) revert MsgValueMustEqualAmount();
         } else {
-            require(
-                msg.value == 0,
-                "FlowVaultsRequests: msg.value must be 0 for ERC20"
-            );
+            if (msg.value != 0) revert MsgValueMustBeZero();
             // TODO: Transfer ERC20 tokens (Phase 2)
-            revert("FlowVaultsRequests: ERC20 not supported yet");
+            revert ERC20NotSupported();
         }
 
         uint256 requestId = createRequest(
@@ -203,25 +268,16 @@ contract FlowVaultsRequests {
         uint64 tideId,
         address tokenAddress,
         uint256 amount
-    ) external payable returns (uint256) {
-        require(tideId > 0, "FlowVaultsRequests: invalid tide ID");
-        require(
-            amount > 0,
-            "FlowVaultsRequests: amount must be greater than 0"
-        );
+    ) external payable onlyWhitelisted returns (uint256) {
+        if (tideId == 0) revert InvalidTideId();
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
 
         if (isNativeFlow(tokenAddress)) {
-            require(
-                msg.value == amount,
-                "FlowVaultsRequests: msg.value must equal amount"
-            );
+            if (msg.value != amount) revert MsgValueMustEqualAmount();
         } else {
-            require(
-                msg.value == 0,
-                "FlowVaultsRequests: msg.value must be 0 for ERC20"
-            );
+            if (msg.value != 0) revert MsgValueMustBeZero();
             // TODO: Transfer ERC20 tokens (Phase 2)
-            revert("FlowVaultsRequests: ERC20 not supported yet");
+            revert ERC20NotSupported();
         }
 
         uint256 requestId = createRequest(
@@ -240,12 +296,9 @@ contract FlowVaultsRequests {
     function withdrawFromTide(
         uint64 tideId,
         uint256 amount
-    ) external returns (uint256) {
-        require(
-            amount > 0,
-            "FlowVaultsRequests: amount must be greater than 0"
-        );
-        require(tideId > 0, "FlowVaultsRequests: invalid tide ID");
+    ) external onlyWhitelisted returns (uint256) {
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
+        if (tideId == 0) revert InvalidTideId();
 
         uint256 requestId = createRequest(
             RequestType.WITHDRAW_FROM_TIDE,
@@ -259,8 +312,10 @@ contract FlowVaultsRequests {
 
     /// @notice Close Tide and withdraw all funds
     /// @param tideId The Tide ID to close
-    function closeTide(uint64 tideId) external returns (uint256) {
-        require(tideId > 0, "FlowVaultsRequests: invalid tide ID");
+    function closeTide(
+        uint64 tideId
+    ) external onlyWhitelisted returns (uint256) {
+        if (tideId == 0) revert InvalidTideId();
 
         uint256 requestId = createRequest(
             RequestType.CLOSE_TIDE,
@@ -277,18 +332,10 @@ contract FlowVaultsRequests {
     function cancelRequest(uint256 requestId) external {
         Request storage request = pendingRequests[requestId];
 
-        require(
-            request.id == requestId,
-            "FlowVaultsRequests: request not found"
-        );
-        require(
-            request.user == msg.sender,
-            "FlowVaultsRequests: not request owner"
-        );
-        require(
-            request.status == RequestStatus.PENDING,
-            "FlowVaultsRequests: can only cancel pending requests"
-        );
+        if (request.id != requestId) revert RequestNotFound();
+        if (request.user != msg.sender) revert NotRequestOwner();
+        if (request.status != RequestStatus.PENDING)
+            revert CanOnlyCancelPending();
 
         // Update status to FAILED with cancellation message
         request.status = RequestStatus.FAILED;
@@ -328,10 +375,10 @@ contract FlowVaultsRequests {
             // Refund the funds
             if (isNativeFlow(request.tokenAddress)) {
                 (bool success, ) = msg.sender.call{value: request.amount}("");
-                require(success, "FlowVaultsRequests: refund failed");
+                if (!success) revert TransferFailed();
             } else {
                 // TODO: Transfer ERC20 tokens (Phase 2)
-                revert("FlowVaultsRequests: ERC20 not supported yet");
+                revert ERC20NotSupported();
             }
 
             emit FundsWithdrawn(
@@ -361,21 +408,15 @@ contract FlowVaultsRequests {
         address tokenAddress,
         uint256 amount
     ) external onlyAuthorizedCOA {
-        require(
-            amount > 0,
-            "FlowVaultsRequests: amount must be greater than 0"
-        );
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
 
         if (isNativeFlow(tokenAddress)) {
-            require(
-                address(this).balance >= amount,
-                "FlowVaultsRequests: insufficient balance"
-            );
+            if (address(this).balance < amount) revert InsufficientBalance();
             (bool success, ) = msg.sender.call{value: amount}("");
-            require(success, "FlowVaultsRequests: transfer failed");
+            if (!success) revert TransferFailed();
         } else {
             // TODO: Transfer ERC20 tokens (Phase 2)
-            revert("FlowVaultsRequests: ERC20 not supported yet");
+            revert ERC20NotSupported();
         }
 
         emit FundsWithdrawn(msg.sender, tokenAddress, amount);
@@ -393,15 +434,11 @@ contract FlowVaultsRequests {
         string calldata message
     ) external onlyAuthorizedCOA {
         Request storage request = pendingRequests[requestId];
-        require(
-            request.id == requestId,
-            "FlowVaultsRequests: request not found"
-        );
-        require(
-            request.status == RequestStatus.PENDING ||
-                request.status == RequestStatus.PROCESSING,
-            "FlowVaultsRequests: request already finalized"
-        );
+        if (request.id != requestId) revert RequestNotFound();
+        if (
+            request.status != RequestStatus.PENDING &&
+            request.status != RequestStatus.PROCESSING
+        ) revert RequestAlreadyFinalized();
 
         // Convert uint8 to RequestStatus
         request.status = RequestStatus(status);
@@ -459,6 +496,19 @@ contract FlowVaultsRequests {
     /// @notice Check if token is native FLOW
     function isNativeFlow(address tokenAddress) public pure returns (bool) {
         return tokenAddress == NATIVE_FLOW;
+    }
+
+    /// @notice Check if an address is whitelisted
+    /// @param _address Address to check
+    /// @return True if address is whitelisted, false otherwise
+    function isWhitelisted(address _address) external view returns (bool) {
+        return whitelisted[_address];
+    }
+
+    /// @notice Check if whitelist is enabled
+    /// @return True if whitelist enforcement is enabled
+    function isWhitelistEnabled() external view returns (bool) {
+        return whitelistEnabled;
     }
 
     /// @notice Get user's request history
