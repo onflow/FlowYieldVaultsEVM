@@ -30,7 +30,22 @@ echo ""
 # Configuration
 RPC_URL="localhost:8545"
 USER_ADDRESS="0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69"
-TIDE_ID=1
+TIDE_ID=0
+CONTRACT_ADDRESS="0x045a1763c93006ca"
+
+# Check if contract address is set
+if [ -z "$FLOW_VAULTS_REQUESTS_CONTRACT" ]; then
+    echo "❌ Error: FLOW_VAULTS_REQUESTS_CONTRACT environment variable is not set"
+    echo ""
+    echo "Please set it with the deployed contract address:"
+    echo "export FLOW_VAULTS_REQUESTS_CONTRACT=0xYourContractAddress"
+    echo ""
+    echo "Or run ./local/deploy_full_stack.sh first and copy the export command"
+    exit 1
+fi
+
+echo "Using FlowVaultsRequests contract at: $FLOW_VAULTS_REQUESTS_CONTRACT"
+echo ""
 
 # ============================================
 # Step 1: Create Tide (10 FLOW)
@@ -40,7 +55,7 @@ echo "Initial Amount: 10 FLOW"
 echo ""
 
 AMOUNT=10000000000000000000 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-    --sig "runCreateTide()" \
+    --sig "runCreateTide(address)" "$FLOW_VAULTS_REQUESTS_CONTRACT" \
     --rpc-url $RPC_URL \
     --broadcast \
     --legacy
@@ -55,7 +70,7 @@ echo ""
 echo "=== Step 2: Processing Create Tide Request ==="
 echo ""
 
-flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
 
 echo ""
 echo "✅ Create tide request processed"
@@ -69,7 +84,7 @@ echo "=== Step 3: Checking Tide Details After Creation ==="
 echo "Expected Balance: ~10 FLOW"
 echo ""
 
-flow scripts execute ./cadence/scripts/check_tide_details.cdc $TIDE_ID "$USER_ADDRESS"
+flow scripts execute ./cadence/scripts/check_tide_details.cdc "$CONTRACT_ADDRESS"
 
 echo ""
 echo "✅ Tide details verified after creation"
@@ -84,7 +99,7 @@ echo "Expected Total: ~30 FLOW"
 echo ""
 
 AMOUNT=20000000000000000000 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-    --sig "runDepositToTide(uint64)" $TIDE_ID \
+    --sig "runDepositToTide(address,uint64)" "$FLOW_VAULTS_REQUESTS_CONTRACT" $TIDE_ID \
     --rpc-url $RPC_URL \
     --broadcast \
     --legacy
@@ -99,7 +114,7 @@ echo ""
 echo "=== Step 5: Processing Deposit Request ==="
 echo ""
 
-flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
 
 echo ""
 echo "✅ Deposit request processed"
@@ -113,7 +128,7 @@ echo "=== Step 6: Checking Tide Details After Deposit ==="
 echo "Expected Balance: ~30 FLOW"
 echo ""
 
-flow scripts execute ./cadence/scripts/check_tide_details.cdc $TIDE_ID "$USER_ADDRESS"
+flow scripts execute ./cadence/scripts/check_tide_details.cdc "$CONTRACT_ADDRESS"
 
 echo ""
 echo "✅ Tide details verified after deposit"
@@ -128,7 +143,7 @@ echo "Expected Remaining: ~15 FLOW"
 echo ""
 
 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-    --sig "runWithdrawFromTide(uint64,uint256)" $TIDE_ID 15000000000000000000 \
+    --sig "runWithdrawFromTide(address,uint64,uint256)" "$FLOW_VAULTS_REQUESTS_CONTRACT" $TIDE_ID 15000000000000000000 \
     --rpc-url $RPC_URL \
     --broadcast \
     --legacy
@@ -143,7 +158,7 @@ echo ""
 echo "=== Step 8: Processing Withdraw Request ==="
 echo ""
 
-flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
 
 echo ""
 echo "✅ Withdrawal request processed"
@@ -157,7 +172,7 @@ echo "=== Step 9: Checking Tide Details After Withdrawal ==="
 echo "Expected Balance: ~15 FLOW"
 echo ""
 
-flow scripts execute ./cadence/scripts/check_tide_details.cdc $TIDE_ID "$USER_ADDRESS"
+flow scripts execute ./cadence/scripts/check_tide_details.cdc "$CONTRACT_ADDRESS"
 
 echo ""
 echo "✅ Tide details verified after withdrawal"
@@ -171,7 +186,7 @@ echo "This will withdraw all remaining funds and close the position"
 echo ""
 
 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-    --sig "runCloseTide(uint64)" $TIDE_ID \
+    --sig "runCloseTide(address,uint64)" "$FLOW_VAULTS_REQUESTS_CONTRACT" $TIDE_ID \
     --rpc-url $RPC_URL \
     --broadcast \
     --legacy
@@ -186,7 +201,7 @@ echo ""
 echo "=== Step 11: Processing Close Tide Request ==="
 echo ""
 
-flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
 
 echo ""
 echo "✅ Close tide request processed"
@@ -200,7 +215,7 @@ echo "=== Step 12: Verifying Tide Was Closed ==="
 echo "Expected: Tide should be closed"
 echo ""
 
-flow scripts execute ./cadence/scripts/check_tide_details.cdc $TIDE_ID "$USER_ADDRESS"
+flow scripts execute ./cadence/scripts/check_tide_details.cdc "$CONTRACT_ADDRESS"
 
 echo ""
 echo "================================================"

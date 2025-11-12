@@ -21,7 +21,6 @@ contract FlowVaultsRequests {
     error MsgValueMustEqualAmount();
     error MsgValueMustBeZero();
     error ERC20NotSupported();
-    error InvalidTideId();
     error RequestNotFound();
     error NotRequestOwner();
     error CanOnlyCancelPending();
@@ -272,7 +271,6 @@ contract FlowVaultsRequests {
         address tokenAddress,
         uint256 amount
     ) external payable onlyWhitelisted returns (uint256) {
-        if (tideId == 0) revert InvalidTideId();
         _validateDeposit(tokenAddress, amount);
 
         uint256 requestId = createRequest(
@@ -295,7 +293,6 @@ contract FlowVaultsRequests {
         uint256 amount
     ) external onlyWhitelisted returns (uint256) {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
-        if (tideId == 0) revert InvalidTideId();
 
         uint256 requestId = createRequest(
             RequestType.WITHDRAW_FROM_TIDE,
@@ -314,8 +311,6 @@ contract FlowVaultsRequests {
     function closeTide(
         uint64 tideId
     ) external onlyWhitelisted returns (uint256) {
-        if (tideId == 0) revert InvalidTideId();
-
         uint256 requestId = createRequest(
             RequestType.CLOSE_TIDE,
             NATIVE_FLOW,

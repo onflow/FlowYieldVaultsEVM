@@ -123,10 +123,22 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(req.tideId, 42);
     }
 
-    function test_DepositToTide_InvalidTideId() public {
+    function test_DepositToTide_TideIdZero() public {
+        // Tide ID 0 is valid (first tide created)
         vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.InvalidTideId.selector);
-        c.depositToTide{value: 1 ether}(0, NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.depositToTide{value: 1 ether}(
+            0,
+            NATIVE_FLOW,
+            1 ether
+        );
+
+        assertEq(reqId, 1);
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(req.tideId, 0);
+        assertEq(
+            uint8(req.requestType),
+            uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE)
+        );
     }
 
     // WITHDRAW_FROM_TIDE Tests

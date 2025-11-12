@@ -159,8 +159,6 @@ contract FlowVaultsTideOperations is Script {
         uint64 tideId,
         uint256 amount
     ) internal {
-        require(tideId > 0, "TIDE_ID must be set for deposit operation");
-
         console.log("\n=== Depositing to Existing Tide ===");
         console.log("Tide ID:", tideId);
         console.log("Amount:", amount);
@@ -195,8 +193,6 @@ contract FlowVaultsTideOperations is Script {
         uint64 tideId,
         uint256 amount
     ) internal {
-        require(tideId > 0, "TIDE_ID must be set for withdraw operation");
-
         console.log("\n=== Withdrawing from Tide ===");
         console.log("Tide ID:", tideId);
         console.log("Amount:", amount);
@@ -225,8 +221,6 @@ contract FlowVaultsTideOperations is Script {
         uint256 userPrivateKey,
         uint64 tideId
     ) internal {
-        require(tideId > 0, "TIDE_ID must be set for close operation");
-
         console.log("\n=== Closing Tide ===");
         console.log("Tide ID:", tideId);
 
