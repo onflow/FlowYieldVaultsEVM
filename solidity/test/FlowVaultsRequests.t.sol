@@ -71,9 +71,9 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
         assertEq(c.getPendingRequestCount(), 1);
 
-        FlowVaultsRequests.Request[] memory reqs = c.getUserRequests(user);
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(
-            uint8(reqs[0].requestType),
+            uint8(req.requestType),
             uint8(FlowVaultsRequests.RequestType.CREATE_TIDE)
         );
     }
@@ -115,12 +115,12 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(reqId, 1);
         assertEq(c.getUserBalance(user, NATIVE_FLOW), 0.5 ether);
 
-        FlowVaultsRequests.Request[] memory reqs = c.getUserRequests(user);
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(
-            uint8(reqs[0].requestType),
+            uint8(req.requestType),
             uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE)
         );
-        assertEq(reqs[0].tideId, 42);
+        assertEq(req.tideId, 42);
     }
 
     function test_DepositToTide_InvalidTideId() public {
@@ -138,12 +138,12 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(reqId, 1);
         assertEq(c.getPendingRequestCount(), 1);
 
-        FlowVaultsRequests.Request[] memory reqs = c.getUserRequests(user);
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(
-            uint8(reqs[0].requestType),
+            uint8(req.requestType),
             uint8(FlowVaultsRequests.RequestType.WITHDRAW_FROM_TIDE)
         );
-        assertEq(reqs[0].amount, 0.3 ether);
+        assertEq(req.amount, 0.3 ether);
     }
 
     // CLOSE_TIDE Tests
@@ -154,12 +154,12 @@ contract FlowVaultsRequestsTest is Test {
 
         assertEq(reqId, 1);
 
-        FlowVaultsRequests.Request[] memory reqs = c.getUserRequests(user);
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(
-            uint8(reqs[0].requestType),
+            uint8(req.requestType),
             uint8(FlowVaultsRequests.RequestType.CLOSE_TIDE)
         );
-        assertEq(reqs[0].tideId, 42);
+        assertEq(req.tideId, 42);
     }
 
     // ============================================
@@ -259,12 +259,12 @@ contract FlowVaultsRequestsTest is Test {
             "Success"
         );
 
-        FlowVaultsRequests.Request[] memory reqs = c.getUserRequests(user);
+        FlowVaultsRequests.Request memory req = c.getRequest(1);
         assertEq(
-            uint8(reqs[0].status),
+            uint8(req.status),
             uint8(FlowVaultsRequests.RequestStatus.COMPLETED)
         );
-        assertEq(reqs[0].tideId, 42);
+        assertEq(req.tideId, 42);
         assertEq(c.getPendingRequestCount(), 0); // Removed from pending
     }
 
@@ -382,11 +382,11 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
         assertEq(c.getUserBalance(user2, NATIVE_FLOW), 2 ether);
 
-        // Verify request counts
-        FlowVaultsRequests.Request[] memory reqs1 = c.getUserRequests(user);
-        FlowVaultsRequests.Request[] memory reqs2 = c.getUserRequests(user2);
-        assertEq(reqs1.length, 1);
-        assertEq(reqs2.length, 1);
+        // Verify requests were created
+        FlowVaultsRequests.Request memory req1 = c.getRequest(1);
+        FlowVaultsRequests.Request memory req2 = c.getRequest(2);
+        assertEq(req1.user, user);
+        assertEq(req2.user, user2);
     }
 
     function test_MultipleUsers_RequestIsolation() public {
@@ -442,9 +442,9 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
 
         // Verify request is marked as failed
-        FlowVaultsRequests.Request[] memory reqs = c.getUserRequests(user);
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(
-            uint8(reqs[0].status),
+            uint8(req.status),
             uint8(FlowVaultsRequests.RequestStatus.FAILED)
         );
 
@@ -490,8 +490,8 @@ contract FlowVaultsRequestsTest is Test {
         // 3. Verify
         assertEq(c.getUserBalance(user, NATIVE_FLOW), 0);
         assertEq(c.getPendingRequestCount(), 0);
-        FlowVaultsRequests.Request[] memory reqs = c.getUserRequests(user);
-        assertEq(reqs[0].tideId, 42);
+        FlowVaultsRequests.Request memory req = c.getRequest(1);
+        assertEq(req.tideId, 42);
     }
 
     function test_FullWithdrawFlow() public {
@@ -517,9 +517,9 @@ contract FlowVaultsRequestsTest is Test {
         );
         vm.stopPrank();
 
-        FlowVaultsRequests.Request[] memory reqs = c.getUserRequests(user);
+        FlowVaultsRequests.Request memory req = c.getRequest(1);
         assertEq(
-            uint8(reqs[0].status),
+            uint8(req.status),
             uint8(FlowVaultsRequests.RequestStatus.COMPLETED)
         );
     }
@@ -640,22 +640,22 @@ contract FlowVaultsRequestsTest is Test {
     // ============================================
 
     event WhitelistEnabled(bool enabled);
-    event AddressesAddedToWhitelist(address[] indexed addresses);
-    event AddressesRemovedFromWhitelist(address[] indexed addresses);
+    event AddressesAddedToWhitelist(address[] addresses);
+    event AddressesRemovedFromWhitelist(address[] addresses);
 
-    function test_Whitelist_InitialState() public {
-        assertFalse(c.isWhitelistEnabled());
-        assertFalse(c.isWhitelisted(user));
+    function test_Whitelist_InitialState() public view {
+        assertFalse(c.whitelistEnabled());
+        assertFalse(c.whitelisted(user));
     }
 
     function test_Whitelist_SetEnabled() public {
         vm.prank(c.owner());
         c.setWhitelistEnabled(true);
-        assertTrue(c.isWhitelistEnabled());
+        assertTrue(c.whitelistEnabled());
 
         vm.prank(c.owner());
         c.setWhitelistEnabled(false);
-        assertFalse(c.isWhitelistEnabled());
+        assertFalse(c.whitelistEnabled());
     }
 
     function test_Whitelist_SetEnabled_RevertNonOwner() public {
@@ -671,7 +671,7 @@ contract FlowVaultsRequestsTest is Test {
         vm.prank(c.owner());
         c.batchAddToWhitelist(addresses);
 
-        assertTrue(c.isWhitelisted(user));
+        assertTrue(c.whitelisted(user));
     }
 
     function test_Whitelist_BatchAdd_MultipleAddresses() public {
@@ -686,9 +686,9 @@ contract FlowVaultsRequestsTest is Test {
         vm.prank(c.owner());
         c.batchAddToWhitelist(addresses);
 
-        assertTrue(c.isWhitelisted(user));
-        assertTrue(c.isWhitelisted(user2));
-        assertTrue(c.isWhitelisted(user3));
+        assertTrue(c.whitelisted(user));
+        assertTrue(c.whitelisted(user2));
+        assertTrue(c.whitelisted(user3));
     }
 
     function test_Whitelist_BatchAdd_RevertEmptyArray() public {
@@ -725,12 +725,12 @@ contract FlowVaultsRequestsTest is Test {
 
         vm.prank(c.owner());
         c.batchAddToWhitelist(addresses);
-        assertTrue(c.isWhitelisted(user));
+        assertTrue(c.whitelisted(user));
 
         // Now remove
         vm.prank(c.owner());
         c.batchRemoveFromWhitelist(addresses);
-        assertFalse(c.isWhitelisted(user));
+        assertFalse(c.whitelisted(user));
     }
 
     function test_Whitelist_BatchRemove_MultipleAddresses() public {
@@ -750,9 +750,9 @@ contract FlowVaultsRequestsTest is Test {
         vm.prank(c.owner());
         c.batchRemoveFromWhitelist(addresses);
 
-        assertFalse(c.isWhitelisted(user));
-        assertFalse(c.isWhitelisted(user2));
-        assertFalse(c.isWhitelisted(user3));
+        assertFalse(c.whitelisted(user));
+        assertFalse(c.whitelisted(user2));
+        assertFalse(c.whitelisted(user3));
     }
 
     function test_Whitelist_BatchRemove_RevertEmptyArray() public {
@@ -914,7 +914,7 @@ contract FlowVaultsRequestsTest is Test {
         // Add
         vm.prank(c.owner());
         c.batchAddToWhitelist(addresses);
-        assertTrue(c.isWhitelisted(user));
+        assertTrue(c.whitelisted(user));
 
         // Enable whitelist
         vm.prank(c.owner());
@@ -933,7 +933,7 @@ contract FlowVaultsRequestsTest is Test {
         // Remove from whitelist
         vm.prank(c.owner());
         c.batchRemoveFromWhitelist(addresses);
-        assertFalse(c.isWhitelisted(user));
+        assertFalse(c.whitelisted(user));
 
         // User cannot create tide anymore
         vm.prank(user);

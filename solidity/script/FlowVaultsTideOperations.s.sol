@@ -35,13 +35,14 @@ contract FlowVaultsTideOperations is Script {
     uint256 constant DEFAULT_AMOUNT = 10 ether;
 
     // Vault and strategy identifiers for testnet
-    string constant VAULT_IDENTIFIER = "A.7e60df042a9c0868.FlowToken.Vault";
-    string constant STRATEGY_IDENTIFIER =
-        "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy";
+    // string constant VAULT_IDENTIFIER = "A.7e60df042a9c0868.FlowToken.Vault";
+    // string constant STRATEGY_IDENTIFIER =
+    //     "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy";
 
-    // Vault and strategy identifiers for emulator
-    // string constant VAULT_IDENTIFIER = "A.0ae53cb6e3f42a79.FlowToken.Vault";
-    // string constant STRATEGY_IDENTIFIER = "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy";
+    // Vault and strategy identifiers for emulator - CI testing
+    string constant VAULT_IDENTIFIER = "A.0ae53cb6e3f42a79.FlowToken.Vault";
+    string constant STRATEGY_IDENTIFIER =
+        "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy";
 
     // ============================================
     // Public Entry Points

@@ -93,9 +93,6 @@ contract FlowVaultsRequests {
     /// @notice Whitelisted addresses mapping
     mapping(address => bool) public whitelisted;
 
-    /// @notice User request history: user address => array of requests
-    mapping(address => Request[]) public userRequests;
-
     /// @notice Pending user balances: user address => token address => balance
     /// @dev These are funds in escrow waiting to be converted to Tides
     mapping(address => mapping(address => uint256)) public pendingUserBalances;
@@ -146,9 +143,9 @@ contract FlowVaultsRequests {
 
     event WhitelistEnabled(bool enabled);
 
-    event AddressesAddedToWhitelist(address[] indexed addresses);
+    event AddressesAddedToWhitelist(address[] addresses);
 
-    event AddressesRemovedFromWhitelist(address[] indexed addresses);
+    event AddressesRemovedFromWhitelist(address[] addresses);
 
     // ============================================
     // Modifiers
@@ -208,10 +205,13 @@ contract FlowVaultsRequests {
     ) external onlyOwner {
         if (_addresses.length == 0) revert EmptyAddressArray();
 
-        for (uint256 i = 0; i < _addresses.length; i++) {
+        for (uint256 i = 0; i < _addresses.length; ) {
             if (_addresses[i] == address(0))
                 revert CannotWhitelistZeroAddress();
             whitelisted[_addresses[i]] = true;
+            unchecked {
+                ++i;
+            }
         }
 
         emit AddressesAddedToWhitelist(_addresses);
@@ -224,8 +224,11 @@ contract FlowVaultsRequests {
     ) external onlyOwner {
         if (_addresses.length == 0) revert EmptyAddressArray();
 
-        for (uint256 i = 0; i < _addresses.length; i++) {
+        for (uint256 i = 0; i < _addresses.length; ) {
             whitelisted[_addresses[i]] = false;
+            unchecked {
+                ++i;
+            }
         }
 
         emit AddressesRemovedFromWhitelist(_addresses);
@@ -246,15 +249,7 @@ contract FlowVaultsRequests {
         string calldata vaultIdentifier,
         string calldata strategyIdentifier
     ) external payable onlyWhitelisted returns (uint256) {
-        if (amount == 0) revert AmountMustBeGreaterThanZero();
-
-        if (isNativeFlow(tokenAddress)) {
-            if (msg.value != amount) revert MsgValueMustEqualAmount();
-        } else {
-            if (msg.value != 0) revert MsgValueMustBeZero();
-            // TODO: Transfer ERC20 tokens (Phase 2)
-            revert ERC20NotSupported();
-        }
+        _validateDeposit(tokenAddress, amount);
 
         uint256 requestId = createRequest(
             RequestType.CREATE_TIDE,
@@ -278,15 +273,7 @@ contract FlowVaultsRequests {
         uint256 amount
     ) external payable onlyWhitelisted returns (uint256) {
         if (tideId == 0) revert InvalidTideId();
-        if (amount == 0) revert AmountMustBeGreaterThanZero();
-
-        if (isNativeFlow(tokenAddress)) {
-            if (msg.value != amount) revert MsgValueMustEqualAmount();
-        } else {
-            if (msg.value != 0) revert MsgValueMustBeZero();
-            // TODO: Transfer ERC20 tokens (Phase 2)
-            revert ERC20NotSupported();
-        }
+        _validateDeposit(tokenAddress, amount);
 
         uint256 requestId = createRequest(
             RequestType.DEPOSIT_TO_TIDE,
@@ -354,16 +341,6 @@ contract FlowVaultsRequests {
         // Update status to FAILED with cancellation message
         request.status = RequestStatus.FAILED;
         request.message = "Cancelled by user";
-
-        // Update in user's request array
-        Request[] storage userReqs = userRequests[msg.sender];
-        for (uint256 i = 0; i < userReqs.length; i++) {
-            if (userReqs[i].id == requestId) {
-                userReqs[i].status = RequestStatus.FAILED;
-                userReqs[i].message = "Cancelled by user";
-                break;
-            }
-        }
 
         // Remove from pending queue
         _removePendingRequest(requestId);
@@ -461,19 +438,6 @@ contract FlowVaultsRequests {
             request.tideId = tideId;
         }
 
-        // Also update in user's request array
-        Request[] storage userReqs = userRequests[request.user];
-        for (uint256 i = 0; i < userReqs.length; i++) {
-            if (userReqs[i].id == requestId) {
-                userReqs[i].status = RequestStatus(status);
-                userReqs[i].message = message;
-                if (tideId > 0) {
-                    userReqs[i].tideId = tideId;
-                }
-                break;
-            }
-        }
-
         // If completed or failed, remove from pending queue
         if (
             status == uint8(RequestStatus.COMPLETED) ||
@@ -512,26 +476,6 @@ contract FlowVaultsRequests {
         return tokenAddress == NATIVE_FLOW;
     }
 
-    /// @notice Check if an address is whitelisted
-    /// @param _address Address to check
-    /// @return True if address is whitelisted, false otherwise
-    function isWhitelisted(address _address) external view returns (bool) {
-        return whitelisted[_address];
-    }
-
-    /// @notice Check if whitelist is enabled
-    /// @return True if whitelist enforcement is enabled
-    function isWhitelistEnabled() external view returns (bool) {
-        return whitelistEnabled;
-    }
-
-    /// @notice Get user's request history
-    function getUserRequests(
-        address user
-    ) external view returns (Request[] memory) {
-        return userRequests[user];
-    }
-
     /// @notice Get user's pending balance for a token
     function getUserBalance(
         address user,
@@ -548,16 +492,6 @@ contract FlowVaultsRequests {
     /// @notice Get all pending request IDs (for counting/scheduling)
     function getPendingRequestIds() external view returns (uint256[] memory) {
         return pendingRequestIds;
-    }
-
-    /// @notice Get pending requests (for worker to process)
-    /// @dev This function is kept for backward compatibility but getPendingRequestsUnpacked(limit) is preferred
-    function getPendingRequests() external view returns (Request[] memory) {
-        Request[] memory requests = new Request[](pendingRequestIds.length);
-        for (uint256 i = 0; i < pendingRequestIds.length; i++) {
-            requests[i] = pendingRequests[pendingRequestIds[i]];
-        }
-        return requests;
     }
 
     /// @notice Get pending requests unpacked with limit (OPTIMIZED for Cadence)
@@ -615,7 +549,7 @@ contract FlowVaultsRequests {
         strategyIdentifiers = new string[](size);
 
         // Populate arrays up to size
-        for (uint256 i = 0; i < size; i++) {
+        for (uint256 i = 0; i < size; ) {
             Request memory req = pendingRequests[pendingRequestIds[i]];
             ids[i] = req.id;
             users[i] = req.user;
@@ -628,6 +562,9 @@ contract FlowVaultsRequests {
             messages[i] = req.message;
             vaultIdentifiers[i] = req.vaultIdentifier;
             strategyIdentifiers[i] = req.strategyIdentifier;
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -641,6 +578,24 @@ contract FlowVaultsRequests {
     // ============================================
     // Internal Functions
     // ============================================
+
+    /// @notice Validate token deposit (amount and msg.value)
+    /// @param tokenAddress Token being deposited
+    /// @param amount Amount being deposited
+    function _validateDeposit(
+        address tokenAddress,
+        uint256 amount
+    ) internal view {
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
+
+        if (isNativeFlow(tokenAddress)) {
+            if (msg.value != amount) revert MsgValueMustEqualAmount();
+        } else {
+            if (msg.value != 0) revert MsgValueMustBeZero();
+            // TODO: Transfer ERC20 tokens (Phase 2)
+            revert ERC20NotSupported();
+        }
+    }
 
     function createRequest(
         RequestType requestType,
@@ -666,9 +621,6 @@ contract FlowVaultsRequests {
             vaultIdentifier: vaultIdentifier,
             strategyIdentifier: strategyIdentifier
         });
-
-        // Store in user's request array
-        userRequests[user].push(newRequest);
 
         // Store in pending requests
         pendingRequests[requestId] = newRequest;
@@ -701,7 +653,7 @@ contract FlowVaultsRequests {
 
     function _removePendingRequest(uint256 requestId) internal {
         // Find and remove from pendingRequestIds array
-        for (uint256 i = 0; i < pendingRequestIds.length; i++) {
+        for (uint256 i = 0; i < pendingRequestIds.length; ) {
             if (pendingRequestIds[i] == requestId) {
                 // Move last element to this position and pop
                 pendingRequestIds[i] = pendingRequestIds[
@@ -709,6 +661,9 @@ contract FlowVaultsRequests {
                 ];
                 pendingRequestIds.pop();
                 break;
+            }
+            unchecked {
+                ++i;
             }
         }
 
