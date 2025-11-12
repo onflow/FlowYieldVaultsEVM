@@ -35,6 +35,8 @@ jobs:
       
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: 1.4.3
       
       - name: Make scripts executable
         run: |
@@ -49,13 +51,17 @@ jobs:
       
       # Step 2: Deploy full stack
       - name: Deploy Full Stack
-        run: ./local/deploy_full_stack.sh
+        run: |
+          DEPLOYMENT_OUTPUT=$(./local/deploy_full_stack.sh)
+          echo "$DEPLOYMENT_OUTPUT"
+          FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowVaultsRequests Contract:" | sed 's/.*: //')
+          echo "CONTRACT_ADDRESS=$FLOW_VAULTS_REQUESTS_CONTRACT" >> $GITHUB_ENV
       
       # Step 3: Create tide from EVM (10 FLOW)
       - name: Create Tide Request from EVM
         run: |
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-            --sig "runCreateTide()" \
+            --sig "runCreateTide(address)" ${{ env.CONTRACT_ADDRESS }} \
             --rpc-url localhost:8545 \
             --broadcast \
             --legacy
@@ -74,7 +80,7 @@ jobs:
       - name: Deposit to Tide from EVM
         run: |
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-            --sig "runDepositToTide(uint64)" 1 \
+            --sig "runDepositToTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 1 \
             --rpc-url localhost:8545 \
             --broadcast \
             --legacy
@@ -93,7 +99,7 @@ jobs:
       - name: Withdraw Half from Tide
         run: |
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-            --sig "runWithdrawFromTide(uint64,uint256)" 1 15000000000000000000 \
+            --sig "runWithdrawFromTide(address,uint64,uint256)" ${{ env.CONTRACT_ADDRESS }} 1 15000000000000000000 \
             --rpc-url localhost:8545 \
             --broadcast \
             --legacy
@@ -110,7 +116,7 @@ jobs:
       - name: Close Tide
         run: |
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-            --sig "runCloseTide(uint64)" 1 \
+            --sig "runCloseTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 1 \
             --rpc-url localhost:8545 \
             --broadcast \
             --legacy
