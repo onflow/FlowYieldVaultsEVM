@@ -34,37 +34,10 @@ jobs:
         run: |
           chmod +x ./local/setup_and_run_emulator.sh
           chmod +x ./local/deploy_full_stack.sh
-          chmod +x ./local/setup_accounts.sh
-          chmod +x ./local/deploy_and_initialize.sh
       
       # Step 1: Setup environment and run emulator in background
       - name: Setup and Run Emulator
-        run: |
-          ./local/setup_and_run_emulator.sh &
-          EMULATOR_PID=$!
-          echo "EMULATOR_PID=$EMULATOR_PID" >> $GITHUB_ENV
-          
-          # Wait for emulator to be fully ready
-          echo "Waiting for emulator to be ready..."
-          for i in {1..30}; do
-            if curl -s http://localhost:8080 > /dev/null 2>&1; then
-              echo "Emulator is ready!"
-              break
-            fi
-            echo "Waiting... ($i/30)"
-            sleep 2
-          done
-          
-          # Wait for RPC to be ready
-          echo "Waiting for RPC to be ready..."
-          for i in {1..30}; do
-            if curl -s http://localhost:8545 > /dev/null 2>&1; then
-              echo "RPC is ready!"
-              break
-            fi
-            echo "Waiting... ($i/30)"
-            sleep 2
-          done
+        run: ./local/setup_and_run_emulator.sh &
       
       # Step 2: Deploy full stack
       - name: Deploy Full Stack
