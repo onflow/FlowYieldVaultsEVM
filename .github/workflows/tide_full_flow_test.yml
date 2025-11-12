@@ -70,7 +70,7 @@ jobs:
       
       # Step 4: Process create tide request
       - name: Process Create Tide Request
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
       
       # Step 5: Check tide details after creation
       - name: Check Tide Details After Creation
@@ -89,7 +89,7 @@ jobs:
       
       # Step 7: Process deposit request
       - name: Process Deposit Request
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
       
       # Step 8: Check tide details after deposit
       - name: Check Tide Details After Deposit
@@ -106,7 +106,7 @@ jobs:
       
       # Step 10: Process withdraw request
       - name: Process Withdraw Request
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
       
       # Step 11: Check tide details after withdrawal
       - name: Check Tide Details After Withdrawal
@@ -123,7 +123,7 @@ jobs:
       
       # Step 13: Process close tide request
       - name: Process Close Tide Request
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
       
       # Step 14: Verify tide was closed
       - name: Check Tide Details After Close

@@ -145,7 +145,7 @@ flow project deploy || echo "⚠ Some contracts may already be deployed, continu
 echo "Setting up worker with badge for contract $FLOW_VAULTS_REQUESTS_CONTRACT..."
 flow transactions send ./cadence/transactions/setup_worker_with_badge.cdc \
   "$FLOW_VAULTS_REQUESTS_CONTRACT" \
-  --signer tidal
+  --signer tidal --gas-limit 9999
 
 echo "✓ Project initialization complete"
 

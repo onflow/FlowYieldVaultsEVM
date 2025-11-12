@@ -62,7 +62,7 @@ jobs:
       
       # Step 4: Process request (Cadence worker)
       - name: Process Requests
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
       
       # Cleanup
       - name: Cleanup

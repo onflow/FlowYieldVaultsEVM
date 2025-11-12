@@ -13,7 +13,7 @@ echo ""
 # Step 1: Initialize the Transaction Handler
 echo "Step 1: Initializing Transaction Handler..."
 flow transactions send ./cadence/transactions/init_flow_vaults_transaction_handler.cdc \
-    --signer tidal
+    --signer tidal --gas-limit 9999
 
 echo "✅ Transaction Handler initialized"
 echo ""
@@ -32,7 +32,7 @@ flow transactions send ./cadence/transactions/schedule_initial_flow_vaults_execu
         {"type":"UInt8","value":"1"},
         {"type":"UInt64","value":"6000"}
     ]' \
-    --signer tidal
+    --signer tidal --gas-limit 9999
 
 echo "✅ Initial execution scheduled"
 echo ""

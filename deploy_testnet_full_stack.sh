@@ -53,7 +53,7 @@ echo "🔧 Step 3: Setting up Worker with Beta Badge and FlowVaultsRequests addr
 flow transactions send cadence/transactions/setup_worker_with_badge.cdc \
     $DEPLOYED_ADDRESS \
     --network testnet \
-    --signer testnet-account
+    --signer testnet-account --gas-limit 9999
 
 echo ""
 echo "✅ Worker initialized and FlowVaultsRequests address set"
@@ -65,7 +65,7 @@ echo ""
 echo "🔧 Step 4: Initializing FlowVaultsTransactionHandler..."
 flow transactions send cadence/transactions/init_flow_vaults_transaction_handler.cdc \
     --network testnet \
-    --signer testnet-account
+    --signer testnet-account --gas-limit 9999
 
 echo ""
 echo "✅ Transaction Handler initialized"
@@ -82,7 +82,7 @@ echo "   - Execution Effort: 7499"
 flow transactions send cadence/transactions/schedule_initial_flow_vaults_execution.cdc \
     10.0 1 7499 \
     --network testnet \
-    --signer testnet-account
+    --signer testnet-account --gas-limit 9999
 
 echo ""
 echo "✅ Initial execution scheduled"
