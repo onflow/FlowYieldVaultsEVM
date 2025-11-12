@@ -37,7 +37,9 @@ jobs:
       
       # Step 1: Setup environment and run emulator in background
       - name: Setup and Run Emulator
-        run: ./local/setup_and_run_emulator.sh &
+        run: |
+          ./local/setup_and_run_emulator.sh &
+          sleep 5
       
       # Step 2: Deploy full stack
       - name: Deploy Full Stack
@@ -59,9 +61,6 @@ jobs:
       - name: Cleanup
         if: always()
         run: |
-          if [ ! -z "$EMULATOR_PID" ]; then
-            kill $EMULATOR_PID 2>/dev/null || true
-          fi
           # Kill any remaining processes
           lsof -ti :8080 | xargs kill -9 2>/dev/null || true
           lsof -ti :8545 | xargs kill -9 2>/dev/null || true

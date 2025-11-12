@@ -36,8 +36,27 @@ echo ""
 # ============================================
 echo "=== Deploying contracts ==="
 
-# Extract just the address part after "Result: "
-COA_ADDRESS=$(flow scripts execute ./cadence/scripts/get_coa_address.cdc 045a1763c93006ca | grep "Result:" | cut -d'"' -f2)
+# Wait for COA to be available with retry logic
+MAX_COA_ATTEMPTS=10
+COA_ATTEMPT=0
+COA_ADDRESS=""
+
+while [ $COA_ATTEMPT -lt $MAX_COA_ATTEMPTS ]; do
+  COA_ADDRESS=$(flow scripts execute ./cadence/scripts/get_coa_address.cdc 045a1763c93006ca | grep "Result:" | cut -d'"' -f2 || echo "")
+  
+  if [ ! -z "$COA_ADDRESS" ]; then
+    break
+  fi
+  
+  echo "Waiting for COA... ($((COA_ATTEMPT + 1))/$MAX_COA_ATTEMPTS)"
+  sleep 2
+  COA_ATTEMPT=$((COA_ATTEMPT + 1))
+done
+
+if [ -z "$COA_ADDRESS" ]; then
+  echo "❌ Failed to get COA address"
+  exit 1
+fi
 
 echo "COA Address: $COA_ADDRESS"
 
