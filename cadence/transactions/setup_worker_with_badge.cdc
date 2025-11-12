@@ -8,7 +8,7 @@ import "EVM"
 /// @param flowVaultsRequestsAddress: The EVM address of the FlowVaultsRequests contract
 ///
 transaction(flowVaultsRequestsAddress: String) {
-    prepare(signer: auth(BorrowValue, SaveValue, LoadValue, Storage, Capabilities, CopyValue) &Account) {
+    prepare(signer: auth(BorrowValue, SaveValue, LoadValue, Storage, Capabilities, CopyValue, IssueStorageCapabilityController) &Account) {
         
         log("=== Starting FlowVaultsEVM Worker Setup ===")
         
@@ -57,21 +57,25 @@ transaction(flowVaultsRequestsAddress: String) {
         log("✓ Beta badge verified for address: ".concat(betaRef.getOwner().toString()))
         
         // ========================================
-        // Step 2: Setup the Worker
+        // Step 2: Setup COA capability
         // ========================================
         
         let admin = signer.storage.borrow<&FlowVaultsEVM.Admin>(
             from: FlowVaultsEVM.AdminStoragePath
         ) ?? panic("Could not borrow FlowVaultsEVM Admin")
         
-        // Load the existing COA from standard storage path
-        let coa <- signer.storage.load<@EVM.CadenceOwnedAccount>(from: /storage/evm)
-            ?? panic("Could not load COA from /storage/evm")
+        // Issue a storage capability to the COA at /storage/evm
+        let coaCap = signer.capabilities.storage.issue<auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount>(
+            /storage/evm
+        )
         
-        log("✓ Using existing COA with address: ".concat(coa.address().toString()))
+        // Verify the capability works
+        let coaRef = coaCap.borrow()
+            ?? panic("Could not borrow COA capability from /storage/evm")
+        log("✓ Using COA with address: ".concat(coaRef.address().toString()))
         
-        // Create worker with the COA and beta badge capability
-        let worker <- admin.createWorker(coa: <-coa, betaBadgeCap: betaBadgeCap!)
+        // Create worker with the COA capability and beta badge capability
+        let worker <- admin.createWorker(coaCap: coaCap, betaBadgeCap: betaBadgeCap!)
         
         // Save worker to storage
         signer.storage.save(<-worker, to: FlowVaultsEVM.WorkerStoragePath)

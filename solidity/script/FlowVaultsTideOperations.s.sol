@@ -10,10 +10,10 @@ import "../src/FlowVaultsRequests.sol";
  * @dev Supports: CREATE_TIDE, DEPOSIT_TO_TIDE, WITHDRAW_FROM_TIDE, CLOSE_TIDE
  *
  * Usage:
- * - CREATE_TIDE:         forge script script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" --broadcast
- * - DEPOSIT_TO_TIDE:     forge script script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runDepositToTide(uint64)" <TIDE_ID> --broadcast
- * - WITHDRAW_FROM_TIDE:  forge script script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runWithdrawFromTide(uint64,uint256)" <TIDE_ID> <AMOUNT> --broadcast
- * - CLOSE_TIDE:          forge script script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCloseTide(uint64)" <TIDE_ID> --broadcast
+ * - CREATE_TIDE:         forge script script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide(address)" <CONTRACT_ADDRESS> --broadcast
+ * - DEPOSIT_TO_TIDE:     forge script script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runDepositToTide(address,uint64)" <CONTRACT_ADDRESS> <TIDE_ID> --broadcast
+ * - WITHDRAW_FROM_TIDE:  forge script script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runWithdrawFromTide(address,uint64,uint256)" <CONTRACT_ADDRESS> <TIDE_ID> <AMOUNT> --broadcast
+ * - CLOSE_TIDE:          forge script script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCloseTide(address,uint64)" <CONTRACT_ADDRESS> <TIDE_ID> --broadcast
  *
  * Environment Variables (optional):
  * - USER_PRIVATE_KEY: Private key for signing (defaults to test key 0x3)
@@ -23,10 +23,6 @@ contract FlowVaultsTideOperations is Script {
     // ============================================
     // Configuration
     // ============================================
-
-    // FlowVaultsRequests contract address (update based on deployment)
-    address constant FLOW_VAULTS_REQUESTS =
-        0x153b84F377C6C7a7D93Bd9a717E48097Ca6Cfd11;
 
     // NATIVE_FLOW constant (must match FlowVaultsRequests.sol)
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
@@ -49,41 +45,48 @@ contract FlowVaultsTideOperations is Script {
     // ============================================
 
     /// @notice Create a new Tide with default or ENV-specified amount
-    function runCreateTide() public {
+    /// @param contractAddress The FlowVaultsRequests contract address
+    function runCreateTide(address contractAddress) public {
         uint256 userPrivateKey = vm.envOr("USER_PRIVATE_KEY", uint256(0x3));
         uint256 amount = vm.envOr("AMOUNT", DEFAULT_AMOUNT);
         address user = vm.addr(userPrivateKey);
 
         FlowVaultsRequests flowVaultsRequests = FlowVaultsRequests(
-            payable(FLOW_VAULTS_REQUESTS)
+            payable(contractAddress)
         );
 
         createTide(flowVaultsRequests, user, userPrivateKey, amount);
     }
 
     /// @notice Deposit to an existing Tide with default or ENV-specified amount
+    /// @param contractAddress The FlowVaultsRequests contract address
     /// @param tideId The Tide ID to deposit to
-    function runDepositToTide(uint64 tideId) public {
+    function runDepositToTide(address contractAddress, uint64 tideId) public {
         uint256 userPrivateKey = vm.envOr("USER_PRIVATE_KEY", uint256(0x3));
         uint256 amount = vm.envOr("AMOUNT", DEFAULT_AMOUNT);
         address user = vm.addr(userPrivateKey);
 
         FlowVaultsRequests flowVaultsRequests = FlowVaultsRequests(
-            payable(FLOW_VAULTS_REQUESTS)
+            payable(contractAddress)
         );
 
         depositToTide(flowVaultsRequests, user, userPrivateKey, tideId, amount);
     }
 
     /// @notice Withdraw from a Tide
+    /// @param contractAddress The FlowVaultsRequests contract address
     /// @param tideId The Tide ID to withdraw from
     /// @param amount Amount to withdraw in wei
-    function runWithdrawFromTide(uint64 tideId, uint256 amount) public {
+    function runWithdrawFromTide(
+        address contractAddress,
+        uint64 tideId,
+        uint256 amount
+    ) public {
         uint256 userPrivateKey = vm.envOr("USER_PRIVATE_KEY", uint256(0x3));
         address user = vm.addr(userPrivateKey);
 
         FlowVaultsRequests flowVaultsRequests = FlowVaultsRequests(
-            payable(FLOW_VAULTS_REQUESTS)
+            payable(contractAddress)
         );
 
         withdrawFromTide(
@@ -96,13 +99,14 @@ contract FlowVaultsTideOperations is Script {
     }
 
     /// @notice Close a Tide and withdraw all funds
+    /// @param contractAddress The FlowVaultsRequests contract address
     /// @param tideId The Tide ID to close
-    function runCloseTide(uint64 tideId) public {
+    function runCloseTide(address contractAddress, uint64 tideId) public {
         uint256 userPrivateKey = vm.envOr("USER_PRIVATE_KEY", uint256(0x3));
         address user = vm.addr(userPrivateKey);
 
         FlowVaultsRequests flowVaultsRequests = FlowVaultsRequests(
-            payable(FLOW_VAULTS_REQUESTS)
+            payable(contractAddress)
         );
 
         closeTide(flowVaultsRequests, user, userPrivateKey, tideId);

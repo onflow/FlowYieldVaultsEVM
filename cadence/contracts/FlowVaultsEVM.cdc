@@ -45,8 +45,6 @@ access(all) contract FlowVaultsEVM {
     access(all) event TideClosedForEVMUser(evmAddress: String, tideId: UInt64, amountReturned: UFix64)
     access(all) event RequestFailed(requestId: UInt256, reason: String)
     access(all) event MaxRequestsPerTxUpdated(oldValue: Int, newValue: Int)
-    access(all) event COAExtractedFromWorker(coaAddress: String)
-    access(all) event COAInjectedIntoWorker(coaAddress: String)
 
     // ========================================
     // Structs
@@ -137,11 +135,11 @@ access(all) contract FlowVaultsEVM {
         }
         
         access(all) fun createWorker(
-            coa: @EVM.CadenceOwnedAccount, 
+            coaCap: Capability<auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount>, 
             betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         ): @Worker {
             let worker <- create Worker(
-                coa: <-coa,
+                coaCap: coaCap,
                 betaBadgeCap: betaBadgeCap
             )
             emit WorkerInitialized(coaAddress: worker.getCOAAddressString())
@@ -154,15 +152,19 @@ access(all) contract FlowVaultsEVM {
     // ========================================
     
     access(all) resource Worker {
-        access(self) var coa: @EVM.CadenceOwnedAccount?
+        access(self) let coaCap: Capability<auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount>
         access(self) let tideManager: @FlowVaults.TideManager
         access(self) let betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         
         init(
-            coa: @EVM.CadenceOwnedAccount,
+            coaCap: Capability<auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount>,
             betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         ) {
-            self.coa <- coa
+            pre {
+                coaCap.check(): "COA capability is invalid"
+            }
+            
+            self.coaCap = coaCap
             self.betaBadgeCap = betaBadgeCap
             
             let betaBadge = betaBadgeCap.borrow()
@@ -171,10 +173,10 @@ access(all) contract FlowVaultsEVM {
             self.tideManager <- FlowVaults.createTideManager(betaRef: betaBadge)
         }
         
-        /// Get reference to COA, panics if already extracted
+        /// Get reference to COA
         access(self) fun getCOARef(): auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount {
-            return &self.coa as auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount?
-                ?? panic("COA has been extracted from this Worker")
+            return self.coaCap.borrow()
+                ?? panic("Could not borrow COA capability")
         }
         
         access(self) fun getBetaReference(): auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge {
@@ -673,35 +675,6 @@ access(all) contract FlowVaultsEVM {
             }
             
             return requests
-        }
-        
-        /// Extract the COA from this Worker
-        /// WARNING: After extraction, this Worker will no longer be functional for processing requests
-        /// This is an emergency function to recover the COA if needed
-        access(all) fun extractCOA(): @EVM.CadenceOwnedAccount {
-            pre {
-                self.coa != nil: "COA has already been extracted"
-            }
-            
-            let coaAddress = self.getCOARef().address().toString()
-            let coa <- self.coa <- nil
-            
-            emit COAExtractedFromWorker(coaAddress: coaAddress)
-            
-            return <-coa!
-        }
-        
-        /// Inject a new COA into this Worker
-        /// This allows re-enabling a Worker after COA extraction or replacing a COA
-        access(all) fun injectCOA(coa: @EVM.CadenceOwnedAccount) {
-            pre {
-                self.coa == nil: "Worker already has a COA. Extract it first before injecting a new one."
-            }
-            
-            let coaAddress = coa.address().toString()
-            self.coa <-! coa
-            
-            emit COAInjectedIntoWorker(coaAddress: coaAddress)
         }
     }
     

@@ -9,8 +9,6 @@ DEPLOYER_FUNDING="50.46"
 USER_A_EOA="0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69"
 USER_A_FUNDING="1234.12"
 
-FLOW_VAULTS_REQUESTS_CONTRACT="0x153b84F377C6C7a7D93Bd9a717E48097Ca6Cfd11"
-
 RPC_URL="localhost:8545"
 
 # ============================================
@@ -113,15 +111,25 @@ echo "✓ EVM Gateway confirmed ready for deployment"
 
 # Deploy FlowVaultsRequests Solidity contract
 echo "Deploying FlowVaultsRequests contract to $RPC_URL..."
-forge script ./solidity/script/DeployFlowVaultsRequests.s.sol \
+DEPLOYMENT_OUTPUT=$(forge script ./solidity/script/DeployFlowVaultsRequests.s.sol \
   --rpc-url "http://$RPC_URL" \
   --broadcast \
   --legacy \
   --optimize \
   --optimizer-runs 1000 \
-  --via-ir
+  --via-ir 2>&1)
 
-echo "✓ Contracts deployed"
+echo "$DEPLOYMENT_OUTPUT"
+
+# Extract the deployed contract address from the output
+FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowVaultsRequests deployed at:" | sed 's/.*: //')
+
+if [ -z "$FLOW_VAULTS_REQUESTS_CONTRACT" ]; then
+  echo "❌ Failed to extract FlowVaultsRequests contract address from deployment"
+  exit 1
+fi
+
+echo "✓ FlowVaultsRequests contract deployed at: $FLOW_VAULTS_REQUESTS_CONTRACT"
 echo ""
 
 # ============================================
@@ -145,3 +153,8 @@ echo ""
 echo "========================================="
 echo "✓ Full stack deployment complete!"
 echo "========================================="
+echo ""
+echo "FlowVaultsRequests Contract: $FLOW_VAULTS_REQUESTS_CONTRACT"
+echo ""
+echo "Export this for use in other scripts:"
+echo "export FLOW_VAULTS_REQUESTS_CONTRACT=$FLOW_VAULTS_REQUESTS_CONTRACT"
