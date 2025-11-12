@@ -195,6 +195,45 @@ contract FlowVaultsRequests {
         return requestId;
     }
 
+    /// @notice Deposit additional funds to existing Tide
+    /// @param tideId The Tide ID to deposit to
+    /// @param tokenAddress Address of token (use NATIVE_FLOW for native $FLOW)
+    /// @param amount Amount to deposit
+    function depositToTide(
+        uint64 tideId,
+        address tokenAddress,
+        uint256 amount
+    ) external payable returns (uint256) {
+        require(tideId > 0, "FlowVaultsRequests: invalid tide ID");
+        require(
+            amount > 0,
+            "FlowVaultsRequests: amount must be greater than 0"
+        );
+
+        if (isNativeFlow(tokenAddress)) {
+            require(
+                msg.value == amount,
+                "FlowVaultsRequests: msg.value must equal amount"
+            );
+        } else {
+            require(
+                msg.value == 0,
+                "FlowVaultsRequests: msg.value must be 0 for ERC20"
+            );
+            // TODO: Transfer ERC20 tokens (Phase 2)
+            revert("FlowVaultsRequests: ERC20 not supported yet");
+        }
+
+        uint256 requestId = createRequest(
+            RequestType.DEPOSIT_TO_TIDE,
+            tokenAddress,
+            amount,
+            tideId
+        );
+
+        return requestId;
+    }
+
     /// @notice Withdraw from existing Tide
     /// @param tideId The Tide ID to withdraw from
     /// @param amount Amount to withdraw
@@ -268,10 +307,12 @@ contract FlowVaultsRequests {
         // Remove from pending queue
         _removePendingRequest(requestId);
 
-        // Refund funds if this was a CREATE_TIDE request
+        // Refund funds if this was a CREATE_TIDE or DEPOSIT_TO_TIDE request
         uint256 refundAmount = 0;
         if (
-            request.requestType == RequestType.CREATE_TIDE && request.amount > 0
+            (request.requestType == RequestType.CREATE_TIDE ||
+                request.requestType == RequestType.DEPOSIT_TO_TIDE) &&
+            request.amount > 0
         ) {
             refundAmount = request.amount;
 
@@ -558,7 +599,10 @@ contract FlowVaultsRequests {
         pendingRequestIds.push(requestId);
 
         // Update pending user balance if depositing
-        if (requestType == RequestType.CREATE_TIDE) {
+        if (
+            requestType == RequestType.CREATE_TIDE ||
+            requestType == RequestType.DEPOSIT_TO_TIDE
+        ) {
             pendingUserBalances[user][tokenAddress] += amount;
             emit BalanceUpdated(
                 user,

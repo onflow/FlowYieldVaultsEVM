@@ -40,6 +40,8 @@ access(all) contract FlowVaultsEVM {
     access(all) event FlowVaultsRequestsAddressSet(address: String)
     access(all) event RequestsProcessed(count: Int, successful: Int, failed: Int)
     access(all) event TideCreatedForEVMUser(evmAddress: String, tideId: UInt64, amount: UFix64)
+    access(all) event TideDepositedForEVMUser(evmAddress: String, tideId: UInt64, amount: UFix64)
+    access(all) event TideWithdrawnForEVMUser(evmAddress: String, tideId: UInt64, amount: UFix64)
     access(all) event TideClosedForEVMUser(evmAddress: String, tideId: UInt64, amountReturned: UFix64)
     access(all) event RequestFailed(requestId: UInt256, reason: String)
     access(all) event MaxRequestsPerTxUpdated(oldValue: Int, newValue: Int)
@@ -231,12 +233,22 @@ access(all) contract FlowVaultsEVM {
             var message = ""
             
             switch request.requestType {
-                case 0:
+                case 0:  // CREATE_TIDE
                     let result = self.processCreateTide(request)
                     success = result.success
                     tideId = result.tideId
                     message = result.message
-                case 3:
+                case 1:  // DEPOSIT_TO_TIDE
+                    let result = self.processDepositToTide(request)
+                    success = result.success
+                    tideId = request.tideId
+                    message = result.message
+                case 2:  // WITHDRAW_FROM_TIDE
+                    let result = self.processWithdrawFromTide(request)
+                    success = result.success
+                    tideId = request.tideId
+                    message = result.message
+                case 3:  // CLOSE_TIDE
                     let result = self.processCloseTideWithMessage(request)
                     success = result.success
                     tideId = request.tideId
@@ -378,6 +390,91 @@ access(all) contract FlowVaultsEVM {
                 success: true, 
                 tideId: request.tideId, 
                 message: "Tide closed successfully"
+            )
+        }
+        
+        access(self) fun processDepositToTide(_ request: EVMRequest): ProcessResult {
+            let evmAddr = request.user.toString()
+            
+            // 1. Verify user owns the Tide
+            if let userTides = FlowVaultsEVM.tidesByEVMAddress[evmAddr] {
+                if !userTides.contains(request.tideId) {
+                    return ProcessResult(
+                        success: false, 
+                        tideId: 0, 
+                        message: "User does not own Tide"
+                    )
+                }
+            } else {
+                return ProcessResult(
+                    success: false, 
+                    tideId: 0, 
+                    message: "User has no Tides"
+                )
+            }
+            
+            // 2. Withdraw funds from EVM
+            let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
+            log("Depositing to Tide for amount: ".concat(amount.toString()))
+            
+            let vault <- self.withdrawFundsFromEVM(amount: amount)
+            
+            // 3. Deposit to existing Tide
+            let betaRef = self.getBetaReference()
+            self.tideManager.depositToTide(betaRef: betaRef, request.tideId, from: <-vault)
+            
+            // 4. Update user balance to 0 (funds now in Tide)
+            self.updateUserBalance(
+                user: request.user,
+                tokenAddress: request.tokenAddress,
+                newBalance: 0
+            )
+            
+            emit TideDepositedForEVMUser(evmAddress: evmAddr, tideId: request.tideId, amount: amount)
+            
+            return ProcessResult(
+                success: true, 
+                tideId: request.tideId, 
+                message: "Deposit successful"
+            )
+        }
+        
+        access(self) fun processWithdrawFromTide(_ request: EVMRequest): ProcessResult {
+            let evmAddr = request.user.toString()
+            
+            // 1. Verify user owns the Tide
+            if let userTides = FlowVaultsEVM.tidesByEVMAddress[evmAddr] {
+                if !userTides.contains(request.tideId) {
+                    return ProcessResult(
+                        success: false, 
+                        tideId: 0, 
+                        message: "User does not own Tide"
+                    )
+                }
+            } else {
+                return ProcessResult(
+                    success: false, 
+                    tideId: 0, 
+                    message: "User has no Tides"
+                )
+            }
+            
+            // 2. Withdraw from Tide
+            let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
+            log("Withdrawing from Tide for amount: ".concat(amount.toString()))
+            
+            let vault <- self.tideManager.withdrawFromTide(request.tideId, amount: amount)
+            
+            // 3. Bridge funds back to EVM user
+            let actualAmount = vault.balance
+            self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user)
+            
+            emit TideWithdrawnForEVMUser(evmAddress: evmAddr, tideId: request.tideId, amount: actualAmount)
+            
+            return ProcessResult(
+                success: true, 
+                tideId: request.tideId, 
+                message: "Withdrawal successful"
             )
         }
         
