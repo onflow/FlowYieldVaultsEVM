@@ -88,7 +88,10 @@
 			"source": "mainnet://92195d814edf9cb0.DeFiActionsUtils",
 			"hash": "d01ab8cd8a57aee3e35ca8a9038f98de2321d6246e03285e0107ef6b4191bff1",
 			"aliases": {
-				"mainnet": "92195d814edf9cb0"
+				"emulator": "045a1763c93006ca",
+				"mainnet": "92195d814edf9cb0",
+				"testing": "0000000000000007",
+				"testnet": "0b11b1848a8aa2c0"
 			}
 		},
 		"EVM": {
