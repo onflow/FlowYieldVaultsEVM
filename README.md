@@ -8,7 +8,7 @@ Bridge Flow EVM users to Cadence-based yield farming through asynchronous cross-
 ./local/setup_and_run_emulator.sh && ./local/deploy_full_stack.sh
 
 # 2. Create yield position from EVM
-forge script ./solidity/script/CreateTideRequest.s.sol --rpc-url localhost:8545 --broadcast --legacy
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" --rpc-url localhost:8545 --broadcast --legacy
 
 # 3. Process request (Cadence worker)
 flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
@@ -20,12 +20,39 @@ flow transactions send ./cadence/transactions/process_requests.cdc --signer tida
 **Cadence Side:** `FlowVaultsEVM` processes requests, creates/manages Tide positions  
 **Bridge:** COA (Cadence Owned Account) controls fund movement between VMs
 
-## Request Types
+## Request Types & Operations
 
-- `CREATE_TIDE` - Open new yield position
-- `DEPOSIT_TO_TIDE` - Add funds to existing position
-- `WITHDRAW_FROM_TIDE` - Withdraw earnings
-- `CLOSE_TIDE` - Close position and return all funds
+All operations are performed using the unified `FlowVaultsTideOperations.s.sol` script:
+
+### CREATE_TIDE - Open new yield position
+```bash
+# With default amount (10 FLOW)
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" --rpc-url localhost:8545 --broadcast --legacy
+
+# With custom amount
+AMOUNT=100000000000000000000 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" --rpc-url localhost:8545 --broadcast --legacy
+```
+
+### DEPOSIT_TO_TIDE - Add funds to existing position
+```bash
+# With default amount (10 FLOW)
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runDepositToTide(uint64)" 42 --rpc-url localhost:8545 --broadcast --legacy
+
+# With custom amount
+AMOUNT=50000000000000000000 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runDepositToTide(uint64)" 42 --rpc-url localhost:8545 --broadcast --legacy
+```
+
+### WITHDRAW_FROM_TIDE - Withdraw earnings
+```bash
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runWithdrawFromTide(uint64,uint256)" 42 30000000000000000000 --rpc-url localhost:8545 --broadcast --legacy
+```
+
+### CLOSE_TIDE - Close position and return all funds
+```bash
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCloseTide(uint64)" 42 --rpc-url localhost:8545 --broadcast --legacy
+```
+
+See `solidity/script/TIDE_OPERATIONS.md` for detailed usage documentation.
 
 ## Key Addresses
 
