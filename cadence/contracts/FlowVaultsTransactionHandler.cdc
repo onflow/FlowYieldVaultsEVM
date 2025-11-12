@@ -14,6 +14,7 @@ access(all) contract FlowVaultsTransactionHandler {
     
     access(all) let HandlerStoragePath: StoragePath
     access(all) let HandlerPublicPath: PublicPath
+    access(all) let AdminStoragePath: StoragePath
     
     /// 5 delay levels (in seconds)
     access(all) let DELAY_LEVELS: [UFix64]
@@ -22,8 +23,18 @@ access(all) contract FlowVaultsTransactionHandler {
     access(all) let LOAD_THRESHOLDS: [Int]
     
     // ========================================
+    // State
+    // ========================================
+    
+    /// When true, scheduled executions will skip processing and not schedule the next execution
+    access(all) var isPaused: Bool
+    
+    // ========================================
     // Events
     // ========================================
+    
+    access(all) event HandlerPaused()
+    access(all) event HandlerUnpaused()
     
     access(all) event ScheduledExecutionTriggered(
         transactionId: UInt64,
@@ -38,6 +49,22 @@ access(all) contract FlowVaultsTransactionHandler {
         delaySeconds: UFix64,
         pendingRequests: Int
     )
+
+    // ========================================
+    // Admin Resource
+    // ========================================
+    
+    access(all) resource Admin {
+        access(all) fun pause() {
+            FlowVaultsTransactionHandler.isPaused = true
+            emit HandlerPaused()
+        }
+        
+        access(all) fun unpause() {
+            FlowVaultsTransactionHandler.isPaused = false
+            emit HandlerUnpaused()
+        }
+    }
 
     // ========================================
     // Handler Resource
@@ -58,6 +85,13 @@ access(all) contract FlowVaultsTransactionHandler {
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
             log("=== FlowVaultsEVM Scheduled Execution Started ===")
             log("Transaction ID: ".concat(id.toString()))
+            
+            // Check if paused
+            if FlowVaultsTransactionHandler.isPaused {
+                log("⏸️  Handler is PAUSED - skipping execution and NOT scheduling next")
+                log("=== FlowVaultsEVM Scheduled Execution Skipped (Paused) ===")
+                return
+            }
             
             let worker = self.workerCap.borrow()
                 ?? panic("Could not borrow Worker capability")
@@ -211,6 +245,10 @@ access(all) contract FlowVaultsTransactionHandler {
         return self.DELAY_LEVELS[level]
     }
     
+    access(all) fun isPausedState(): Bool {
+        return self.isPaused
+    }
+    
     // ========================================
     // Initialization
     // ========================================
@@ -218,6 +256,10 @@ access(all) contract FlowVaultsTransactionHandler {
     init() {
         self.HandlerStoragePath = /storage/FlowVaultsTransactionHandler
         self.HandlerPublicPath = /public/FlowVaultsTransactionHandler
+        self.AdminStoragePath = /storage/FlowVaultsTransactionHandlerAdmin
+        
+        // Initialize as unpaused
+        self.isPaused = false
         
         // 5 delay levels (simplified)
         self.DELAY_LEVELS = [
@@ -236,5 +278,9 @@ access(all) contract FlowVaultsTransactionHandler {
             5,    // Level 3: Low load
             0     // Level 4: Very low/Idle
         ]
+        
+        // Create and save Admin resource
+        let admin <- create Admin()
+        self.account.storage.save(<-admin, to: self.AdminStoragePath)
     }
 }

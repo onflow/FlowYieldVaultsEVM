@@ -20,14 +20,14 @@
 			"source": "./cadence/contracts/FlowVaultsEVM.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
-				"testnet": "01253f60e289fd08"
+				"testnet": "adadd122c1e95c4a"
 			}
 		},
 		"FlowVaultsTransactionHandler": {
 			"source": "./cadence/contracts/FlowVaultsTransactionHandler.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
-				"testnet": "01253f60e289fd08"
+				"testnet": "adadd122c1e95c4a"
 			}
 		}
 	},
@@ -285,12 +285,12 @@
 			}
 		},
 		"testnet-account": {
-			"address": "01253f60e289fd08",
+			"address": "adadd122c1e95c4a",
 			"key": {
 				"type": "hex",
 				"signatureAlgorithm": "ECDSA_secp256k1",
 				"hashAlgorithm": "SHA2_256",
-				"privateKey": "56e271786bc9c798f3d8585c34f706da0bb4010060549ff24689474895b815a7"
+				"privateKey": "56bcf3e931551343f2988bf74767f2b4b768f50a681b8f824f29707f9688528b"
 			}
 		},
 		"tidal": {
