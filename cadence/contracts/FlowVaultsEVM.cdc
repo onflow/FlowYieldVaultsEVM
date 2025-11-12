@@ -45,6 +45,8 @@ access(all) contract FlowVaultsEVM {
     access(all) event TideClosedForEVMUser(evmAddress: String, tideId: UInt64, amountReturned: UFix64)
     access(all) event RequestFailed(requestId: UInt256, reason: String)
     access(all) event MaxRequestsPerTxUpdated(oldValue: Int, newValue: Int)
+    access(all) event COAExtractedFromWorker(coaAddress: String)
+    access(all) event COAInjectedIntoWorker(coaAddress: String)
 
     // ========================================
     // Structs
@@ -146,7 +148,7 @@ access(all) contract FlowVaultsEVM {
     // ========================================
     
     access(all) resource Worker {
-        access(self) let coa: @EVM.CadenceOwnedAccount
+        access(self) var coa: @EVM.CadenceOwnedAccount?
         access(self) let tideManager: @FlowVaults.TideManager
         access(self) let betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>
         
@@ -163,13 +165,19 @@ access(all) contract FlowVaultsEVM {
             self.tideManager <- FlowVaults.createTideManager(betaRef: betaBadge)
         }
         
+        /// Get reference to COA, panics if already extracted
+        access(self) fun getCOARef(): auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount {
+            return &self.coa as auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount?
+                ?? panic("COA has been extracted from this Worker")
+        }
+        
         access(self) fun getBetaReference(): auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge {
             return self.betaBadgeCap.borrow()
                 ?? panic("Could not borrow beta badge capability")
         }
         
         access(all) fun getCOAAddressString(): String {
-            return self.coa.address().toString()
+            return self.getCOARef().address().toString()
         }
         
         /// Process pending requests (up to MAX_REQUESTS_PER_TX)
@@ -381,7 +389,7 @@ access(all) contract FlowVaultsEVM {
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user)
             
             if let index = FlowVaultsEVM.tidesByEVMAddress[evmAddr]!.firstIndex(of: request.tideId) {
-                FlowVaultsEVM.tidesByEVMAddress[evmAddr]!.remove(at: index)
+                let _ = FlowVaultsEVM.tidesByEVMAddress[evmAddr]!.remove(at: index)
             }
             
             emit TideClosedForEVMUser(evmAddress: evmAddr, tideId: request.tideId, amountReturned: amount)
@@ -487,7 +495,7 @@ access(all) contract FlowVaultsEVM {
                 [nativeFlowAddress, amountUInt256]
             )
             
-            let result = self.coa.call(
+            let result = self.getCOARef().call(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 100000,
@@ -505,9 +513,9 @@ access(all) contract FlowVaultsEVM {
             let attoflowAmount = UInt(rawUFix64) * 10_000_000_000
             
             let balance = EVM.Balance(attoflow: attoflowAmount)
-            let vault <- self.coa.withdraw(balance: balance) as! @FlowToken.Vault
+            let vault <- self.getCOARef().withdraw(balance: balance)
             
-            return <-vault
+            return <-vault as! @FlowToken.Vault
         }
         
         access(self) fun bridgeFundsToEVMUser(vault: @{FungibleToken.Vault}, recipient: EVM.EVMAddress) {
@@ -516,10 +524,10 @@ access(all) contract FlowVaultsEVM {
             let rawUFix64 = UInt64(amount * 100_000_000.0)
             let attoflowAmount = UInt(rawUFix64) * 10_000_000_000
             
-            self.coa.deposit(from: <-vault as! @FlowToken.Vault)
+            self.getCOARef().deposit(from: <-vault as! @FlowToken.Vault)
             
             let balance = EVM.Balance(attoflow: attoflowAmount)
-            recipient.deposit(from: <-self.coa.withdraw(balance: balance))
+            recipient.deposit(from: <-self.getCOARef().withdraw(balance: balance))
         }
         
         access(self) fun updateRequestStatus(requestId: UInt256, status: UInt8, tideId: UInt64, message: String) {
@@ -528,7 +536,7 @@ access(all) contract FlowVaultsEVM {
                 [requestId, status, tideId, message]
             )
             
-            let result = self.coa.call(
+            let result = self.getCOARef().call(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 1_000_000,
@@ -549,7 +557,7 @@ access(all) contract FlowVaultsEVM {
                 [user, tokenAddress, newBalance]
             )
             
-            let result = self.coa.call(
+            let result = self.getCOARef().call(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 100000,
@@ -569,7 +577,7 @@ access(all) contract FlowVaultsEVM {
         access(all) fun getPendingRequestIdsFromEVM(): [UInt256] {
             let calldata = EVM.encodeABIWithSignature("getPendingRequestIds()", [])
             
-            let callResult = self.coa.dryCall(
+            let callResult = self.getCOARef().dryCall(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 500000,
@@ -597,7 +605,7 @@ access(all) contract FlowVaultsEVM {
             let limit = UInt256(FlowVaultsEVM.MAX_REQUESTS_PER_TX)
             let calldata = EVM.encodeABIWithSignature("getPendingRequestsUnpacked(uint256)", [limit])
             
-            let callResult = self.coa.dryCall(
+            let callResult = self.getCOARef().dryCall(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 15_000_000,
@@ -660,6 +668,35 @@ access(all) contract FlowVaultsEVM {
             }
             
             return requests
+        }
+        
+        /// Extract the COA from this Worker
+        /// WARNING: After extraction, this Worker will no longer be functional for processing requests
+        /// This is an emergency function to recover the COA if needed
+        access(all) fun extractCOA(): @EVM.CadenceOwnedAccount {
+            pre {
+                self.coa != nil: "COA has already been extracted"
+            }
+            
+            let coaAddress = self.getCOARef().address().toString()
+            let coa <- self.coa <- nil
+            
+            emit COAExtractedFromWorker(coaAddress: coaAddress)
+            
+            return <-coa!
+        }
+        
+        /// Inject a new COA into this Worker
+        /// This allows re-enabling a Worker after COA extraction or replacing a COA
+        access(all) fun injectCOA(coa: @EVM.CadenceOwnedAccount) {
+            pre {
+                self.coa == nil: "Worker already has a COA. Extract it first before injecting a new one."
+            }
+            
+            let coaAddress = coa.address().toString()
+            self.coa <-! coa
+            
+            emit COAInjectedIntoWorker(coaAddress: coaAddress)
         }
     }
     
