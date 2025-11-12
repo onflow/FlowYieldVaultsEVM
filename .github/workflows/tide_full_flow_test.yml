@@ -36,7 +36,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: 1.4.3
+          version: nightly-fa9f934bdac4bcf57e694e852a61997dda90668a
       
       - name: Make scripts executable
         run: |
