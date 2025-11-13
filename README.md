@@ -8,10 +8,10 @@ Bridge Flow EVM users to Cadence-based yield farming through asynchronous cross-
 ./local/setup_and_run_emulator.sh && ./local/deploy_full_stack.sh
 
 # 2. Create yield position from EVM
-forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" --rpc-url localhost:8545 --broadcast --legacy
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" <CONTRACT_ADDRESS> --rpc-url localhost:8545 --broadcast --legacy
 
 # 3. Process request (Cadence worker)
-flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal
+flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limt 9999
 ```
 
 ## Architecture
