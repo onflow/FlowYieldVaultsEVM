@@ -241,7 +241,7 @@ access(all) contract FlowVaultsEVM {
                 requestId: request.id,
                 status: 1,
                 tideId: 0,
-                message: "Processing request"
+                message: "Processing request ID ".concat(request.id.toString())
             )
             
             var success = false
@@ -271,7 +271,7 @@ access(all) contract FlowVaultsEVM {
                     message = result.message
                 default:
                     success = false
-                    message = "Request type not implemented"
+                    message = "Unknown request type: ".concat(request.requestType.toString()).concat(" for request ID ").concat(request.id.toString())
             }
             
             let finalStatus = success ? 2 : 3
@@ -304,7 +304,7 @@ access(all) contract FlowVaultsEVM {
                 return ProcessResult(
                     success: false, 
                     tideId: 0, 
-                    message: "Vault type mismatch"
+                    message: "Vault type mismatch: expected ".concat(vaultIdentifier).concat(", got ").concat(vaultType.identifier)
                 )
             }
             
@@ -314,7 +314,7 @@ access(all) contract FlowVaultsEVM {
                 return ProcessResult(
                     success: false, 
                     tideId: 0, 
-                    message: "Invalid strategyIdentifier"
+                    message: "Invalid strategyIdentifier: ".concat(strategyIdentifier)
                 )
             }
             
@@ -340,7 +340,7 @@ access(all) contract FlowVaultsEVM {
                 return ProcessResult(
                     success: false, 
                     tideId: 0, 
-                    message: "Failed to find newly created Tide ID"
+                    message: "Failed to find newly created Tide ID after creation for request ".concat(request.id.toString())
                 )
             }
             
@@ -350,10 +350,16 @@ access(all) contract FlowVaultsEVM {
             }
             FlowVaultsEVM.tidesByEVMAddress[evmAddr]!.append(tideId)
             
+            let currentBalance = self.getUserBalanceFromEVM(user: request.user, tokenAddress: request.tokenAddress)
+            let amountUInt256 = FlowVaultsEVM.uint256FromUFix64(amount)
+            let newBalance = currentBalance >= amountUInt256 
+                ? currentBalance - amountUInt256
+                : 0 as UInt256
+            
             self.updateUserBalance(
                 user: request.user,
                 tokenAddress: request.tokenAddress,
-                newBalance: 0
+                newBalance: newBalance
             )
             
             emit TideCreatedForEVMUser(evmAddress: evmAddr, tideId: tideId, amount: amount)
@@ -361,7 +367,7 @@ access(all) contract FlowVaultsEVM {
             return ProcessResult(
                 success: true, 
                 tideId: tideId, 
-                message: "Tide created successfully"
+                message: "Tide ID ".concat(tideId.toString()).concat(" created successfully with amount ").concat(amount.toString()).concat(" FLOW")
             )
         }
         
@@ -372,15 +378,15 @@ access(all) contract FlowVaultsEVM {
                 if !userTides.contains(request.tideId) {
                     return ProcessResult(
                         success: false, 
-                        tideId: 0, 
-                        message: "User does not own Tide"
+                        tideId: request.tideId, 
+                        message: "User ".concat(evmAddr).concat(" does not own Tide ID ").concat(request.tideId.toString())
                     )
                 }
             } else {
                 return ProcessResult(
                     success: false, 
-                    tideId: 0, 
-                    message: "User has no Tides"
+                    tideId: request.tideId, 
+                    message: "User ".concat(evmAddr).concat(" has no Tides registered")
                 )
             }
             
@@ -398,7 +404,7 @@ access(all) contract FlowVaultsEVM {
             return ProcessResult(
                 success: true, 
                 tideId: request.tideId, 
-                message: "Tide closed successfully"
+                message: "Tide ID ".concat(request.tideId.toString()).concat(" closed successfully, returned ").concat(amount.toString()).concat(" FLOW")
             )
         }
         
@@ -410,15 +416,15 @@ access(all) contract FlowVaultsEVM {
                 if !userTides.contains(request.tideId) {
                     return ProcessResult(
                         success: false, 
-                        tideId: 0, 
-                        message: "User does not own Tide"
+                        tideId: request.tideId, 
+                        message: "User ".concat(evmAddr).concat(" does not own Tide ID ").concat(request.tideId.toString())
                     )
                 }
             } else {
                 return ProcessResult(
                     success: false, 
-                    tideId: 0, 
-                    message: "User has no Tides"
+                    tideId: request.tideId, 
+                    message: "User ".concat(evmAddr).concat(" has no Tides registered")
                 )
             }
             
@@ -432,11 +438,16 @@ access(all) contract FlowVaultsEVM {
             let betaRef = self.getBetaReference()
             self.tideManager.depositToTide(betaRef: betaRef, request.tideId, from: <-vault)
             
-            // 4. Update user balance to 0 (funds now in Tide)
+            // 4. Subtract amount from current balance instead of setting to 0
+            let currentBalance = self.getUserBalanceFromEVM(user: request.user, tokenAddress: request.tokenAddress)
+            let newBalance = currentBalance >= request.amount
+                ? currentBalance - request.amount
+                : 0 as UInt256
+            
             self.updateUserBalance(
                 user: request.user,
                 tokenAddress: request.tokenAddress,
-                newBalance: 0
+                newBalance: newBalance
             )
             
             emit TideDepositedForEVMUser(evmAddress: evmAddr, tideId: request.tideId, amount: amount)
@@ -444,7 +455,7 @@ access(all) contract FlowVaultsEVM {
             return ProcessResult(
                 success: true, 
                 tideId: request.tideId, 
-                message: "Deposit successful"
+                message: "Deposited ".concat(amount.toString()).concat(" FLOW to Tide ID ").concat(request.tideId.toString())
             )
         }
         
@@ -456,15 +467,15 @@ access(all) contract FlowVaultsEVM {
                 if !userTides.contains(request.tideId) {
                     return ProcessResult(
                         success: false, 
-                        tideId: 0, 
-                        message: "User does not own Tide"
+                        tideId: request.tideId, 
+                        message: "User ".concat(evmAddr).concat(" does not own Tide ID ").concat(request.tideId.toString())
                     )
                 }
             } else {
                 return ProcessResult(
                     success: false, 
-                    tideId: 0, 
-                    message: "User has no Tides"
+                    tideId: request.tideId, 
+                    message: "User ".concat(evmAddr).concat(" has no Tides registered")
                 )
             }
             
@@ -483,7 +494,7 @@ access(all) contract FlowVaultsEVM {
             return ProcessResult(
                 success: true, 
                 tideId: request.tideId, 
-                message: "Withdrawal successful"
+                message: "Withdrew ".concat(actualAmount.toString()).concat(" FLOW from Tide ID ").concat(request.tideId.toString())
             )
         }
         
@@ -499,7 +510,7 @@ access(all) contract FlowVaultsEVM {
             let result = self.getCOARef().call(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 100000,
+                gasLimit: 100_000,
                 value: EVM.Balance(attoflow: 0)
             )
             
@@ -537,7 +548,7 @@ access(all) contract FlowVaultsEVM {
             let result = self.getCOARef().call(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 1_000_000,
+                gasLimit: 500_000,
                 value: EVM.Balance(attoflow: 0)
             )
             
@@ -558,7 +569,7 @@ access(all) contract FlowVaultsEVM {
             let result = self.getCOARef().call(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 100000,
+                gasLimit: 100_000,
                 value: EVM.Balance(attoflow: 0)
             )
             
@@ -570,6 +581,33 @@ access(all) contract FlowVaultsEVM {
             }
         }
         
+        /// Get user's current balance from EVM contract
+        access(self) fun getUserBalanceFromEVM(user: EVM.EVMAddress, tokenAddress: EVM.EVMAddress): UInt256 {
+            let calldata = EVM.encodeABIWithSignature(
+                "getUserBalance(address,address)",
+                [user, tokenAddress]
+            )
+            
+            let callResult = self.getCOARef().dryCall(
+                to: FlowVaultsEVM.flowVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 100_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+            
+            if callResult.status != EVM.Status.successful {
+                let errorMsg = FlowVaultsEVM.decodeEVMError(callResult.data)
+                panic("getUserBalance call failed: ".concat(errorMsg))
+            }
+            
+            let decoded = EVM.decodeABI(
+                types: [Type<UInt256>()],
+                data: callResult.data
+            )
+            
+            return decoded[0] as! UInt256
+        }
+        
         /// Get pending request IDs from FlowVaultsRequests contract (lightweight)
         /// Used for counting total pending requests without fetching full data
         access(all) fun getPendingRequestIdsFromEVM(): [UInt256] {
@@ -578,7 +616,7 @@ access(all) contract FlowVaultsEVM {
             let callResult = self.getCOARef().dryCall(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 500000,
+                gasLimit: 500_000,
                 value: EVM.Balance(attoflow: 0)
             )
             
@@ -606,7 +644,7 @@ access(all) contract FlowVaultsEVM {
             let callResult = self.getCOARef().dryCall(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 15_000_000,
+                gasLimit: 10_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
 
