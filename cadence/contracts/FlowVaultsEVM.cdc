@@ -10,6 +10,26 @@ import "FlowVaultsClosedBeta"
 access(all) contract FlowVaultsEVM {
     
     // ========================================
+    // Enums
+    // ========================================
+    
+    /// Request Type (matching Solidity enum RequestType)
+    access(all) enum RequestType: UInt8 {
+        access(all) case CREATE_TIDE           // rawValue = 0
+        access(all) case DEPOSIT_TO_TIDE       // rawValue = 1
+        access(all) case WITHDRAW_FROM_TIDE    // rawValue = 2
+        access(all) case CLOSE_TIDE            // rawValue = 3
+    }
+    
+    /// Request Status (matching Solidity enum RequestStatus)
+    access(all) enum RequestStatus: UInt8 {
+        access(all) case PENDING       // rawValue = 0
+        access(all) case PROCESSING    // rawValue = 1
+        access(all) case COMPLETED     // rawValue = 2
+        access(all) case FAILED        // rawValue = 3
+    }
+    
+    // ========================================
     // Constants
     // ========================================
     
@@ -239,7 +259,7 @@ access(all) contract FlowVaultsEVM {
         access(self) fun processRequestSafely(_ request: EVMRequest): Bool {
             self.updateRequestStatus(
                 requestId: request.id,
-                status: 1,
+                status: FlowVaultsEVM.RequestStatus.PROCESSING.rawValue,
                 tideId: 0,
                 message: "Processing request ID ".concat(request.id.toString())
             )
@@ -249,22 +269,22 @@ access(all) contract FlowVaultsEVM {
             var message = ""
             
             switch request.requestType {
-                case 0:  // CREATE_TIDE
+                case FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue:
                     let result = self.processCreateTide(request)
                     success = result.success
                     tideId = result.tideId
                     message = result.message
-                case 1:  // DEPOSIT_TO_TIDE
+                case FlowVaultsEVM.RequestType.DEPOSIT_TO_TIDE.rawValue:
                     let result = self.processDepositToTide(request)
                     success = result.success
                     tideId = request.tideId
                     message = result.message
-                case 2:  // WITHDRAW_FROM_TIDE
+                case FlowVaultsEVM.RequestType.WITHDRAW_FROM_TIDE.rawValue:
                     let result = self.processWithdrawFromTide(request)
                     success = result.success
                     tideId = request.tideId
                     message = result.message
-                case 3:  // CLOSE_TIDE
+                case FlowVaultsEVM.RequestType.CLOSE_TIDE.rawValue:
                     let result = self.processCloseTideWithMessage(request)
                     success = result.success
                     tideId = request.tideId
@@ -274,10 +294,13 @@ access(all) contract FlowVaultsEVM {
                     message = "Unknown request type: ".concat(request.requestType.toString()).concat(" for request ID ").concat(request.id.toString())
             }
             
-            let finalStatus = success ? 2 : 3
+            let finalStatus = success 
+                ? FlowVaultsEVM.RequestStatus.COMPLETED.rawValue
+                : FlowVaultsEVM.RequestStatus.FAILED.rawValue
+            
             self.updateRequestStatus(
                 requestId: request.id,
-                status: UInt8(finalStatus),
+                status: finalStatus,
                 tideId: tideId,
                 message: message
             )
@@ -548,7 +571,7 @@ access(all) contract FlowVaultsEVM {
             let result = self.getCOARef().call(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 500_000,
+                gasLimit: 1_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
             
@@ -644,7 +667,7 @@ access(all) contract FlowVaultsEVM {
             let callResult = self.getCOARef().dryCall(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 10_000_000,
+                gasLimit: 15_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
 
