@@ -41,7 +41,7 @@ jobs:
       - name: Setup and Run Emulator
         run: |
           ./local/setup_and_run_emulator.sh &
-          sleep 5
+          sleep 80  # Wait for emulator to be fully up
       
       - name: Deploy Full Stack
         run: |
