@@ -567,17 +567,15 @@ contract FlowVaultsRequests {
         // Convert uint8 to RequestStatus
         request.status = RequestStatus(status);
         request.message = message;
-        if (tideId > 0) {
-            request.tideId = tideId;
-            // Register the new tide ID if this was a successful CREATE_TIDE
-            if (
-                status == uint8(RequestStatus.COMPLETED) &&
-                request.requestType == RequestType.CREATE_TIDE
-            ) {
-                validTideIds[tideId] = true;
-                tideOwners[tideId] = request.user;
-                emit TideIdRegistered(tideId);
-            }
+        request.tideId = tideId; // Always update the tideId
+        // Register the new tide ID if this was a successful CREATE_TIDE
+        if (
+            status == uint8(RequestStatus.COMPLETED) &&
+            request.requestType == RequestType.CREATE_TIDE
+        ) {
+            validTideIds[tideId] = true;
+            tideOwners[tideId] = request.user;
+            emit TideIdRegistered(tideId);
         }
 
         // Remove from pending queue and decrement counter (since we only transition from PENDING to COMPLETED/FAILED now)
