@@ -18,6 +18,13 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           submodules: recursive
       
+      # Only install on act (local testing), GitHub runners already have these
+      - name: Install Required Tools (act only)
+        if: env.ACT
+        continue-on-error: true
+        run: |
+          apt-get update && apt-get install -y lsof netcat-openbsd
+      
       - name: Install Flow CLI
         run: sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
       
@@ -43,7 +50,6 @@ jobs:
           ./local/setup_and_run_emulator.sh &
           sleep 5
       
-      # Step 2: Deploy full stack
       - name: Deploy Full Stack
         run: |
           DEPLOYMENT_OUTPUT=$(./local/deploy_full_stack.sh)
@@ -51,7 +57,6 @@ jobs:
           FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowVaultsRequests Contract:" | sed 's/.*: //')
           echo "CONTRACT_ADDRESS=$FLOW_VAULTS_REQUESTS_CONTRACT" >> $GITHUB_ENV
       
-      # Step 3: Create yield position from EVM
       - name: Create Tide Request from EVM
         run: |
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
@@ -60,16 +65,5 @@ jobs:
             --broadcast \
             --legacy
       
-      # Step 4: Process request (Cadence worker)
       - name: Process Requests
         run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
-      
-      # Cleanup
-      - name: Cleanup
-        if: always()
-        run: |
-          # Kill any remaining processes
-          lsof -ti :8080 | xargs kill -9 2>/dev/null || true
-          lsof -ti :8545 | xargs kill -9 2>/dev/null || true
-          lsof -ti :3569 | xargs kill -9 2>/dev/null || true
-          lsof -ti :8888 | xargs kill -9 2>/dev/null || true
