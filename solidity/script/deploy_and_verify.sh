@@ -24,8 +24,8 @@ echo ""
 # Read COA address from .env file in parent directory
 COA_ADDRESS=$(grep COA_ADDRESS ../.env | cut -d '=' -f2)
 
-echo "⏳ Waiting 30 seconds for block explorer to index the deployment..."
-sleep 30
+echo "⏳ Waiting 60 seconds for block explorer to index the deployment..."
+sleep 60
 
 echo "🔍 Verifying contract..."
 echo "COA Address (constructor arg): $COA_ADDRESS"
