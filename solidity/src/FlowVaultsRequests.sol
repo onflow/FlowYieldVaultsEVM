@@ -27,6 +27,9 @@ contract FlowVaultsRequests {
     error RequestAlreadyFinalized();
     error InsufficientBalance();
     error TransferFailed();
+    error BelowMinimumBalance();
+    error TooManyPendingRequests();
+    error InvalidTideId();
 
     // ============================================
     // Constants
@@ -92,6 +95,21 @@ contract FlowVaultsRequests {
     /// @notice Allow-listed addresses mapping
     mapping(address => bool) public allowlisted;
 
+    /// @notice Minimum balance required for deposits (can be updated by owner)
+    uint256 public minimumBalance;
+
+    /// @notice Maximum pending requests allowed per user
+    uint256 public maxPendingRequestsPerUser;
+
+    /// @notice Track pending request count per user
+    mapping(address => uint256) public userPendingRequestCount;
+
+    /// @notice Registry of valid tide IDs created on Cadence side
+    mapping(uint64 => bool) public validTideIds;
+
+    /// @notice Tide ownership mapping: tideId => owner address
+    mapping(uint64 => address) public tideOwners;
+
     /// @notice Pending user balances: user address => token address => balance
     /// @dev These are funds in escrow waiting to be converted to Tides
     mapping(address => mapping(address => uint256)) public pendingUserBalances;
@@ -146,24 +164,44 @@ contract FlowVaultsRequests {
 
     event AddressesRemovedFromAllowlist(address[] addresses);
 
+    event MinimumBalanceUpdated(uint256 oldMinimum, uint256 newMinimum);
+
+    event MaxPendingRequestsPerUserUpdated(uint256 oldMax, uint256 newMax);
+
+    event TideIdRegistered(uint64 indexed tideId);
+
+    event RequestsDropped(uint256[] requestIds, address indexed droppedBy);
+
     // ============================================
     // Modifiers
     // ============================================
 
     modifier onlyAuthorizedCOA() {
-        if (msg.sender != authorizedCOA) revert NotAuthorizedCOA();
+        _checkAuthorizedCOA();
         _;
     }
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
+        _checkOwner();
         _;
     }
 
     modifier onlyAllowlisted() {
+        _checkAllowlisted();
+        _;
+    }
+
+    function _checkAuthorizedCOA() internal view {
+        if (msg.sender != authorizedCOA) revert NotAuthorizedCOA();
+    }
+
+    function _checkOwner() internal view {
+        if (msg.sender != owner) revert NotOwner();
+    }
+
+    function _checkAllowlisted() internal view {
         if (allowlistEnabled && !allowlisted[msg.sender])
             revert NotInAllowlist();
-        _;
     }
 
     // ============================================
@@ -175,6 +213,8 @@ contract FlowVaultsRequests {
         authorizedCOA = coaAddress;
 
         _requestIdCounter = 1;
+        minimumBalance = 1000000000000000;
+        maxPendingRequestsPerUser = 100;
     }
 
     // ============================================
@@ -233,6 +273,94 @@ contract FlowVaultsRequests {
         emit AddressesRemovedFromAllowlist(_addresses);
     }
 
+    /// @notice Set minimum balance required for deposits
+    /// @param _minimumBalance New minimum balance (in wei)
+    function setMinimumBalance(uint256 _minimumBalance) external onlyOwner {
+        uint256 oldMinimum = minimumBalance;
+        minimumBalance = _minimumBalance;
+        emit MinimumBalanceUpdated(oldMinimum, _minimumBalance);
+    }
+
+    /// @notice Set maximum pending requests allowed per user
+    /// @param _maxRequests New maximum (0 = no limit)
+    function setMaxPendingRequestsPerUser(
+        uint256 _maxRequests
+    ) external onlyOwner {
+        uint256 oldMax = maxPendingRequestsPerUser;
+        maxPendingRequestsPerUser = _maxRequests;
+        emit MaxPendingRequestsPerUserUpdated(oldMax, _maxRequests);
+    }
+
+    /// @notice Drop invalid/spam requests (admin function to clear backlog)
+    /// @param requestIds Array of request IDs to drop
+    function dropRequests(uint256[] calldata requestIds) external onlyOwner {
+        for (uint256 i = 0; i < requestIds.length; ) {
+            uint256 requestId = requestIds[i];
+            Request storage request = pendingRequests[requestId];
+
+            if (
+                request.id == requestId &&
+                request.status == RequestStatus.PENDING
+            ) {
+                // Mark as failed
+                request.status = RequestStatus.FAILED;
+                request.message = "Dropped";
+
+                // Refund if necessary
+                if (
+                    (request.requestType == RequestType.CREATE_TIDE ||
+                        request.requestType == RequestType.DEPOSIT_TO_TIDE) &&
+                    request.amount > 0
+                ) {
+                    // Decrease pending balance
+                    pendingUserBalances[request.user][
+                        request.tokenAddress
+                    ] -= request.amount;
+                    emit BalanceUpdated(
+                        request.user,
+                        request.tokenAddress,
+                        pendingUserBalances[request.user][request.tokenAddress]
+                    );
+
+                    // Refund the funds
+                    if (isNativeFlow(request.tokenAddress)) {
+                        (bool success, ) = request.user.call{
+                            value: request.amount
+                        }("");
+                        if (!success) revert TransferFailed();
+                    }
+
+                    emit FundsWithdrawn(
+                        request.user,
+                        request.tokenAddress,
+                        request.amount
+                    );
+                }
+
+                // Decrement user pending request count
+                if (userPendingRequestCount[request.user] > 0) {
+                    userPendingRequestCount[request.user]--;
+                }
+
+                // Remove from pending queue
+                _removePendingRequest(requestId);
+
+                emit RequestProcessed(
+                    requestId,
+                    RequestStatus.FAILED,
+                    request.tideId,
+                    "Dropped"
+                );
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        emit RequestsDropped(requestIds, msg.sender);
+    }
+
     // ============================================
     // User Functions
     // ============================================
@@ -249,6 +377,7 @@ contract FlowVaultsRequests {
         string calldata strategyIdentifier
     ) external payable onlyAllowlisted returns (uint256) {
         _validateDeposit(tokenAddress, amount);
+        _checkPendingRequestLimit();
 
         uint256 requestId = createRequest(
             RequestType.CREATE_TIDE,
@@ -272,6 +401,8 @@ contract FlowVaultsRequests {
         uint256 amount
     ) external payable onlyAllowlisted returns (uint256) {
         _validateDeposit(tokenAddress, amount);
+        _validateTideId(tideId, msg.sender);
+        _checkPendingRequestLimit();
 
         uint256 requestId = createRequest(
             RequestType.DEPOSIT_TO_TIDE,
@@ -293,6 +424,8 @@ contract FlowVaultsRequests {
         uint256 amount
     ) external onlyAllowlisted returns (uint256) {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
+        _validateTideId(tideId, msg.sender);
+        _checkPendingRequestLimit();
 
         uint256 requestId = createRequest(
             RequestType.WITHDRAW_FROM_TIDE,
@@ -311,6 +444,9 @@ contract FlowVaultsRequests {
     function closeTide(
         uint64 tideId
     ) external onlyAllowlisted returns (uint256) {
+        _validateTideId(tideId, msg.sender);
+        _checkPendingRequestLimit();
+
         uint256 requestId = createRequest(
             RequestType.CLOSE_TIDE,
             NATIVE_FLOW,
@@ -335,7 +471,12 @@ contract FlowVaultsRequests {
 
         // Update status to FAILED with cancellation message
         request.status = RequestStatus.FAILED;
-        request.message = "Cancelled by user";
+        request.message = "Cancelled";
+
+        // Decrement user pending request count
+        if (userPendingRequestCount[msg.sender] > 0) {
+            userPendingRequestCount[msg.sender]--;
+        }
 
         // Remove from pending queue
         _removePendingRequest(requestId);
@@ -379,7 +520,7 @@ contract FlowVaultsRequests {
             requestId,
             RequestStatus.FAILED,
             request.tideId,
-            "Cancelled by user"
+            "Cancelled"
         );
     }
 
@@ -431,13 +572,26 @@ contract FlowVaultsRequests {
         request.message = message;
         if (tideId > 0) {
             request.tideId = tideId;
+            // Register the new tide ID if this was a successful CREATE_TIDE
+            if (
+                status == uint8(RequestStatus.COMPLETED) &&
+                request.requestType == RequestType.CREATE_TIDE
+            ) {
+                validTideIds[tideId] = true;
+                tideOwners[tideId] = request.user;
+                emit TideIdRegistered(tideId);
+            }
         }
 
-        // If completed or failed, remove from pending queue
+        // If completed or failed, remove from pending queue and decrement counter
         if (
             status == uint8(RequestStatus.COMPLETED) ||
             status == uint8(RequestStatus.FAILED)
         ) {
+            // Decrement user pending request count
+            if (userPendingRequestCount[request.user] > 0) {
+                userPendingRequestCount[request.user]--;
+            }
             _removePendingRequest(requestId);
         }
 
@@ -570,6 +724,22 @@ contract FlowVaultsRequests {
         return pendingRequests[requestId];
     }
 
+    /// @notice Check if a tide ID is valid
+    /// @param tideId The tide ID to check
+    /// @return True if the tide ID exists
+    function isTideIdValid(uint64 tideId) external view returns (bool) {
+        return validTideIds[tideId];
+    }
+
+    /// @notice Get user's pending request count
+    /// @param user The user address to check
+    /// @return Number of pending requests for the user
+    function getUserPendingRequestCount(
+        address user
+    ) external view returns (uint256) {
+        return userPendingRequestCount[user];
+    }
+
     // ============================================
     // Internal Functions
     // ============================================
@@ -583,12 +753,36 @@ contract FlowVaultsRequests {
     ) internal view {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
 
+        // Check minimum balance requirement
+        if (minimumBalance > 0 && amount < minimumBalance) {
+            revert BelowMinimumBalance();
+        }
+
         if (isNativeFlow(tokenAddress)) {
             if (msg.value != amount) revert MsgValueMustEqualAmount();
         } else {
             if (msg.value != 0) revert MsgValueMustBeZero();
             // TODO: Transfer ERC20 tokens (Phase 2)
             revert ERC20NotSupported();
+        }
+    }
+
+    /// @notice Validate that tide ID exists and caller is owner
+    /// @param tideId The tide ID to validate
+    /// @param user The expected owner address
+    function _validateTideId(uint64 tideId, address user) internal view {
+        if (!validTideIds[tideId] || tideOwners[tideId] != user) {
+            revert InvalidTideId();
+        }
+    }
+
+    /// @notice Check if user has exceeded pending request limit
+    function _checkPendingRequestLimit() internal view {
+        if (
+            maxPendingRequestsPerUser > 0 &&
+            userPendingRequestCount[msg.sender] >= maxPendingRequestsPerUser
+        ) {
+            revert TooManyPendingRequests();
         }
     }
 
@@ -620,6 +814,9 @@ contract FlowVaultsRequests {
         // Store in pending requests
         pendingRequests[requestId] = newRequest;
         pendingRequestIds.push(requestId);
+
+        // Increment user pending request count
+        userPendingRequestCount[user]++;
 
         // Update pending user balance if depositing
         if (

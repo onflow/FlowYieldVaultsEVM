@@ -4,8 +4,19 @@ pragma solidity 0.8.18;
 import "forge-std/Test.sol";
 import "../src/FlowVaultsRequests.sol";
 
+// Test helper contract that exposes validTideIds for testing
+contract FlowVaultsRequestsTestHelper is FlowVaultsRequests {
+    constructor(address coaAddress) FlowVaultsRequests(coaAddress) {}
+
+    // Allow tests to directly register tide IDs without going through request flow
+    function testRegisterTideId(uint64 tideId, address owner) external {
+        validTideIds[tideId] = true;
+        tideOwners[tideId] = owner;
+    }
+}
+
 contract FlowVaultsRequestsTest is Test {
-    FlowVaultsRequests public c; // Short name for brevity
+    FlowVaultsRequestsTestHelper public c; // Short name for brevity
     address user = makeAddr("user");
     address coa = makeAddr("coa");
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
@@ -49,7 +60,11 @@ contract FlowVaultsRequestsTest is Test {
 
     function setUp() public {
         vm.deal(user, 100 ether);
-        c = new FlowVaultsRequests(coa);
+        c = new FlowVaultsRequestsTestHelper(coa);
+
+        // Register commonly used tide IDs for testing
+        c.testRegisterTideId(0, user); // Tide ID 0
+        c.testRegisterTideId(42, user); // Commonly used test tide ID
     }
 
     // ============================================
