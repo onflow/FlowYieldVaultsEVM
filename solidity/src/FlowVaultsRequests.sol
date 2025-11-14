@@ -13,10 +13,10 @@ contract FlowVaultsRequests {
 
     error NotAuthorizedCOA();
     error NotOwner();
-    error NotWhitelisted();
+    error NotInAllowlist();
     error InvalidCOAAddress();
     error EmptyAddressArray();
-    error CannotWhitelistZeroAddress();
+    error CannotAllowlistZeroAddress();
     error AmountMustBeGreaterThanZero();
     error MsgValueMustEqualAmount();
     error MsgValueMustBeZero();
@@ -86,11 +86,11 @@ contract FlowVaultsRequests {
     /// @notice Owner of the contract (for admin functions)
     address public owner;
 
-    /// @notice Whitelist enabled flag
-    bool public whitelistEnabled;
+    /// @notice Allow list enabled flag
+    bool public allowlistEnabled;
 
-    /// @notice Whitelisted addresses mapping
-    mapping(address => bool) public whitelisted;
+    /// @notice Allow-listed addresses mapping
+    mapping(address => bool) public allowlisted;
 
     /// @notice Pending user balances: user address => token address => balance
     /// @dev These are funds in escrow waiting to be converted to Tides
@@ -140,11 +140,11 @@ contract FlowVaultsRequests {
 
     event AuthorizedCOAUpdated(address indexed oldCOA, address indexed newCOA);
 
-    event WhitelistEnabled(bool enabled);
+    event AllowlistEnabled(bool enabled);
 
-    event AddressesAddedToWhitelist(address[] addresses);
+    event AddressesAddedToAllowlist(address[] addresses);
 
-    event AddressesRemovedFromWhitelist(address[] addresses);
+    event AddressesRemovedFromAllowlist(address[] addresses);
 
     // ============================================
     // Modifiers
@@ -160,9 +160,9 @@ contract FlowVaultsRequests {
         _;
     }
 
-    modifier onlyWhitelisted() {
-        if (whitelistEnabled && !whitelisted[msg.sender])
-            revert NotWhitelisted();
+    modifier onlyAllowlisted() {
+        if (allowlistEnabled && !allowlisted[msg.sender])
+            revert NotInAllowlist();
         _;
     }
 
@@ -190,47 +190,47 @@ contract FlowVaultsRequests {
         emit AuthorizedCOAUpdated(oldCOA, _coa);
     }
 
-    /// @notice Enable or disable whitelist enforcement
-    /// @param _enabled True to enable whitelist, false to disable
-    function setWhitelistEnabled(bool _enabled) external onlyOwner {
-        whitelistEnabled = _enabled;
-        emit WhitelistEnabled(_enabled);
+    /// @notice Enable or disable allow list enforcement
+    /// @param _enabled True to enable allow list, false to disable
+    function setAllowlistEnabled(bool _enabled) external onlyOwner {
+        allowlistEnabled = _enabled;
+        emit AllowlistEnabled(_enabled);
     }
 
-    /// @notice Add multiple addresses to whitelist
-    /// @param _addresses Array of addresses to whitelist
-    function batchAddToWhitelist(
+    /// @notice Add multiple addresses to allow list
+    /// @param _addresses Array of addresses to allow list
+    function batchAddToAllowlist(
         address[] calldata _addresses
     ) external onlyOwner {
         if (_addresses.length == 0) revert EmptyAddressArray();
 
         for (uint256 i = 0; i < _addresses.length; ) {
             if (_addresses[i] == address(0))
-                revert CannotWhitelistZeroAddress();
-            whitelisted[_addresses[i]] = true;
+                revert CannotAllowlistZeroAddress();
+            allowlisted[_addresses[i]] = true;
             unchecked {
                 ++i;
             }
         }
 
-        emit AddressesAddedToWhitelist(_addresses);
+        emit AddressesAddedToAllowlist(_addresses);
     }
 
-    /// @notice Remove multiple addresses from whitelist
-    /// @param _addresses Array of addresses to remove from whitelist
-    function batchRemoveFromWhitelist(
+    /// @notice Remove multiple addresses from allow list
+    /// @param _addresses Array of addresses to remove from allow list
+    function batchRemoveFromAllowlist(
         address[] calldata _addresses
     ) external onlyOwner {
         if (_addresses.length == 0) revert EmptyAddressArray();
 
         for (uint256 i = 0; i < _addresses.length; ) {
-            whitelisted[_addresses[i]] = false;
+            allowlisted[_addresses[i]] = false;
             unchecked {
                 ++i;
             }
         }
 
-        emit AddressesRemovedFromWhitelist(_addresses);
+        emit AddressesRemovedFromAllowlist(_addresses);
     }
 
     // ============================================
@@ -247,7 +247,7 @@ contract FlowVaultsRequests {
         uint256 amount,
         string calldata vaultIdentifier,
         string calldata strategyIdentifier
-    ) external payable onlyWhitelisted returns (uint256) {
+    ) external payable onlyAllowlisted returns (uint256) {
         _validateDeposit(tokenAddress, amount);
 
         uint256 requestId = createRequest(
@@ -270,7 +270,7 @@ contract FlowVaultsRequests {
         uint64 tideId,
         address tokenAddress,
         uint256 amount
-    ) external payable onlyWhitelisted returns (uint256) {
+    ) external payable onlyAllowlisted returns (uint256) {
         _validateDeposit(tokenAddress, amount);
 
         uint256 requestId = createRequest(
@@ -291,7 +291,7 @@ contract FlowVaultsRequests {
     function withdrawFromTide(
         uint64 tideId,
         uint256 amount
-    ) external onlyWhitelisted returns (uint256) {
+    ) external onlyAllowlisted returns (uint256) {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
 
         uint256 requestId = createRequest(
@@ -310,7 +310,7 @@ contract FlowVaultsRequests {
     /// @param tideId The Tide ID to close
     function closeTide(
         uint64 tideId
-    ) external onlyWhitelisted returns (uint256) {
+    ) external onlyAllowlisted returns (uint256) {
         uint256 requestId = createRequest(
             RequestType.CLOSE_TIDE,
             NATIVE_FLOW,

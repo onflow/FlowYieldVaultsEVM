@@ -1025,7 +1025,7 @@ Users need to query **both sides** to get a complete picture:
 - **Question**: When do we integrate the Flow EVM Bridge for ERC-20 tokens?
   - Phase 1: Native $FLOW only
   - Phase 2: ERC-20 support via bridge
-- **Question**: How do we handle token whitelisting?
+- **Question**: How do we handle token allow list?
   - Which tokens from the Cadence side are supported?
 - **Alignment**: "We can conditionally incorporate the EVM bridge with the already onboarded tokens on the Cadence side"
 
@@ -1089,7 +1089,7 @@ Users need to query **both sides** to get a complete picture:
 
 ### Phase 3: Multi-Token Support
 - Integrate Flow EVM Bridge for ERC-20 tokens
-- Token whitelisting system
+- Token allow list system
 - Multi-token balance tracking
 
 ### Phase 4: Optimization & Scale

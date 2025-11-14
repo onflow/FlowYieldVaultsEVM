@@ -510,24 +510,21 @@ access(all) contract FlowVaultsEVM {
                 panic("withdrawFunds call failed: ".concat(errorMsg))
             }
             
-            let rawUFix64 = UInt64(amount * 100_000_000.0)
-            let attoflowAmount = UInt(rawUFix64) * 10_000_000_000
-            
-            let balance = EVM.Balance(attoflow: attoflowAmount)
+            // Convert UFix64 amount to attoflow (10^18) for EVM.Balance
+            let balance = FlowVaultsEVM.balanceFromUFix64(amount)
             let vault <- self.getCOARef().withdraw(balance: balance)
             
-            return <-vault as! @FlowToken.Vault
+            return <-vault
         }
         
         access(self) fun bridgeFundsToEVMUser(vault: @{FungibleToken.Vault}, recipient: EVM.EVMAddress) {
             let amount = vault.balance
             
-            let rawUFix64 = UInt64(amount * 100_000_000.0)
-            let attoflowAmount = UInt(rawUFix64) * 10_000_000_000
-            
+            // Deposit vault to COA first
             self.getCOARef().deposit(from: <-vault as! @FlowToken.Vault)
             
-            let balance = EVM.Balance(attoflow: attoflowAmount)
+            // Convert UFix64 amount to attoflow (10^18) and withdraw as EVM balance
+            let balance = FlowVaultsEVM.balanceFromUFix64(amount)
             recipient.deposit(from: <-self.getCOARef().withdraw(balance: balance))
         }
         
@@ -698,6 +695,17 @@ access(all) contract FlowVaultsEVM {
     access(self) fun uint256FromUFix64(_ value: UFix64): UInt256 {
         let rawValue = UInt64(value * 100_000_000.0)
         return UInt256(rawValue) * 10_000_000_000
+    }
+
+    /// Convert UFix64 (8 decimals) to EVM.Balance (attoflow, 18 decimals)
+    /// UFix64: 1.0 = 1 FLOW with 8 decimal places
+    /// Attoflow: 1 FLOW = 10^18 attoflow
+    access(self) fun balanceFromUFix64(_ value: UFix64): EVM.Balance {
+        // Convert UFix64 to its base unit representation (8 decimals)
+        let flowUnits = UInt64(value * 100_000_000.0)
+        // Scale from 8 decimals to 18 decimals (attoflow)
+        let attoflowAmount = UInt(flowUnits) * 10_000_000_000
+        return EVM.Balance(attoflow: attoflowAmount)
     }
 
     /// Decode error message from EVM revert data

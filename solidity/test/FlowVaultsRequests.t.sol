@@ -648,45 +648,45 @@ contract FlowVaultsRequestsTest is Test {
     }
 
     // ============================================
-    // WHITELIST TESTS
+    // ALLOW LIST TESTS
     // ============================================
 
-    event WhitelistEnabled(bool enabled);
-    event AddressesAddedToWhitelist(address[] addresses);
-    event AddressesRemovedFromWhitelist(address[] addresses);
+    event AllowlistEnabled(bool enabled);
+    event AddressesAddedToAllowlist(address[] addresses);
+    event AddressesRemovedFromAllowlist(address[] addresses);
 
-    function test_Whitelist_InitialState() public view {
-        assertFalse(c.whitelistEnabled());
-        assertFalse(c.whitelisted(user));
+    function test_Allowlist_InitialState() public view {
+        assertFalse(c.allowlistEnabled());
+        assertFalse(c.allowlisted(user));
     }
 
-    function test_Whitelist_SetEnabled() public {
+    function test_Allowlist_SetEnabled() public {
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
-        assertTrue(c.whitelistEnabled());
+        c.setAllowlistEnabled(true);
+        assertTrue(c.allowlistEnabled());
 
         vm.prank(c.owner());
-        c.setWhitelistEnabled(false);
-        assertFalse(c.whitelistEnabled());
+        c.setAllowlistEnabled(false);
+        assertFalse(c.allowlistEnabled());
     }
 
-    function test_Whitelist_SetEnabled_RevertNonOwner() public {
+    function test_Allowlist_SetEnabled_RevertNonOwner() public {
         vm.prank(user);
         vm.expectRevert(FlowVaultsRequests.NotOwner.selector);
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
     }
 
-    function test_Whitelist_BatchAdd_SingleAddress() public {
+    function test_Allowlist_BatchAdd_SingleAddress() public {
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
 
-        assertTrue(c.whitelisted(user));
+        assertTrue(c.allowlisted(user));
     }
 
-    function test_Whitelist_BatchAdd_MultipleAddresses() public {
+    function test_Allowlist_BatchAdd_MultipleAddresses() public {
         address user2 = makeAddr("user2");
         address user3 = makeAddr("user3");
 
@@ -696,56 +696,56 @@ contract FlowVaultsRequestsTest is Test {
         addresses[2] = user3;
 
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
 
-        assertTrue(c.whitelisted(user));
-        assertTrue(c.whitelisted(user2));
-        assertTrue(c.whitelisted(user3));
+        assertTrue(c.allowlisted(user));
+        assertTrue(c.allowlisted(user2));
+        assertTrue(c.allowlisted(user3));
     }
 
-    function test_Whitelist_BatchAdd_RevertEmptyArray() public {
+    function test_Allowlist_BatchAdd_RevertEmptyArray() public {
         address[] memory addresses = new address[](0);
 
         vm.prank(c.owner());
         vm.expectRevert(FlowVaultsRequests.EmptyAddressArray.selector);
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
     }
 
-    function test_Whitelist_BatchAdd_RevertZeroAddress() public {
+    function test_Allowlist_BatchAdd_RevertZeroAddress() public {
         address[] memory addresses = new address[](2);
         addresses[0] = user;
         addresses[1] = address(0);
 
         vm.prank(c.owner());
-        vm.expectRevert(FlowVaultsRequests.CannotWhitelistZeroAddress.selector);
-        c.batchAddToWhitelist(addresses);
+        vm.expectRevert(FlowVaultsRequests.CannotAllowlistZeroAddress.selector);
+        c.batchAddToAllowlist(addresses);
     }
 
-    function test_Whitelist_BatchAdd_RevertNonOwner() public {
+    function test_Allowlist_BatchAdd_RevertNonOwner() public {
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         vm.prank(user);
         vm.expectRevert(FlowVaultsRequests.NotOwner.selector);
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
     }
 
-    function test_Whitelist_BatchRemove_SingleAddress() public {
-        // First add user to whitelist
+    function test_Allowlist_BatchRemove_SingleAddress() public {
+        // First add user to allow list
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
-        assertTrue(c.whitelisted(user));
+        c.batchAddToAllowlist(addresses);
+        assertTrue(c.allowlisted(user));
 
         // Now remove
         vm.prank(c.owner());
-        c.batchRemoveFromWhitelist(addresses);
-        assertFalse(c.whitelisted(user));
+        c.batchRemoveFromAllowlist(addresses);
+        assertFalse(c.allowlisted(user));
     }
 
-    function test_Whitelist_BatchRemove_MultipleAddresses() public {
+    function test_Allowlist_BatchRemove_MultipleAddresses() public {
         address user2 = makeAddr("user2");
         address user3 = makeAddr("user3");
 
@@ -756,36 +756,36 @@ contract FlowVaultsRequestsTest is Test {
 
         // Add all
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
 
         // Remove all
         vm.prank(c.owner());
-        c.batchRemoveFromWhitelist(addresses);
+        c.batchRemoveFromAllowlist(addresses);
 
-        assertFalse(c.whitelisted(user));
-        assertFalse(c.whitelisted(user2));
-        assertFalse(c.whitelisted(user3));
+        assertFalse(c.allowlisted(user));
+        assertFalse(c.allowlisted(user2));
+        assertFalse(c.allowlisted(user3));
     }
 
-    function test_Whitelist_BatchRemove_RevertEmptyArray() public {
+    function test_Allowlist_BatchRemove_RevertEmptyArray() public {
         address[] memory addresses = new address[](0);
 
         vm.prank(c.owner());
         vm.expectRevert(FlowVaultsRequests.EmptyAddressArray.selector);
-        c.batchRemoveFromWhitelist(addresses);
+        c.batchRemoveFromAllowlist(addresses);
     }
 
-    function test_Whitelist_BatchRemove_RevertNonOwner() public {
+    function test_Allowlist_BatchRemove_RevertNonOwner() public {
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         vm.prank(user);
         vm.expectRevert(FlowVaultsRequests.NotOwner.selector);
-        c.batchRemoveFromWhitelist(addresses);
+        c.batchRemoveFromAllowlist(addresses);
     }
 
-    function test_Whitelist_CreateTide_WhitelistDisabled() public {
-        // Whitelist is disabled by default, so anyone can create
+    function test_Allowlist_CreateTide_AllowlistDisabled() public {
+        // Allow list is disabled by default, so anyone can create
         vm.prank(user);
         uint256 reqId = c.createTide{value: 1 ether}(
             NATIVE_FLOW,
@@ -796,14 +796,14 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(reqId, 1);
     }
 
-    function test_Whitelist_CreateTide_WhitelistEnabled_NotWhitelisted()
+    function test_Allowlist_CreateTide_AllowlistEnabled_NotInAllowlist()
         public
     {
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotWhitelisted.selector);
+        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
         c.createTide{value: 1 ether}(
             NATIVE_FLOW,
             1 ether,
@@ -812,17 +812,17 @@ contract FlowVaultsRequestsTest is Test {
         );
     }
 
-    function test_Whitelist_CreateTide_WhitelistEnabled_Whitelisted() public {
-        // Add user to whitelist
+    function test_Allowlist_CreateTide_AllowlistEnabled_InAllowlist() public {
+        // Add user to allow list
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
 
-        // Enable whitelist
+        // Enable allow list
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         // User should be able to create tide
         vm.prank(user);
@@ -835,28 +835,28 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(reqId, 1);
     }
 
-    function test_Whitelist_DepositToTide_WhitelistEnabled_NotWhitelisted()
+    function test_Allowlist_DepositToTide_AllowlistEnabled_NotInAllowlist()
         public
     {
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotWhitelisted.selector);
+        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
         c.depositToTide{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
     }
 
-    function test_Whitelist_DepositToTide_WhitelistEnabled_Whitelisted()
+    function test_Allowlist_DepositToTide_AllowlistEnabled_InAllowlist()
         public
     {
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
 
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         vm.prank(user);
         uint256 reqId = c.depositToTide{value: 1 ether}(
@@ -867,70 +867,70 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(reqId, 1);
     }
 
-    function test_Whitelist_WithdrawFromTide_WhitelistEnabled_NotWhitelisted()
+    function test_Allowlist_WithdrawFromTide_AllowlistEnabled_NotInAllowlist()
         public
     {
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotWhitelisted.selector);
+        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
         c.withdrawFromTide(42, 1 ether);
     }
 
-    function test_Whitelist_WithdrawFromTide_WhitelistEnabled_Whitelisted()
+    function test_Allowlist_WithdrawFromTide_AllowlistEnabled_InAllowlist()
         public
     {
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
 
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         vm.prank(user);
         uint256 reqId = c.withdrawFromTide(42, 1 ether);
         assertEq(reqId, 1);
     }
 
-    function test_Whitelist_CloseTide_WhitelistEnabled_NotWhitelisted() public {
+    function test_Allowlist_CloseTide_AllowlistEnabled_NotInAllowlist() public {
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotWhitelisted.selector);
+        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
         c.closeTide(42);
     }
 
-    function test_Whitelist_CloseTide_WhitelistEnabled_Whitelisted() public {
+    function test_Allowlist_CloseTide_AllowlistEnabled_InAllowlist() public {
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
 
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         vm.prank(user);
         uint256 reqId = c.closeTide(42);
         assertEq(reqId, 1);
     }
 
-    function test_Whitelist_RemoveAfterAdd() public {
+    function test_Allowlist_RemoveAfterAdd() public {
         address[] memory addresses = new address[](1);
         addresses[0] = user;
 
         // Add
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
-        assertTrue(c.whitelisted(user));
+        c.batchAddToAllowlist(addresses);
+        assertTrue(c.allowlisted(user));
 
-        // Enable whitelist
+        // Enable allow list
         vm.prank(c.owner());
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
 
         // User can create tide
         vm.prank(user);
@@ -942,14 +942,14 @@ contract FlowVaultsRequestsTest is Test {
         );
         assertEq(reqId, 1);
 
-        // Remove from whitelist
+        // Remove from allow list
         vm.prank(c.owner());
-        c.batchRemoveFromWhitelist(addresses);
-        assertFalse(c.whitelisted(user));
+        c.batchRemoveFromAllowlist(addresses);
+        assertFalse(c.allowlisted(user));
 
         // User cannot create tide anymore
         vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotWhitelisted.selector);
+        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
         c.createTide{value: 1 ether}(
             NATIVE_FLOW,
             1 ether,
@@ -958,16 +958,16 @@ contract FlowVaultsRequestsTest is Test {
         );
     }
 
-    function test_Whitelist_Events_WhitelistEnabled() public {
+    function test_Allowlist_Events_AllowlistEnabled() public {
         vm.prank(c.owner());
 
         vm.expectEmit(false, false, false, true);
-        emit WhitelistEnabled(true);
+        emit AllowlistEnabled(true);
 
-        c.setWhitelistEnabled(true);
+        c.setAllowlistEnabled(true);
     }
 
-    function test_Whitelist_Events_AddressesAdded() public {
+    function test_Allowlist_Events_AddressesAdded() public {
         address[] memory addresses = new address[](2);
         addresses[0] = user;
         addresses[1] = makeAddr("user2");
@@ -975,24 +975,24 @@ contract FlowVaultsRequestsTest is Test {
         vm.prank(c.owner());
 
         vm.expectEmit(true, false, false, true);
-        emit AddressesAddedToWhitelist(addresses);
+        emit AddressesAddedToAllowlist(addresses);
 
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
     }
 
-    function test_Whitelist_Events_AddressesRemoved() public {
+    function test_Allowlist_Events_AddressesRemoved() public {
         address[] memory addresses = new address[](2);
         addresses[0] = user;
         addresses[1] = makeAddr("user2");
 
         vm.prank(c.owner());
-        c.batchAddToWhitelist(addresses);
+        c.batchAddToAllowlist(addresses);
 
         vm.prank(c.owner());
 
         vm.expectEmit(true, false, false, true);
-        emit AddressesRemovedFromWhitelist(addresses);
+        emit AddressesRemovedFromAllowlist(addresses);
 
-        c.batchRemoveFromWhitelist(addresses);
+        c.batchRemoveFromAllowlist(addresses);
     }
 }
