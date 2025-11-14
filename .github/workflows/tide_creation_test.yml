@@ -65,3 +65,39 @@ jobs:
       
       - name: Process Requests
         run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+
+      - name: Verify Tide Creation
+        run: |
+          echo "=== Verifying Tide Creation ==="
+          
+          # Check tide details using your script
+          TIDE_CHECK=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 0x045a1763c93006ca)
+          echo "$TIDE_CHECK"
+          
+          # Verify that we have at least one EVM address with tides
+          if echo "$TIDE_CHECK" | grep -q '"totalEVMAddresses": 1'; then
+            echo "✅ EVM address registered"
+          else
+            echo "❌ No EVM addresses found"
+            exit 1
+          fi
+          
+          # Verify that we have at least one tide created
+          if echo "$TIDE_CHECK" | grep -q '"totalMappedTides": 1'; then
+            echo "✅ Tide created successfully"
+          else
+            echo "❌ No tides found"
+            exit 1
+          fi
+          
+          # Verify the specific EVM address has the tide
+          if echo "$TIDE_CHECK" | grep -q '6813eb9362372eef6200f3b1dbc3f819671cba69'; then
+            echo "✅ Tide mapped to correct EVM address"
+          else
+            echo "❌ EVM address mapping not found"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✅ All verifications passed!"
+          echo "✅ E2E Tide Creation Test completed successfully!"
