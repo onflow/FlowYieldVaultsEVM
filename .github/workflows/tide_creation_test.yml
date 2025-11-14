@@ -18,7 +18,6 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           submodules: recursive
       
-      # Only install on act (local testing), GitHub runners already have these
       - name: Install Required Tools (act only)
         if: env.ACT
         continue-on-error: true
@@ -44,11 +43,10 @@ jobs:
           chmod +x ./local/setup_and_run_emulator.sh
           chmod +x ./local/deploy_full_stack.sh
       
-      # Step 1: Setup environment and run emulator in background
       - name: Setup and Run Emulator
         run: |
           ./local/setup_and_run_emulator.sh &
-          sleep 5
+          sleep 60
       
       - name: Deploy Full Stack
         run: |
@@ -61,7 +59,7 @@ jobs:
         run: |
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
             --sig "runCreateTide(address)" ${{ env.CONTRACT_ADDRESS }} \
-            --rpc-url localhost:8545 \
+            --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
       
