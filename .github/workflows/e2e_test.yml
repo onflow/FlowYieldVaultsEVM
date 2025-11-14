@@ -1,0 +1,235 @@
+name: Tide Operations CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  setup-and-test:
+    name: Tide Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      # === COMMON SETUP (keeping as before) ===
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          submodules: recursive
+      
+      - name: Install Flow CLI
+        run: sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
+      
+      - name: Update PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Verify Flow CLI Installation
+        run: flow version
+      
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      
+      - name: Make scripts executable
+        run: |
+          chmod +x ./local/setup_and_run_emulator.sh
+          chmod +x ./local/deploy_full_stack.sh
+      
+      - name: Setup and Run Emulator
+        run: |
+          ./local/setup_and_run_emulator.sh &
+          sleep 5
+      
+      - name: Deploy Full Stack
+        run: |
+          DEPLOYMENT_OUTPUT=$(./local/deploy_full_stack.sh)
+          echo "$DEPLOYMENT_OUTPUT"
+          FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowVaultsRequests Contract:" | sed 's/.*: //')
+          echo "CONTRACT_ADDRESS=$FLOW_VAULTS_REQUESTS_CONTRACT" >> $GITHUB_ENV
+      
+      # === TEST 1: BASIC TIDE CREATION ===
+      - name: Test 1 - Create Tide (10 FLOW)
+        run: |
+          echo "========================================="
+          echo "TEST 1: BASIC TIDE CREATION"
+          echo "========================================="
+          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+            --sig "runCreateTide(address)" ${{ env.CONTRACT_ADDRESS }} \
+            --rpc-url localhost:8545 \
+            --broadcast \
+            --legacy
+        env:
+          AMOUNT: 10000000000000000000
+      
+      - name: Process Create Request
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+      
+      - name: Verify Tide Creation
+        run: |
+          echo "Verifying tide was created successfully..."
+          
+          # Capture the output
+          TIDE_OUTPUT=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 1 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69 2>&1)
+          echo "$TIDE_OUTPUT"
+          
+          # Check for error in script execution
+          if echo "$TIDE_OUTPUT" | grep -q "error\|Error\|ERROR\|failed\|Failed"; then
+            echo "❌ Script execution failed"
+            exit 1
+          fi
+          
+          # Validate tide exists (check for tide ID 1)
+          if echo "$TIDE_OUTPUT" | grep -q "Tide ID: 1"; then
+            echo "✅ Tide ID verified: 1"
+          else
+            echo "❌ Tide ID 1 not found"
+            exit 1
+          fi
+          
+          # Validate initial balance (should be 10 FLOW = 10.00000000)
+          if echo "$TIDE_OUTPUT" | grep -q "Balance: 10.00000000\|Balance: 10.0"; then
+            echo "✅ Initial balance verified: 10 FLOW"
+          else
+            echo "❌ Expected balance of 10 FLOW not found"
+            echo "Actual output: $TIDE_OUTPUT"
+            exit 1
+          fi
+          
+          # Validate EVM address
+          if echo "$TIDE_OUTPUT" | grep -qi "0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69"; then
+            echo "✅ EVM address verified"
+          else
+            echo "❌ EVM address not matched"
+            exit 1
+          fi
+          
+          echo "✅ Test 1 Passed: Tide created successfully"
+      
+      # === TEST 2: FULL TIDE LIFECYCLE ===
+      - name: Test 2 - Deposit Additional Funds (20 FLOW)
+        run: |
+          echo "========================================="
+          echo "TEST 2: FULL TIDE LIFECYCLE"
+          echo "========================================="
+          echo "Step 1: Depositing additional 20 FLOW..."
+          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+            --sig "runDepositToTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 1 \
+            --rpc-url localhost:8545 \
+            --broadcast \
+            --legacy
+        env:
+          AMOUNT: 20000000000000000000
+      
+      - name: Process Deposit Request
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+      
+      - name: Verify Deposit (Total 30 FLOW)
+        run: |
+          echo "Verifying deposit (should have 30 FLOW total)..."
+          
+          TIDE_OUTPUT=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 1 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69 2>&1)
+          echo "$TIDE_OUTPUT"
+          
+          # Check for script execution errors
+          if echo "$TIDE_OUTPUT" | grep -q "error\|Error\|ERROR\|failed\|Failed"; then
+            echo "❌ Script execution failed"
+            exit 1
+          fi
+          
+          # Validate balance after deposit (should be 30 FLOW)
+          if echo "$TIDE_OUTPUT" | grep -q "Balance: 30.00000000\|Balance: 30.0"; then
+            echo "✅ Balance after deposit verified: 30 FLOW"
+          else
+            echo "❌ Expected balance of 30 FLOW not found"
+            echo "Actual output: $TIDE_OUTPUT"
+            exit 1
+          fi
+      
+      - name: Test 2 - Withdraw Half (15 FLOW)
+        run: |
+          echo "Step 2: Withdrawing 15 FLOW..."
+          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+            --sig "runWithdrawFromTide(address,uint64,uint256)" ${{ env.CONTRACT_ADDRESS }} 1 15000000000000000000 \
+            --rpc-url localhost:8545 \
+            --broadcast \
+            --legacy
+      
+      - name: Process Withdraw Request
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+      
+      - name: Verify Withdrawal (Remaining 15 FLOW)
+        run: |
+          echo "Verifying withdrawal (should have 15 FLOW remaining)..."
+          
+          TIDE_OUTPUT=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 1 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69 2>&1)
+          echo "$TIDE_OUTPUT"
+          
+          # Check for script execution errors
+          if echo "$TIDE_OUTPUT" | grep -q "error\|Error\|ERROR\|failed\|Failed"; then
+            echo "❌ Script execution failed"
+            exit 1
+          fi
+          
+          # Validate balance after withdrawal (should be 15 FLOW)
+          if echo "$TIDE_OUTPUT" | grep -q "Balance: 15.00000000\|Balance: 15.0"; then
+            echo "✅ Balance after withdrawal verified: 15 FLOW"
+          else
+            echo "❌ Expected balance of 15 FLOW not found"
+            echo "Actual output: $TIDE_OUTPUT"
+            exit 1
+          fi
+      
+      - name: Test 2 - Close Tide
+        run: |
+          echo "Step 3: Closing tide (withdrawing remaining funds)..."
+          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+            --sig "runCloseTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 1 \
+            --rpc-url localhost:8545 \
+            --broadcast \
+            --legacy
+      
+      - name: Process Close Request
+        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+      
+      - name: Verify Tide Closed
+        run: |
+          echo "Verifying tide was closed..."
+          
+          TIDE_OUTPUT=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 1 0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69 2>&1)
+          echo "$TIDE_OUTPUT"
+          
+          # Check if tide is closed (different possible outputs)
+          if echo "$TIDE_OUTPUT" | grep -qi "closed\|not found\|does not exist\|Balance: 0.00000000\|Balance: 0.0"; then
+            echo "✅ Tide successfully closed"
+          else
+            # If tide still exists with balance, that's an error
+            if echo "$TIDE_OUTPUT" | grep -q "Balance:"; then
+              echo "❌ Tide still has balance after close"
+              exit 1
+            fi
+            echo "✅ Tide closed (no longer accessible)"
+          fi
+          
+          echo "✅ Test 2 Passed: Full tide lifecycle completed successfully"
+      
+      # === FINAL SUMMARY ===
+      - name: Test Summary
+        run: |
+          echo "========================================="
+          echo "ALL INTEGRATION TESTS PASSED"
+          echo "========================================="
+          echo "✅ Test 1: Basic Tide Creation - PASSED"
+          echo "✅ Test 2: Full Tide Lifecycle - PASSED"
+          echo "========================================="
+      
+      # === CLEANUP ===
+      - name: Cleanup
+        if: always()
+        run: |
+          lsof -ti :8080 | xargs kill -9 2>/dev/null || true
+          lsof -ti :8545 | xargs kill -9 2>/dev/null || true
+          lsof -ti :3569 | xargs kill -9 2>/dev/null || true
+          lsof -ti :8888 | xargs kill -9 2>/dev/null || true
