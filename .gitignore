@@ -2,6 +2,7 @@ imports
 db
 
 .env
+.secrets
 
 # Cache files
 cache/

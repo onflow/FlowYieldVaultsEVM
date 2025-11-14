@@ -498,12 +498,6 @@ contract FlowVaultsRequestsTest is Test {
 
         // 2. COA processes
         vm.startPrank(coa);
-        c.updateRequestStatus(
-            1,
-            uint8(FlowVaultsRequests.RequestStatus.PROCESSING),
-            0,
-            ""
-        );
         c.withdrawFunds(NATIVE_FLOW, 1 ether);
         c.updateUserBalance(user, NATIVE_FLOW, 0);
         c.updateRequestStatus(
@@ -529,12 +523,6 @@ contract FlowVaultsRequestsTest is Test {
         // COA processes and sends funds back
         vm.deal(address(c), 0.5 ether);
         vm.startPrank(coa);
-        c.updateRequestStatus(
-            1,
-            uint8(FlowVaultsRequests.RequestStatus.PROCESSING),
-            0,
-            ""
-        );
         // In real scenario, COA would bridge funds back to user's EVM address
         c.updateRequestStatus(
             1,

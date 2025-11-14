@@ -21,7 +21,7 @@ access(all) fun main(contractAddr: Address): {String: AnyStruct} {
         "requestType": request.requestType,
         "requestTypeName": request.requestType == 0 ? "CREATE_TIDE" : (request.requestType == 3 ? "CLOSE_TIDE" : "UNKNOWN"),
         "status": request.status,
-        "statusName": request.status == 0 ? "PENDING" : (request.status == 1 ? "PROCESSING" : (request.status == 2 ? "COMPLETED" : "FAILED")),
+        "statusName": request.status == 0 ? "PENDING" : (request.status == 1 ? "COMPLETED" : "FAILED"),
         "tokenAddress": request.tokenAddress.toString(),
         "amount": request.amount.toString(),
         "tideId": request.tideId.toString(),

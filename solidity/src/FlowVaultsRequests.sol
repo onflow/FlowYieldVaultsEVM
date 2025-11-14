@@ -53,7 +53,6 @@ contract FlowVaultsRequests {
 
     enum RequestStatus {
         PENDING,
-        PROCESSING,
         COMPLETED,
         FAILED
     }
@@ -551,7 +550,7 @@ contract FlowVaultsRequests {
 
     /// @notice Update request status (only authorized COA)
     /// @param requestId Request ID to update
-    /// @param status New status (as uint8: 0=PENDING, 1=PROCESSING, 2=COMPLETED, 3=FAILED)
+    /// @param status New status (as uint8: 0=PENDING, 1=COMPLETED, 2=FAILED)
     /// @param tideId Associated Tide ID (if applicable)
     /// @param message Status message (e.g., error reason if failed)
     function updateRequestStatus(
@@ -562,10 +561,8 @@ contract FlowVaultsRequests {
     ) external onlyAuthorizedCOA {
         Request storage request = pendingRequests[requestId];
         if (request.id != requestId) revert RequestNotFound();
-        if (
-            request.status != RequestStatus.PENDING &&
-            request.status != RequestStatus.PROCESSING
-        ) revert RequestAlreadyFinalized();
+        if (request.status != RequestStatus.PENDING)
+            revert RequestAlreadyFinalized();
 
         // Convert uint8 to RequestStatus
         request.status = RequestStatus(status);
@@ -583,17 +580,12 @@ contract FlowVaultsRequests {
             }
         }
 
-        // If completed or failed, remove from pending queue and decrement counter
-        if (
-            status == uint8(RequestStatus.COMPLETED) ||
-            status == uint8(RequestStatus.FAILED)
-        ) {
-            // Decrement user pending request count
-            if (userPendingRequestCount[request.user] > 0) {
-                userPendingRequestCount[request.user]--;
-            }
-            _removePendingRequest(requestId);
+        // Remove from pending queue and decrement counter (since we only transition from PENDING to COMPLETED/FAILED now)
+        // Decrement user pending request count
+        if (userPendingRequestCount[request.user] > 0) {
+            userPendingRequestCount[request.user]--;
         }
+        _removePendingRequest(requestId);
 
         emit RequestProcessed(
             requestId,

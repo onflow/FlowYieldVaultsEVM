@@ -24,9 +24,8 @@ access(all) contract FlowVaultsEVM {
     /// Request Status (matching Solidity enum RequestStatus)
     access(all) enum RequestStatus: UInt8 {
         access(all) case PENDING       // rawValue = 0
-        access(all) case PROCESSING    // rawValue = 1
-        access(all) case COMPLETED     // rawValue = 2
-        access(all) case FAILED        // rawValue = 3
+        access(all) case COMPLETED     // rawValue = 1
+        access(all) case FAILED        // rawValue = 2
     }
     
     // ========================================
@@ -257,13 +256,6 @@ access(all) contract FlowVaultsEVM {
         }
         
         access(self) fun processRequestSafely(_ request: EVMRequest): Bool {
-            self.updateRequestStatus(
-                requestId: request.id,
-                status: FlowVaultsEVM.RequestStatus.PROCESSING.rawValue,
-                tideId: 0,
-                message: "Processing request ID ".concat(request.id.toString())
-            )
-            
             var success = false
             var tideId: UInt64 = 0
             var message = ""
