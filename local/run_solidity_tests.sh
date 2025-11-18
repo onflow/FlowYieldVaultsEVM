@@ -1,15 +1,15 @@
-#!/usr/bin/env fish
+#!/bin/bash
 
 # Run all Solidity tests using Foundry
 echo "Running Solidity tests..."
 echo ""
 
 # Navigate to project root
-cd (dirname (status -f))/..
+cd "$(dirname "$0")/.."
 
 cd solidity
 
-if forge test
+if forge test; then
     echo ""
     echo "=========================================="
     echo "✓ All Solidity tests passed"
@@ -21,4 +21,4 @@ else
     echo "✗ Some Solidity tests failed"
     echo "=========================================="
     exit 1
-end
+fi
