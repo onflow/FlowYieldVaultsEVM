@@ -1,11 +1,51 @@
 #!/bin/bash
 
-# Run all Cadence tests
-echo "Running Cadence tests..."
-echo ""
+set -e  # Exit on any error
 
 # Navigate to project root
 cd "$(dirname "$0")/.."
+
+# ============================================
+# CLEANUP SECTION
+# ============================================
+echo "Starting cleanup process..."
+
+# Clean the db directory (only if it exists)
+echo "Cleaning ./db directory..."
+if [ -d "./db" ]; then
+  rm -rf ./db/*
+  echo "Database directory cleaned."
+else
+  echo "Database directory does not exist, skipping..."
+fi
+
+# Clean the imports directory
+echo "Cleaning ./imports directory..."
+if [ -d "./imports" ]; then
+  rm -rf ./imports/*
+  echo "Imports directory cleaned."
+else
+  echo "Imports directory does not exist, creating it..."
+  mkdir -p ./imports
+fi
+
+echo "Cleanup completed!"
+echo ""
+
+# ============================================
+# INSTALL DEPENDENCIES
+# ============================================
+echo "Installing Flow dependencies..."
+flow deps install --skip-alias --skip-deployments
+
+echo "Dependencies installed!"
+echo ""
+
+# ============================================
+# RUN TESTS
+# ============================================
+echo "Running Cadence tests..."
+echo ""
 
 test_files=(
     "cadence/tests/access_control_test.cdc"
