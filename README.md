@@ -12,7 +12,7 @@ Cross-VM bridge enabling Flow EVM users to access Cadence-based yield farming th
 
 # 2. Create yield position from EVM
 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-  --sig "runCreateTide(address)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 \
+  --sig "runCreateTide(address)" 0x935936B21B397902B786B55A21d3CB3863C9E814 \
   --rpc-url localhost:8545 --broadcast --legacy
 
 # 3. Process requests (Cadence worker)
@@ -41,33 +41,33 @@ All operations use `FlowVaultsTideOperations.s.sol`:
 ```bash
 # Default: 10 FLOW
 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-  --sig "runCreateTide(address)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 \
+  --sig "runCreateTide(address)" 0x935936B21B397902B786B55A21d3CB3863C9E814 \
   --rpc-url localhost:8545 --broadcast --legacy
 
 # Custom amount (100 FLOW)
 AMOUNT=100000000000000000000 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-  --sig "runCreateTide(address)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 \
+  --sig "runCreateTide(address)" 0x935936B21B397902B786B55A21d3CB3863C9E814 \
   --rpc-url localhost:8545 --broadcast --legacy
 ```
 
 ### DEPOSIT_TO_TIDE - Add to existing position
 ```bash
 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-  --sig "runDepositToTide(address,uint64)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 42 \
+  --sig "runDepositToTide(address,uint64)" 0x935936B21B397902B786B55A21d3CB3863C9E814 42 \
   --rpc-url localhost:8545 --broadcast --legacy
 ```
 
 ### WITHDRAW_FROM_TIDE - Withdraw earnings
 ```bash
 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-  --sig "runWithdrawFromTide(address,uint64,uint256)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 42 30000000000000000000 \
+  --sig "runWithdrawFromTide(address,uint64,uint256)" 0x935936B21B397902B786B55A21d3CB3863C9E814 42 30000000000000000000 \
   --rpc-url localhost:8545 --broadcast --legacy
 ```
 
 ### CLOSE_TIDE - Close position
 ```bash
 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-  --sig "runCloseTide(address,uint64)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 42 \
+  --sig "runCloseTide(address,uint64)" 0x935936B21B397902B786B55A21d3CB3863C9E814 42 \
   --rpc-url localhost:8545 --broadcast --legacy
 ```
 
@@ -77,7 +77,7 @@ forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOper
 
 | Component | Address |
 |-----------|---------|
-| FlowVaultsRequests | `0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892` |
+| FlowVaultsRequests | `0x935936B21B397902B786B55A21d3CB3863C9E814` |
 | FlowVaultsEVM | Deployed on Cadence (tidal account) |
 | RPC | `localhost:8545` |
 

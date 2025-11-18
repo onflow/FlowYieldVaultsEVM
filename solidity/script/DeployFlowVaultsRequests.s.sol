@@ -11,8 +11,6 @@ contract DeployFlowVaultsRequests is Script {
             uint256(0x2)
         );
 
-        address deployer = vm.addr(deployerPrivateKey);
-
         // Read COA address from environment variable
         address coa = vm.envAddress("COA_ADDRESS");
 
@@ -22,6 +20,11 @@ contract DeployFlowVaultsRequests is Script {
         FlowVaultsRequests flowVaultsRequests = new FlowVaultsRequests(coa);
 
         vm.stopBroadcast();
+
+        console.log(
+            "FlowVaultsRequests deployed at:",
+            address(flowVaultsRequests)
+        );
 
         return flowVaultsRequests;
     }
