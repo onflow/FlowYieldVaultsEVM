@@ -21,10 +21,10 @@ contract FlowVaultsRequestsTest is Test {
     address coa = makeAddr("coa");
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
-    // Test vault and strategy identifiers for testnet
-    string constant VAULT_IDENTIFIER = "A.7e60df042a9c0868.FlowToken.Vault";
+    // Test vault and strategy identifiers for emulator
+    string constant VAULT_IDENTIFIER = "A.0ae53cb6e3f42a79.FlowToken.Vault";
     string constant STRATEGY_IDENTIFIER =
-        "A.3bda2f90274dbc9b.FlowVaultsStrategies.TracerStrategy";
+        "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy";
 
     // Event declarations for testing
     event RequestCreated(
@@ -201,6 +201,7 @@ contract FlowVaultsRequestsTest is Test {
             STRATEGY_IDENTIFIER
         );
 
+        assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether); // Before cancellation
         uint256 balBefore = user.balance;
         c.cancelRequest(reqId);
 

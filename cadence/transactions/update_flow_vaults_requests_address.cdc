@@ -8,7 +8,7 @@ transaction(newAddress: String) {
         ) ?? panic("Could not borrow Admin resource")
         
         let evmAddress = EVM.addressFromString(newAddress)
-        admin.updateFlowVaultsRequestsAddress(evmAddress)  // 👈 Nouvelle fonction
+        admin.updateFlowVaultsRequestsAddress(evmAddress)
         
         log("FlowVaultsRequests address updated to: ".concat(newAddress))
     }
