@@ -18,14 +18,7 @@ access(all) fun main(evmAddress: String): [UInt64] {
         normalizedAddress = "0".concat(normalizedAddress)
     }
     
-    log("Checking Tides for EVM address: ".concat(normalizedAddress))
-    
     let tideIds = FlowVaultsEVM.getTideIDsForEVMAddress(normalizedAddress)
-    
-    log("Found ".concat(tideIds.length.toString()).concat(" Tide(s)"))
-    for id in tideIds {
-        log("  - Tide ID: ".concat(id.toString()))
-    }
     
     return tideIds
 }

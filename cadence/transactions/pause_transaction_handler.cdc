@@ -10,9 +10,5 @@ transaction() {
         ) ?? panic("Could not borrow Admin resource")
         
         admin.pause()
-        
-        log("✅ Handler paused successfully")
-        log("⚠️  Currently scheduled transactions will still execute")
-        log("⚠️  But they will skip processing and NOT schedule the next execution")
     }
 }

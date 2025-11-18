@@ -122,11 +122,6 @@ contract FlowVaultsTideOperations is Script {
         uint256 userPrivateKey,
         uint256 amount
     ) internal {
-        console.log("\n=== Creating New Tide ===");
-        console.log("Amount:", amount);
-        console.log("Vault:", VAULT_IDENTIFIER);
-        console.log("Strategy:", STRATEGY_IDENTIFIER);
-
         require(user.balance >= amount, "Insufficient balance");
 
         vm.startBroadcast(userPrivateKey);
@@ -141,11 +136,6 @@ contract FlowVaultsTideOperations is Script {
         vm.stopBroadcast();
 
         displayRequestDetails(flowVaultsRequests, requestId, user);
-
-        console.log("\n=== Next Steps ===");
-        console.log("1. Note the Request ID:", requestId);
-        console.log("2. Run Cadence worker to process this request");
-        console.log("3. Tide ID will be assigned after processing");
     }
 
     // ============================================
@@ -159,10 +149,6 @@ contract FlowVaultsTideOperations is Script {
         uint64 tideId,
         uint256 amount
     ) internal {
-        console.log("\n=== Depositing to Existing Tide ===");
-        console.log("Tide ID:", tideId);
-        console.log("Amount:", amount);
-
         require(user.balance >= amount, "Insufficient balance");
 
         vm.startBroadcast(userPrivateKey);
@@ -176,10 +162,6 @@ contract FlowVaultsTideOperations is Script {
         vm.stopBroadcast();
 
         displayRequestDetails(flowVaultsRequests, requestId, user);
-
-        console.log("\n=== Next Steps ===");
-        console.log("1. Note the Request ID:", requestId);
-        console.log("2. Run Cadence worker to process this deposit");
     }
 
     // ============================================
@@ -193,10 +175,6 @@ contract FlowVaultsTideOperations is Script {
         uint64 tideId,
         uint256 amount
     ) internal {
-        console.log("\n=== Withdrawing from Tide ===");
-        console.log("Tide ID:", tideId);
-        console.log("Amount:", amount);
-
         vm.startBroadcast(userPrivateKey);
 
         uint256 requestId = flowVaultsRequests.withdrawFromTide(tideId, amount);
@@ -204,11 +182,6 @@ contract FlowVaultsTideOperations is Script {
         vm.stopBroadcast();
 
         displayRequestDetails(flowVaultsRequests, requestId, user);
-
-        console.log("\n=== Next Steps ===");
-        console.log("1. Note the Request ID:", requestId);
-        console.log("2. Run Cadence worker to process this withdrawal");
-        console.log("3. Funds will be returned to your EVM address");
     }
 
     // ============================================
@@ -221,9 +194,6 @@ contract FlowVaultsTideOperations is Script {
         uint256 userPrivateKey,
         uint64 tideId
     ) internal {
-        console.log("\n=== Closing Tide ===");
-        console.log("Tide ID:", tideId);
-
         vm.startBroadcast(userPrivateKey);
 
         uint256 requestId = flowVaultsRequests.closeTide(tideId);
@@ -231,11 +201,6 @@ contract FlowVaultsTideOperations is Script {
         vm.stopBroadcast();
 
         displayRequestDetails(flowVaultsRequests, requestId, user);
-
-        console.log("\n=== Next Steps ===");
-        console.log("1. Note the Request ID:", requestId);
-        console.log("2. Run Cadence worker to process this closure");
-        console.log("3. All funds will be returned to your EVM address");
     }
 
     // ============================================
@@ -250,16 +215,6 @@ contract FlowVaultsTideOperations is Script {
         FlowVaultsRequests.Request memory request = flowVaultsRequests
             .getRequest(requestId);
 
-        console.log("\n=== Request Created ===");
-        console.log("Request ID:", request.id);
-        console.log("User:", request.user);
-        console.log("Type:", uint256(request.requestType));
-        console.log("Status:", uint256(request.status));
-        console.log("Token:", request.tokenAddress);
-        console.log("Amount:", request.amount);
-        console.log("Tide ID:", request.tideId);
-        console.log("Timestamp:", request.timestamp);
-
         if (bytes(request.vaultIdentifier).length > 0) {
             console.log("Vault:", request.vaultIdentifier);
         }
@@ -268,14 +223,10 @@ contract FlowVaultsTideOperations is Script {
         }
 
         uint256[] memory pendingIds = flowVaultsRequests.getPendingRequestIds();
-        console.log("\n=== Queue Status ===");
-        console.log("Total pending requests:", pendingIds.length);
 
         uint256 userBalance = flowVaultsRequests.getUserBalance(
             user,
             NATIVE_FLOW
         );
-        console.log("Your pending balance:", userBalance);
-        console.log("Your wallet balance:", user.balance);
     }
 }

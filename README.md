@@ -1,79 +1,113 @@
 # Flow Vaults EVM Integration
 
-Bridge Flow EVM users to Cadence-based yield farming through asynchronous cross-VM requests.
+Cross-VM bridge enabling Flow EVM users to access Cadence-based yield farming through asynchronous request processing.
+
+---
 
 ## Quick Start
+
 ```bash
-# 1. Start environment & deploy contracts
+# 1. Setup & deploy
 ./local/setup_and_run_emulator.sh && ./local/deploy_full_stack.sh
 
 # 2. Create yield position from EVM
-forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" <CONTRACT_ADDRESS> --rpc-url localhost:8545 --broadcast --legacy
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+  --sig "runCreateTide(address)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 \
+  --rpc-url localhost:8545 --broadcast --legacy
 
-# 3. Process request (Cadence worker)
-flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limt 9999
+# 3. Process requests (Cadence worker)
+flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
 ```
+
+---
 
 ## Architecture
 
-**EVM Side:** Users deposit FLOW to `FlowVaultsRequests` contract and submit requests  
-**Cadence Side:** `FlowVaultsEVM` processes requests, creates/manages Tide positions  
-**Bridge:** COA (Cadence Owned Account) controls fund movement between VMs
-
-## Request Types & Operations
-
-All operations are performed using the unified `FlowVaultsTideOperations.s.sol` script:
-
-### CREATE_TIDE - Open new yield position
-```bash
-# With default amount (10 FLOW)
-forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" --rpc-url localhost:8545 --broadcast --legacy
-
-# With custom amount
-AMOUNT=100000000000000000000 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCreateTide()" --rpc-url localhost:8545 --broadcast --legacy
+```
+EVM User → FlowVaultsRequests (escrow) → Worker polls → COA bridges → Tide in Cadence
 ```
 
-### DEPOSIT_TO_TIDE - Add funds to existing position
-```bash
-# With default amount (10 FLOW)
-forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runDepositToTide(uint64)" 42 --rpc-url localhost:8545 --broadcast --legacy
+**EVM Side**: Users deposit FLOW and submit requests (CREATE/DEPOSIT/WITHDRAW/CLOSE)  
+**Cadence Side**: Worker processes requests, manages Tide positions via COA  
+**Bridge**: COA (Cadence Owned Account) controls fund movement between VMs
 
-# With custom amount
-AMOUNT=50000000000000000000 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runDepositToTide(uint64)" 42 --rpc-url localhost:8545 --broadcast --legacy
+---
+
+## Operations
+
+All operations use `FlowVaultsTideOperations.s.sol`:
+
+### CREATE_TIDE - Open yield position
+```bash
+# Default: 10 FLOW
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+  --sig "runCreateTide(address)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 \
+  --rpc-url localhost:8545 --broadcast --legacy
+
+# Custom amount (100 FLOW)
+AMOUNT=100000000000000000000 forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+  --sig "runCreateTide(address)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 \
+  --rpc-url localhost:8545 --broadcast --legacy
+```
+
+### DEPOSIT_TO_TIDE - Add to existing position
+```bash
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+  --sig "runDepositToTide(address,uint64)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 42 \
+  --rpc-url localhost:8545 --broadcast --legacy
 ```
 
 ### WITHDRAW_FROM_TIDE - Withdraw earnings
 ```bash
-forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runWithdrawFromTide(uint64,uint256)" 42 30000000000000000000 --rpc-url localhost:8545 --broadcast --legacy
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+  --sig "runWithdrawFromTide(address,uint64,uint256)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 42 30000000000000000000 \
+  --rpc-url localhost:8545 --broadcast --legacy
 ```
 
-### CLOSE_TIDE - Close position and return all funds
+### CLOSE_TIDE - Close position
 ```bash
-forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations --sig "runCloseTide(uint64)" 42 --rpc-url localhost:8545 --broadcast --legacy
+forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+  --sig "runCloseTide(address,uint64)" 0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892 42 \
+  --rpc-url localhost:8545 --broadcast --legacy
 ```
-
-See `solidity/script/TIDE_OPERATIONS.md` for detailed usage documentation.
-
-## Key Addresses
-
-| Component | Address |
-|-----------|---------|
-| RPC | `localhost:8545` |
-| FlowVaultsRequests | `0x153b84F377C6C7a7D93Bd9a717E48097Ca6Cfd11` |
-| Deployer | `0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF` |
-| User A | `0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69` |
-
-## How It Works
-```
-EVM User → FlowVaultsRequests (escrow FLOW) → Worker polls requests → 
-COA bridges funds → Create Tide on Cadence → Update EVM state
-```
-
-## Status
-
-✅ **CREATE_TIDE** - Fully working  
-🚧 **DEPOSIT/WITHDRAW/CLOSE** - In development
 
 ---
 
-**Built on Flow** | [Docs](./docs) | [Architecture](./DESIGN.md)
+## Key Contracts
+
+| Component | Address |
+|-----------|---------|
+| FlowVaultsRequests | `0xe78a4bF6F7a17CE6fF09219b9E8e10a893819892` |
+| FlowVaultsEVM | Deployed on Cadence (tidal account) |
+| RPC | `localhost:8545` |
+
+---
+
+## Testing
+
+**Status**: ✅ 19/19 tests passing (100%)
+
+```bash
+# Run all tests
+flow test cadence/tests/evm_bridge_lifecycle_test.cdc
+flow test cadence/tests/access_control_test.cdc
+flow test cadence/tests/error_handling_test.cdc
+```
+
+**Coverage**:
+- Request lifecycle (CREATE, DEPOSIT, WITHDRAW, CLOSE) - 8 tests
+- Access control & security - 7 tests
+- Error handling & edge cases - 4 tests
+
+See `TESTING.md` for complete documentation.
+
+---
+
+## Documentation
+
+- **[Architecture Design](./FLOW_VAULTS_EVM_BRIDGE_DESIGN.md)** - Complete bridge design and data flows
+- **[Testing](./TESTING.md)** - Test suite documentation
+
+---
+
+**Built on Flow** | Testnet Deployment Ready

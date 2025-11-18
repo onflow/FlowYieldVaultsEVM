@@ -12,23 +12,14 @@ contract DeployFlowVaultsRequests is Script {
         );
 
         address deployer = vm.addr(deployerPrivateKey);
-        console.log("Deployer address:", deployer);
-        console.log("Deployer balance:", deployer.balance);
 
         // Read COA address from environment variable
         address coa = vm.envAddress("COA_ADDRESS");
-        console.log("Using COA address:", coa);
 
         // Start broadcast with private key
         vm.startBroadcast(deployerPrivateKey);
 
         FlowVaultsRequests flowVaultsRequests = new FlowVaultsRequests(coa);
-
-        console.log(
-            "FlowVaultsRequests deployed at:",
-            address(flowVaultsRequests)
-        );
-        console.log("NATIVE_FLOW constant:", flowVaultsRequests.NATIVE_FLOW());
 
         vm.stopBroadcast();
 

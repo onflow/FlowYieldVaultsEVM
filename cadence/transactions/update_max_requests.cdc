@@ -13,20 +13,12 @@ import "FlowVaultsEVM"
 transaction(newMax: Int) {
     prepare(signer: auth(BorrowValue) &Account) {
         
-        log("=== Updating MAX_REQUESTS_PER_TX ===")
-        log("Current value: ".concat(FlowVaultsEVM.MAX_REQUESTS_PER_TX.toString()))
-        log("New value: ".concat(newMax.toString()))
-        
         // Borrow the Admin resource
         let admin = signer.storage.borrow<&FlowVaultsEVM.Admin>(
             from: FlowVaultsEVM.AdminStoragePath
         ) ?? panic("Could not borrow FlowVaultsEVM Admin resource")
-        
         // Update the value
         admin.updateMaxRequestsPerTx(newMax)
-        
-        log("✅ MAX_REQUESTS_PER_TX updated successfully")
-        log("New value: ".concat(FlowVaultsEVM.MAX_REQUESTS_PER_TX.toString()))
     }
     
     post {

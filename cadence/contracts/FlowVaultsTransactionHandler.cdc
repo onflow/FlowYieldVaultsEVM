@@ -83,13 +83,9 @@ access(all) contract FlowVaultsTransactionHandler {
         }
         
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
-            log("=== FlowVaultsEVM Scheduled Execution Started ===")
-            log("Transaction ID: ".concat(id.toString()))
             
             // Check if paused
             if FlowVaultsTransactionHandler.isPaused {
-                log("⏸️  Handler is PAUSED - skipping execution and NOT scheduling next")
-                log("=== FlowVaultsEVM Scheduled Execution Skipped (Paused) ===")
                 return
             }
             
@@ -97,12 +93,10 @@ access(all) contract FlowVaultsTransactionHandler {
                 ?? panic("Could not borrow Worker capability")
             
             let pendingRequestsBefore = self.getPendingRequestCount(worker)
-            log("Pending Requests Before: ".concat(pendingRequestsBefore.toString()))
             
             worker.processRequests()
             
             let pendingRequestsAfter = self.getPendingRequestCount(worker)
-            log("Pending Requests After: ".concat(pendingRequestsAfter.toString()))
             
             self.executionCount = self.executionCount + 1
             self.lastExecutionTime = getCurrentBlock().timestamp
@@ -120,12 +114,10 @@ access(all) contract FlowVaultsTransactionHandler {
             // AUTO-SCHEDULE: Schedule the next execution based on remaining workload
             self.scheduleNextExecution(nextDelay: nextDelay, pendingRequests: pendingRequestsAfter)
             
-            log("=== FlowVaultsEVM Scheduled Execution Complete ===")
         }
         
         /// Schedule the next execution automatically
         access(self) fun scheduleNextExecution(nextDelay: UFix64, pendingRequests: Int) {
-            log("=== Auto-Scheduling Next Execution ===")
             
             let future = getCurrentBlock().timestamp + nextDelay
             let priority = FlowTransactionScheduler.Priority.Medium
@@ -181,11 +173,6 @@ access(all) contract FlowVaultsTransactionHandler {
                 delaySeconds: nextDelay,
                 pendingRequests: pendingRequests
             )
-            
-            log("Next execution scheduled for: ".concat(future.toString()))
-            log("Transaction ID: ".concat(transactionId.toString()))
-            log("Delay: ".concat(nextDelay.toString()).concat(" seconds"))
-            log("=== Auto-Scheduling Complete ===")
         }
 
         access(all) view fun getViews(): [Type] {

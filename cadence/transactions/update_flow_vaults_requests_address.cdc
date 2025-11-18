@@ -9,7 +9,5 @@ transaction(newAddress: String) {
         
         let evmAddress = EVM.addressFromString(newAddress)
         admin.updateFlowVaultsRequestsAddress(evmAddress)
-        
-        log("FlowVaultsRequests address updated to: ".concat(newAddress))
     }
 }

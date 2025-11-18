@@ -14,12 +14,7 @@ transaction() {
             from: FlowVaultsEVM.WorkerStoragePath
         ) ?? panic("Could not borrow Worker from storage")
         
-        log("=== Processing Pending Requests ===")
-        log("Worker COA address: ".concat(worker.getCOAAddressString()))
-        
         // Process all pending requests
         worker.processRequests()
-        
-        log("=== Processing Complete ===")
     }
 }

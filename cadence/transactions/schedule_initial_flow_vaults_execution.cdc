@@ -19,13 +19,9 @@ transaction(
     priority: UInt8,
     executionEffort: UInt64
 ) {
-    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, GetStorageCapabilityController, PublishCapability) &Account) {
-        log("=== Scheduling Initial FlowVaultsEVM Execution ===")
-        
+    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, GetStorageCapabilityController, PublishCapability) &Account) {        
         // Calculate future timestamp
         let future = getCurrentBlock().timestamp + delaySeconds
-        log("Scheduled for: ".concat(future.toString()))
-        log("Delay: ".concat(delaySeconds.toString()).concat(" seconds"))
 
         // Convert priority
         let pr = priority == 0
@@ -33,7 +29,6 @@ transaction(
             : priority == 1
                 ? FlowTransactionScheduler.Priority.Medium
                 : FlowTransactionScheduler.Priority.Low
-        log("Priority: ".concat(pr.rawValue.toString()))
 
         // Get the entitled handler capability
         var handlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>? = nil
@@ -49,18 +44,15 @@ transaction(
         if handlerCap == nil {
             panic("Could not find entitled handler capability. Please run InitFlowVaultsTransactionHandler.cdc first.")
         }
-        log("Handler capability found")
 
         // Initialize scheduler manager if not present
         if signer.storage.borrow<&AnyResource>(from: FlowTransactionSchedulerUtils.managerStoragePath) == nil {
-            log("Creating new scheduler manager")
             let manager <- FlowTransactionSchedulerUtils.createManager()
             signer.storage.save(<-manager, to: FlowTransactionSchedulerUtils.managerStoragePath)
 
             let managerCapPublic = signer.capabilities.storage
                 .issue<&{FlowTransactionSchedulerUtils.Manager}>(FlowTransactionSchedulerUtils.managerStoragePath)
             signer.capabilities.publish(managerCapPublic, at: FlowTransactionSchedulerUtils.managerPublicPath)
-            log("Scheduler manager created and published")
         }
 
         // Borrow the manager
@@ -68,10 +60,8 @@ transaction(
             .borrow<auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}>(
                 from: FlowTransactionSchedulerUtils.managerStoragePath
             ) ?? panic("Could not borrow Manager reference")
-        log("Manager borrowed successfully")
 
         // Estimate fees
-        log("Estimating transaction fees...")
         let est = FlowTransactionScheduler.estimate(
             data: nil,
             timestamp: future,
@@ -80,7 +70,6 @@ transaction(
         )
         
         let estimatedFee = est.flowFee ?? 0.0
-        log("Estimated fee: ".concat(estimatedFee.toString()).concat(" FLOW"))
         
         if est.timestamp == nil && pr != FlowTransactionScheduler.Priority.Low {
             let errorMsg = est.error ?? "estimation failed"
@@ -93,7 +82,6 @@ transaction(
             ?? panic("Missing FlowToken vault")
         
         let fees <- vaultRef.withdraw(amount: estimatedFee) as! @FlowToken.Vault
-        log("Fees withdrawn from vault")
 
         // Schedule the transaction
         let transactionId = manager.schedule(
@@ -104,11 +92,5 @@ transaction(
             executionEffort: executionEffort,
             fees: <-fees
         )
-
-        log("✅ Scheduled transaction ID: ".concat(transactionId.toString()))
-        log("Execution will trigger at: ".concat(future.toString()))
-        log("After execution, the handler will automatically schedule the next run")
-        log("based on the number of pending requests (smart scheduling)")
-        log("=== Scheduling Complete ===")
     }
 }

@@ -95,6 +95,18 @@ access(all) contract FlowVaultsEVM {
             vaultIdentifier: String,
             strategyIdentifier: String
         ) {
+            pre {
+                requestType >= FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue && 
+                requestType <= FlowVaultsEVM.RequestType.CLOSE_TIDE.rawValue: 
+                    "Invalid request type: must be between 0 (CREATE_TIDE) and 3 (CLOSE_TIDE)"
+                
+                status >= FlowVaultsEVM.RequestStatus.PENDING.rawValue && 
+                status <= FlowVaultsEVM.RequestStatus.FAILED.rawValue: 
+                    "Invalid status: must be between 0 (PENDING) and 2 (FAILED)"
+                
+                requestType == FlowVaultsEVM.RequestType.CLOSE_TIDE.rawValue || amount > 0: 
+                    "Amount must be greater than 0 for CREATE_TIDE, DEPOSIT_TO_TIDE, and WITHDRAW_FROM_TIDE operations"
+            }
             self.id = id
             self.user = user
             self.requestType = requestType
@@ -217,15 +229,11 @@ access(all) contract FlowVaultsEVM {
             // 1. Get count of pending requests (lightweight)
             let pendingIds = self.getPendingRequestIdsFromEVM()
             let totalPending = pendingIds.length
-            
-            log("Total pending requests: ".concat(totalPending.toString()))
-            
+                        
             // 2. Fetch only the batch we'll process (up to MAX_REQUESTS_PER_TX)
             let requestsToProcess = self.getPendingRequestsFromEVM()
             let batchSize = requestsToProcess.length
-            
-            log("Batch size to process: ".concat(batchSize.toString()))
-            
+                        
             if batchSize == 0 {
                 emit RequestsProcessed(count: 0, successful: 0, failed: 0)
                 return
@@ -237,11 +245,6 @@ access(all) contract FlowVaultsEVM {
             
             while i < batchSize {
                 let request = requestsToProcess[i]
-                
-                log("Processing request: ".concat(request.id.toString()))
-                log("Request type: ".concat(request.requestType.toString()))
-                log("User: ".concat(request.user.toString()))
-                log("Amount: ".concat(request.amount.toString()))
 
                 let success = self.processRequestSafely(request)
                 if success {
@@ -256,6 +259,10 @@ access(all) contract FlowVaultsEVM {
         }
         
         access(self) fun processRequestSafely(_ request: EVMRequest): Bool {
+            pre {
+                request.amount > 0 || request.requestType == FlowVaultsEVM.RequestType.CLOSE_TIDE.rawValue: "Request amount must be greater than 0 for non-close operations"
+                request.status == FlowVaultsEVM.RequestStatus.PENDING.rawValue: "Request must be in PENDING status"
+            }
             var success = false
             var tideId: UInt64 = 0
             var message = ""
@@ -309,7 +316,6 @@ access(all) contract FlowVaultsEVM {
             let strategyIdentifier = request.strategyIdentifier
 
             let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
-            log("Creating Tide for amount: ".concat(amount.toString()))
             
             let vault <- self.withdrawFundsFromEVM(amount: amount)
 
@@ -445,8 +451,7 @@ access(all) contract FlowVaultsEVM {
             
             // 2. Withdraw funds from EVM
             let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
-            log("Depositing to Tide for amount: ".concat(amount.toString()))
-            
+
             let vault <- self.withdrawFundsFromEVM(amount: amount)
             
             // 3. Deposit to existing Tide
@@ -496,7 +501,6 @@ access(all) contract FlowVaultsEVM {
             
             // 2. Withdraw from Tide
             let amount = FlowVaultsEVM.ufix64FromUInt256(request.amount)
-            log("Withdrawing from Tide for amount: ".concat(amount.toString()))
             
             let vault <- self.tideManager.withdrawFromTide(request.tideId, amount: amount)
             
@@ -662,12 +666,6 @@ access(all) contract FlowVaultsEVM {
                 gasLimit: 15_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
-
-            log("=== EVM Call Result ===")
-            log("Status: ".concat(callResult.status == EVM.Status.successful ? "SUCCESSFUL" : "FAILED"))
-            log("Requested limit: ".concat(limit.toString()))
-            log("Gas Used: ".concat(callResult.gasUsed.toString()))
-            log("Data Length: ".concat(callResult.data.length.toString()))
 
             // If EVM call fails, decode error and panic
             if callResult.status != EVM.Status.successful {

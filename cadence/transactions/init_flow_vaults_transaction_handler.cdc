@@ -11,9 +11,7 @@ import "FlowVaultsEVM"
 /// 3. Issues both entitled and public capabilities for the handler
 ///
 transaction() {
-    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
-        log("=== Initializing FlowVaultsTransactionHandler ===")
-        
+    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {        
         // Check if Worker exists
         if signer.storage.borrow<&FlowVaultsEVM.Worker>(from: FlowVaultsEVM.WorkerStoragePath) == nil {
             panic("FlowVaultsEVM Worker not found. Please initialize Worker first.")
@@ -22,16 +20,11 @@ transaction() {
         // Create a capability to the Worker
         let workerCap = signer.capabilities.storage
             .issue<&FlowVaultsEVM.Worker>(FlowVaultsEVM.WorkerStoragePath)
-        
-        log("Worker capability created")
-        
+                
         // Create and save the handler with the worker capability
         if signer.storage.borrow<&AnyResource>(from: FlowVaultsTransactionHandler.HandlerStoragePath) == nil {
             let handler <- FlowVaultsTransactionHandler.createHandler(workerCap: workerCap)
             signer.storage.save(<-handler, to: FlowVaultsTransactionHandler.HandlerStoragePath)
-            log("Handler resource saved to storage")
-        } else {
-            log("Handler already exists in storage")
         }
 
         // Issue an entitled capability for the scheduler to call executeTransaction - VALIDATION for future calls
@@ -46,8 +39,5 @@ transaction() {
                 FlowVaultsTransactionHandler.HandlerStoragePath
             )
         signer.capabilities.publish(publicCap, at: FlowVaultsTransactionHandler.HandlerPublicPath)
-        log("Public handler capability published")
-        
-        log("=== FlowVaultsTransactionHandler Initialization Complete ===")
     }
 }

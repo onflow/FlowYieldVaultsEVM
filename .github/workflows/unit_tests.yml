@@ -1,0 +1,53 @@
+name: Unit Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  cadence-tests:
+    name: Cadence Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          submodules: recursive
+      
+      - name: Install Flow CLI
+        run: sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
+      
+      - name: Update PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Verify Flow CLI Installation
+        run: flow version
+      
+      - name: Make test script executable
+        run: chmod +x ./local/run_cadence_tests.sh
+      
+      - name: Run Cadence Tests
+        run: ./local/run_cadence_tests.sh
+
+  solidity-tests:
+    name: Solidity Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      
+      - name: Make test script executable
+        run: chmod +x ./local/run_solidity_tests.sh
+      
+      - name: Run Solidity Tests
+        run: ./local/run_solidity_tests.sh
