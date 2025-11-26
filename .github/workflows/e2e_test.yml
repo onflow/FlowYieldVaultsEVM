@@ -57,15 +57,17 @@ jobs:
           echo "TEST 1: BASIC TIDE CREATION"
           echo "========================================="
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-            --sig "runCreateTide(address)" ${{ env.CONTRACT_ADDRESS }} \
-            --rpc-url localhost:8545 \
+            --root ./solidity \
+            --sig "createTide(address)" ${{ env.CONTRACT_ADDRESS }} \
+            --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
         env:
           AMOUNT: 10000000000000000000
       
       - name: Process Create Request
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+        run: |
+          flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
       
       - name: Verify Tide Creation
         run: |
@@ -110,15 +112,17 @@ jobs:
           echo "Step 1: Depositing additional 20 FLOW..."
           # Note: Using tide ID 0 based on the event logs from your output
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-            --sig "runDepositToTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
-            --rpc-url localhost:8545 \
+            --root ./solidity \
+            --sig "depositToTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
+            --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
         env:
           AMOUNT: 20000000000000000000
       
       - name: Process Deposit Request
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+        run: |
+          flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
       
       - name: Verify Deposit
         run: |
@@ -139,13 +143,15 @@ jobs:
         run: |
           echo "Step 2: Withdrawing 15 FLOW..."
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-            --sig "runWithdrawFromTide(address,uint64,uint256)" ${{ env.CONTRACT_ADDRESS }} 0 15000000000000000000 \
-            --rpc-url localhost:8545 \
+            --root ./solidity \
+            --sig "withdrawFromTide(address,uint64,uint256)" ${{ env.CONTRACT_ADDRESS }} 0 15000000000000000000 \
+            --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
       
       - name: Process Withdraw Request
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+        run: |
+          flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
       
       - name: Verify Withdrawal
         run: |
@@ -166,13 +172,15 @@ jobs:
         run: |
           echo "Step 3: Closing tide (withdrawing remaining funds)..."
           forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
-            --sig "runCloseTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
-            --rpc-url localhost:8545 \
+            --root ./solidity \
+            --sig "closeTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
+            --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
       
       - name: Process Close Request
-        run: flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --gas-limit 9999
+        run: |
+          flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
       
       - name: Verify Tide Closed
         run: |

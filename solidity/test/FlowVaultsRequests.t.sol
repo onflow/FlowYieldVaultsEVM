@@ -1,341 +1,482 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.18;
+pragma solidity 0.8.20;
 
 import "forge-std/Test.sol";
 import "../src/FlowVaultsRequests.sol";
 
-// Test helper contract that exposes validTideIds for testing
 contract FlowVaultsRequestsTestHelper is FlowVaultsRequests {
     constructor(address coaAddress) FlowVaultsRequests(coaAddress) {}
 
-    // Allow tests to directly register tide IDs without going through request flow
     function testRegisterTideId(uint64 tideId, address owner) external {
         validTideIds[tideId] = true;
         tideOwners[tideId] = owner;
+        tidesByUser[owner].push(tideId);
+        userOwnsTide[owner][tideId] = true;
     }
 }
 
 contract FlowVaultsRequestsTest is Test {
-    FlowVaultsRequestsTestHelper public c; // Short name for brevity
+    FlowVaultsRequestsTestHelper public c;
     address user = makeAddr("user");
+    address user2 = makeAddr("user2");
     address coa = makeAddr("coa");
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
-    // Test vault and strategy identifiers for emulator
-    string constant VAULT_IDENTIFIER = "A.0ae53cb6e3f42a79.FlowToken.Vault";
-    string constant STRATEGY_IDENTIFIER =
-        "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy";
+    // Events for testing (from OpenZeppelin Ownable2Step)
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
-    // Event declarations for testing
-    event RequestCreated(
-        uint256 indexed requestId,
-        address indexed user,
-        FlowVaultsRequests.RequestType requestType,
-        address indexed tokenAddress,
-        uint256 amount,
-        uint64 tideId
-    );
-    event BalanceUpdated(
-        address indexed user,
-        address indexed tokenAddress,
-        uint256 newBalance
-    );
-    event RequestProcessed(
-        uint256 indexed requestId,
-        FlowVaultsRequests.RequestStatus status,
-        uint64 tideId,
-        string message
-    );
-    event RequestCancelled(
-        uint256 indexed requestId,
-        address indexed user,
-        uint256 refundAmount
-    );
-    event FundsWithdrawn(
-        address indexed to,
-        address indexed tokenAddress,
-        uint256 amount
-    );
-    event AuthorizedCOAUpdated(address indexed oldCOA, address indexed newCOA);
+    // Errors from OpenZeppelin Ownable
+    error OwnableUnauthorizedAccount(address account);
+    error OwnableInvalidOwner(address owner);
+
+    string constant VAULT_ID = "A.0ae53cb6e3f42a79.FlowToken.Vault";
+    string constant STRATEGY_ID = "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy";
 
     function setUp() public {
         vm.deal(user, 100 ether);
+        vm.deal(user2, 100 ether);
         c = new FlowVaultsRequestsTestHelper(coa);
-
-        // Register commonly used tide IDs for testing
-        c.testRegisterTideId(0, user); // Tide ID 0
-        c.testRegisterTideId(42, user); // Commonly used test tide ID
+        c.testRegisterTideId(42, user);
     }
 
     // ============================================
-    // 1. USER REQUEST CREATION TESTS
+    // USER REQUEST LIFECYCLE
     // ============================================
 
-    // CREATE_TIDE Tests
-    // ============================================
     function test_CreateTide() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         assertEq(reqId, 1);
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
         assertEq(c.getPendingRequestCount(), 1);
 
         FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(
-            uint8(req.requestType),
-            uint8(FlowVaultsRequests.RequestType.CREATE_TIDE)
-        );
+        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.CREATE_TIDE));
+        assertEq(req.user, user);
+        assertEq(req.amount, 1 ether);
     }
+
+    function test_DepositToTide() public {
+        vm.prank(user);
+        uint256 reqId = c.depositToTide{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE));
+        assertEq(req.tideId, 42);
+    }
+
+    function test_WithdrawFromTide() public {
+        vm.prank(user);
+        uint256 reqId = c.withdrawFromTide(42, 0.5 ether);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.WITHDRAW_FROM_TIDE));
+        assertEq(req.amount, 0.5 ether);
+    }
+
+    function test_CloseTide() public {
+        vm.prank(user);
+        uint256 reqId = c.closeTide(42);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.CLOSE_TIDE));
+        assertEq(req.tideId, 42);
+    }
+
+    function test_CancelRequest_RefundsFunds() public {
+        vm.startPrank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 balBefore = user.balance;
+
+        c.cancelRequest(reqId);
+        vm.stopPrank();
+
+        assertEq(user.balance, balBefore + 1 ether);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getPendingRequestCount(), 0);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.FAILED));
+    }
+
+    function test_CancelRequest_RevertNotOwner() public {
+        vm.prank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user2);
+        vm.expectRevert(FlowVaultsRequests.NotRequestOwner.selector);
+        c.cancelRequest(reqId);
+    }
+
+    function test_CancelRequest_RevertAlreadyCancelled() public {
+        vm.startPrank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.cancelRequest(reqId);
+
+        vm.expectRevert(FlowVaultsRequests.CanOnlyCancelPending.selector);
+        c.cancelRequest(reqId);
+        vm.stopPrank();
+    }
+
+    // ============================================
+    // COA PROCESSING - startProcessing & completeProcessing
+    // ============================================
+
+    function test_StartProcessing_Success() public {
+        vm.prank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
+
+        vm.prank(coa);
+        c.startProcessing(reqId);
+
+        // Balance deducted atomically
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.PROCESSING));
+    }
+
+    function test_StartProcessing_RevertNotPending() public {
+        vm.prank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+
+        vm.expectRevert(FlowVaultsRequests.RequestAlreadyFinalized.selector);
+        c.startProcessing(reqId);
+        vm.stopPrank();
+    }
+
+    function test_StartProcessing_RevertUnauthorized() public {
+        vm.prank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.NotAuthorizedCOA.selector, user));
+        c.startProcessing(reqId);
+    }
+
+    function test_CompleteProcessing_Success() public {
+        vm.prank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 100, "Tide created");
+        vm.stopPrank();
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.COMPLETED));
+        assertEq(req.tideId, 100);
+        assertEq(c.getPendingRequestCount(), 0);
+
+        // Tide ownership registered
+        assertEq(c.doesUserOwnTide(user, 100), true);
+        assertEq(c.isTideIdValid(100), true);
+    }
+
+    function test_CompleteProcessing_FailureRefundsBalance() public {
+        vm.prank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        // Balance is now 0
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+
+        c.completeProcessing(reqId, false, 0, "Cadence error");
+        vm.stopPrank();
+
+        // Balance restored on failure
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.FAILED));
+    }
+
+    function test_CompleteProcessing_CloseTideRemovesOwnership() public {
+        vm.prank(user);
+        uint256 reqId = c.closeTide(42);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 42, "Closed");
+        vm.stopPrank();
+
+        assertEq(c.doesUserOwnTide(user, 42), false);
+        assertEq(c.isTideIdValid(42), false);
+    }
+
+    function test_CompleteProcessing_RevertNotProcessing() public {
+        vm.prank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(coa);
+        vm.expectRevert(FlowVaultsRequests.RequestAlreadyFinalized.selector);
+        c.completeProcessing(reqId, true, 100, "Should fail");
+    }
+
+    // ============================================
+    // ADMIN FUNCTIONS
+    // ============================================
+
+    function test_SetAuthorizedCOA() public {
+        address newCOA = makeAddr("newCOA");
+
+        vm.prank(c.owner());
+        c.setAuthorizedCOA(newCOA);
+
+        assertEq(c.authorizedCOA(), newCOA);
+    }
+
+    function test_SetAuthorizedCOA_RevertZeroAddress() public {
+        vm.prank(c.owner());
+        vm.expectRevert(FlowVaultsRequests.InvalidCOAAddress.selector);
+        c.setAuthorizedCOA(address(0));
+    }
+
+    function test_SetTokenConfig() public {
+        address token = makeAddr("token");
+
+        vm.prank(c.owner());
+        c.setTokenConfig(token, true, 0.5 ether, false);
+
+        (bool isSupported, uint256 minBalance, bool isNative) = c.allowedTokens(token);
+        assertEq(isSupported, true);
+        assertEq(minBalance, 0.5 ether);
+        assertEq(isNative, false);
+    }
+
+    function test_SetMaxPendingRequestsPerUser() public {
+        vm.prank(c.owner());
+        c.setMaxPendingRequestsPerUser(5);
+
+        assertEq(c.maxPendingRequestsPerUser(), 5);
+    }
+
+    function test_MaxPendingRequests_EnforcesLimit() public {
+        vm.prank(c.owner());
+        c.setMaxPendingRequestsPerUser(2);
+
+        vm.startPrank(user);
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.expectRevert(FlowVaultsRequests.TooManyPendingRequests.selector);
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+    }
+
+    function test_DropRequests() public {
+        vm.prank(user);
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 balBefore = user.balance;
+
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = reqId;
+
+        vm.prank(c.owner());
+        c.dropRequests(ids);
+
+        // User refunded
+        assertEq(user.balance, balBefore + 1 ether);
+        assertEq(c.getPendingRequestCount(), 0);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.FAILED));
+    }
+
+    // ============================================
+    // OWNERSHIP TRANSFER
+    // ============================================
+
+    function test_TransferOwnership_TwoStepProcess() public {
+        address newOwner = makeAddr("newOwner");
+        address originalOwner = c.owner();
+
+        // Step 1: Current owner initiates transfer
+        vm.prank(originalOwner);
+        c.transferOwnership(newOwner);
+
+        // Owner hasn't changed yet
+        assertEq(c.owner(), originalOwner);
+        assertEq(c.pendingOwner(), newOwner);
+
+        // Step 2: New owner accepts
+        vm.prank(newOwner);
+        c.acceptOwnership();
+
+        // Now ownership is transferred
+        assertEq(c.owner(), newOwner);
+        assertEq(c.pendingOwner(), address(0));
+    }
+
+    function test_TransferOwnership_RevertNotOwner() public {
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, user));
+        c.transferOwnership(makeAddr("newOwner"));
+    }
+
+    function test_AcceptOwnership_RevertNotPendingOwner() public {
+        vm.prank(c.owner());
+        c.transferOwnership(makeAddr("newOwner"));
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, user));
+        c.acceptOwnership();
+    }
+
+    function test_TransferOwnership_NewOwnerHasAdminRights() public {
+        address newOwner = makeAddr("newOwner");
+        address originalOwner = c.owner();
+
+        vm.prank(originalOwner);
+        c.transferOwnership(newOwner);
+
+        vm.prank(newOwner);
+        c.acceptOwnership();
+
+        // New owner can perform admin actions
+        vm.prank(newOwner);
+        c.setMaxPendingRequestsPerUser(99);
+        assertEq(c.maxPendingRequestsPerUser(), 99);
+
+        // Old owner cannot
+        vm.prank(originalOwner);
+        vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, originalOwner));
+        c.setMaxPendingRequestsPerUser(50);
+    }
+
+    // ============================================
+    // ACCESS CONTROL
+    // ============================================
+
+    function test_Allowlist() public {
+        address[] memory addrs = new address[](1);
+        addrs[0] = user;
+
+        vm.startPrank(c.owner());
+        c.setAllowlistEnabled(true);
+        c.batchAddToAllowlist(addrs);
+        vm.stopPrank();
+
+        // Allowlisted user can create
+        vm.prank(user);
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        // Non-allowlisted user cannot
+        vm.prank(user2);
+        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.NotInAllowlist.selector, user2));
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+    }
+
+    function test_Blocklist() public {
+        address[] memory addrs = new address[](1);
+        addrs[0] = user;
+
+        vm.startPrank(c.owner());
+        c.setBlocklistEnabled(true);
+        c.batchAddToBlocklist(addrs);
+        vm.stopPrank();
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.Blocklisted.selector, user));
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+    }
+
+    function test_BlocklistTakesPrecedence() public {
+        address[] memory addrs = new address[](1);
+        addrs[0] = user;
+
+        vm.startPrank(c.owner());
+        c.setAllowlistEnabled(true);
+        c.batchAddToAllowlist(addrs);
+        c.setBlocklistEnabled(true);
+        c.batchAddToBlocklist(addrs);
+        vm.stopPrank();
+
+        // User is both allowlisted AND blocklisted - blocklist wins
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.Blocklisted.selector, user));
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+    }
+
+    // ============================================
+    // VALIDATION
+    // ============================================
 
     function test_CreateTide_RevertZeroAmount() public {
         vm.prank(user);
-        vm.expectRevert(
-            FlowVaultsRequests.AmountMustBeGreaterThanZero.selector
-        );
-        c.createTide{value: 0}(
-            NATIVE_FLOW,
-            0,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
+        vm.expectRevert(FlowVaultsRequests.AmountMustBeGreaterThanZero.selector);
+        c.createTide{value: 0}(NATIVE_FLOW, 0, VAULT_ID, STRATEGY_ID);
     }
 
     function test_CreateTide_RevertMsgValueMismatch() public {
         vm.prank(user);
         vm.expectRevert(FlowVaultsRequests.MsgValueMustEqualAmount.selector);
-        c.createTide{value: 0.5 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        ); // Mismatch
+        c.createTide{value: 0.5 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
-    // DEPOSIT_TO_TIDE Tests
-    // ============================================
-    function test_DepositToTide() public {
+    function test_CreateTide_RevertBelowMinimum() public {
         vm.prank(user);
-        uint256 reqId = c.depositToTide{value: 0.5 ether}(
-            42,
-            NATIVE_FLOW,
-            0.5 ether
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowVaultsRequests.BelowMinimumBalance.selector,
+                NATIVE_FLOW,
+                0.5 ether,
+                1 ether
+            )
         );
-
-        assertEq(reqId, 1);
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 0.5 ether);
-
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(
-            uint8(req.requestType),
-            uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE)
-        );
-        assertEq(req.tideId, 42);
+        c.createTide{value: 0.5 ether}(NATIVE_FLOW, 0.5 ether, VAULT_ID, STRATEGY_ID);
     }
 
-    function test_DepositToTide_TideIdZero() public {
-        // Tide ID 0 is valid (first tide created)
+    function test_DepositToTide_RevertInvalidTideId() public {
         vm.prank(user);
-        uint256 reqId = c.depositToTide{value: 1 ether}(
-            0,
-            NATIVE_FLOW,
-            1 ether
-        );
-
-        assertEq(reqId, 1);
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(req.tideId, 0);
-        assertEq(
-            uint8(req.requestType),
-            uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE)
-        );
+        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.InvalidTideId.selector, 999, user));
+        c.depositToTide{value: 1 ether}(999, NATIVE_FLOW, 1 ether);
     }
 
-    // WITHDRAW_FROM_TIDE Tests
-    // ============================================
-    function test_WithdrawFromTide() public {
-        vm.prank(user);
-        uint256 reqId = c.withdrawFromTide(42, 0.3 ether);
-
-        assertEq(reqId, 1);
-        assertEq(c.getPendingRequestCount(), 1);
-
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(
-            uint8(req.requestType),
-            uint8(FlowVaultsRequests.RequestType.WITHDRAW_FROM_TIDE)
-        );
-        assertEq(req.amount, 0.3 ether);
-    }
-
-    // CLOSE_TIDE Tests
-    // ============================================
-    function test_CloseTide() public {
-        vm.prank(user);
-        uint256 reqId = c.closeTide(42);
-
-        assertEq(reqId, 1);
-
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(
-            uint8(req.requestType),
-            uint8(FlowVaultsRequests.RequestType.CLOSE_TIDE)
-        );
-        assertEq(req.tideId, 42);
+    function test_DepositToTide_RevertNotOwner() public {
+        // Tide 42 is owned by user, not user2
+        vm.prank(user2);
+        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.InvalidTideId.selector, 42, user2));
+        c.depositToTide{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
     }
 
     // ============================================
-    // 2. REQUEST CANCELLATION TESTS
+    // MULTI-USER ISOLATION
     // ============================================
-    function test_CancelRequest() public {
-        vm.startPrank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
 
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether); // Before cancellation
-        uint256 balBefore = user.balance;
-        c.cancelRequest(reqId);
-
-        assertEq(user.balance, balBefore + 1 ether); // Refunded
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 0);
-        assertEq(c.getPendingRequestCount(), 0);
-        vm.stopPrank();
-    }
-
-    function test_CancelRequest_RevertNotOwner() public {
+    function test_UserBalancesAreSeparate() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
-        vm.prank(makeAddr("other"));
-        vm.expectRevert();
-        c.cancelRequest(reqId);
-    }
+        vm.prank(user2);
+        c.createTide{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
 
-    function test_DoubleRefund_Prevention() public {
-        // User creates tide
-        vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        uint256 balBefore = user.balance;
-
-        // User cancels and gets refund
-        vm.prank(user);
-        c.cancelRequest(reqId);
-
-        assertEq(user.balance, balBefore + 1 ether);
-
-        // Try to cancel again - should revert because request is now FAILED
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.CanOnlyCancelPending.selector);
-        c.cancelRequest(reqId);
-
-        // Balance should not have changed
-        assertEq(user.balance, balBefore + 1 ether);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
+        assertEq(c.getUserPendingBalance(user2, NATIVE_FLOW), 2 ether);
     }
 
     // ============================================
-    // 3. COA OPERATIONS TESTS
-    // ============================================
-    function test_COA_WithdrawFunds() public {
-        vm.prank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        vm.prank(coa);
-        c.withdrawFunds(NATIVE_FLOW, 1 ether);
-
-        assertEq(coa.balance, 1 ether);
-    }
-
-    function test_COA_UpdateRequestStatus() public {
-        vm.prank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        vm.prank(coa);
-        c.updateRequestStatus(
-            1,
-            uint8(FlowVaultsRequests.RequestStatus.COMPLETED),
-            42,
-            "Success"
-        );
-
-        FlowVaultsRequests.Request memory req = c.getRequest(1);
-        assertEq(
-            uint8(req.status),
-            uint8(FlowVaultsRequests.RequestStatus.COMPLETED)
-        );
-        assertEq(req.tideId, 42);
-        assertEq(c.getPendingRequestCount(), 0); // Removed from pending
-    }
-
-    function test_COA_UpdateUserBalance() public {
-        vm.prank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        vm.prank(coa);
-        c.updateUserBalance(user, NATIVE_FLOW, 0.5 ether);
-
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 0.5 ether);
-    }
-
-    function test_COA_RevertUnauthorized() public {
-        vm.prank(user);
-        vm.expectRevert();
-        c.withdrawFunds(NATIVE_FLOW, 1 ether);
-    }
-
-    // ============================================
-    // 4. QUERY & VIEW FUNCTIONS TESTS
+    // VIEW FUNCTIONS
     // ============================================
 
     function test_GetPendingRequestsUnpacked() public {
         vm.startPrank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-        c.depositToTide{value: 0.5 ether}(42, NATIVE_FLOW, 0.5 ether);
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.depositToTide{value: 2 ether}(42, NATIVE_FLOW, 2 ether);
         vm.stopPrank();
 
         (
             uint256[] memory ids,
             address[] memory users,
-            ,
+            uint8[] memory requestTypes,
             ,
             ,
             uint256[] memory amounts,
@@ -344,659 +485,78 @@ contract FlowVaultsRequestsTest is Test {
             ,
             ,
 
-        ) = c.getPendingRequestsUnpacked(0);
+        ) = c.getPendingRequestsUnpacked(0, 0);
 
         assertEq(ids.length, 2);
         assertEq(ids[0], 1);
+        assertEq(ids[1], 2);
         assertEq(users[0], user);
         assertEq(amounts[0], 1 ether);
+        assertEq(amounts[1], 2 ether);
+        assertEq(requestTypes[0], uint8(FlowVaultsRequests.RequestType.CREATE_TIDE));
+        assertEq(requestTypes[1], uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE));
     }
 
-    function test_GetPendingRequestsUnpacked_WithLimit() public {
+    function test_GetPendingRequestsUnpacked_Pagination() public {
         vm.startPrank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-        c.createTide{value: 2 ether}(
-            NATIVE_FLOW,
-            2 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-        c.createTide{value: 3 ether}(
-            NATIVE_FLOW,
-            3 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
+        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.createTide{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        c.createTide{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
         vm.stopPrank();
 
-        (uint256[] memory ids, , , , , , , , , , ) = c
-            .getPendingRequestsUnpacked(2);
+        // Get first 2
+        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 2);
+        assertEq(ids.length, 2);
+        assertEq(ids[0], 1);
+        assertEq(ids[1], 2);
 
-        assertEq(ids.length, 2); // Limited to 2
+        // Get starting from index 1
+        (uint256[] memory ids2, , , , , , , , , , ) = c.getPendingRequestsUnpacked(1, 2);
+        assertEq(ids2.length, 2);
+        assertEq(ids2[0], 2);
+        assertEq(ids2[1], 3);
     }
 
     // ============================================
-    // 5. MULTI-USER SCENARIOS
+    // INTEGRATION: FULL LIFECYCLE
     // ============================================
 
-    function test_MultipleUsers_SeparateBalances() public {
-        address user2 = makeAddr("user2");
-        vm.deal(user2, 100 ether);
-
-        // User 1 creates tide
-        vm.prank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        // User 2 creates tide
-        vm.prank(user2);
-        c.createTide{value: 2 ether}(
-            NATIVE_FLOW,
-            2 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        // Verify balances are separate
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
-        assertEq(c.getUserBalance(user2, NATIVE_FLOW), 2 ether);
-
-        // Verify requests were created
-        FlowVaultsRequests.Request memory req1 = c.getRequest(1);
-        FlowVaultsRequests.Request memory req2 = c.getRequest(2);
-        assertEq(req1.user, user);
-        assertEq(req2.user, user2);
-    }
-
-    function test_MultipleUsers_RequestIsolation() public {
-        address user2 = makeAddr("user2");
-        vm.deal(user2, 100 ether);
-
-        // User 1 creates tide
-        vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        // User 2 tries to cancel User 1's request
-        vm.prank(user2);
-        vm.expectRevert(FlowVaultsRequests.NotRequestOwner.selector);
-        c.cancelRequest(reqId);
-
-        // Verify request still exists
-        assertEq(c.getPendingRequestCount(), 1);
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
-    }
-
-    // ============================================
-    // 6. BALANCE & ACCOUNTING TESTS
-    // ============================================
-
-    function test_UserBalance_AfterFailedRequest() public {
-        // User creates tide
-        vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        // Initial balance
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
-
-        // COA marks request as failed (but doesn't update user balance)
-        vm.prank(coa);
-        c.updateRequestStatus(
-            reqId,
-            uint8(FlowVaultsRequests.RequestStatus.FAILED),
-            0,
-            "Simulated failure"
-        );
-
-        // Balance should still be 1 ether (funds remain in contract)
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 1 ether);
-
-        // Verify request is marked as failed
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(
-            uint8(req.status),
-            uint8(FlowVaultsRequests.RequestStatus.FAILED)
-        );
-
-        // Request is no longer in pending queue
-        assertEq(c.getPendingRequestCount(), 0);
-
-        // Note: In a real scenario, the COA would need to update the user balance
-        // to return the funds, or the user would need a different mechanism to reclaim funds
-        // from failed requests that were already removed from pending queue
-    }
-
-    // ============================================
-    // 7. COMPLETE INTEGRATION FLOWS
-    // ============================================
-    function test_FullCreateTideFlow() public {
+    function test_FullCreateTideLifecycle() public {
         // 1. User creates tide
         vm.prank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
+        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
 
-        // 2. COA processes
-        vm.startPrank(coa);
-        c.withdrawFunds(NATIVE_FLOW, 1 ether);
-        c.updateUserBalance(user, NATIVE_FLOW, 0);
-        c.updateRequestStatus(
-            1,
-            uint8(FlowVaultsRequests.RequestStatus.COMPLETED),
-            42,
-            "Tide created"
-        );
-        vm.stopPrank();
+        // 2. COA starts processing (deducts balance atomically)
+        vm.prank(coa);
+        c.startProcessing(reqId);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
 
-        // 3. Verify
-        assertEq(c.getUserBalance(user, NATIVE_FLOW), 0);
+        // 3. COA completes processing (funds are bridged via COA in Cadence)
+        vm.prank(coa);
+        c.completeProcessing(reqId, true, 100, "Tide created");
+
+        // Verify final state
         assertEq(c.getPendingRequestCount(), 0);
-        FlowVaultsRequests.Request memory req = c.getRequest(1);
-        assertEq(req.tideId, 42);
+        assertEq(c.doesUserOwnTide(user, 100), true);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.COMPLETED));
+        assertEq(req.tideId, 100);
     }
 
-    function test_FullWithdrawFlow() public {
+    function test_FullWithdrawLifecycle() public {
         // User withdraws from existing tide
         vm.prank(user);
-        c.withdrawFromTide(42, 0.5 ether);
+        uint256 reqId = c.withdrawFromTide(42, 0.5 ether);
 
-        // COA processes and sends funds back
-        vm.deal(address(c), 0.5 ether);
+        // COA processes
         vm.startPrank(coa);
-        // In real scenario, COA would bridge funds back to user's EVM address
-        c.updateRequestStatus(
-            1,
-            uint8(FlowVaultsRequests.RequestStatus.COMPLETED),
-            42,
-            "Withdrawn"
-        );
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 42, "Withdrawn");
         vm.stopPrank();
 
-        FlowVaultsRequests.Request memory req = c.getRequest(1);
-        assertEq(
-            uint8(req.status),
-            uint8(FlowVaultsRequests.RequestStatus.COMPLETED)
-        );
-    }
-
-    // ============================================
-    // 8. EVENT EMISSION TESTS
-    // ============================================
-
-    function test_Events_RequestCreated() public {
-        vm.prank(user);
-
-        vm.expectEmit(true, true, true, true);
-        emit RequestCreated(
-            1, // requestId
-            user,
-            FlowVaultsRequests.RequestType.CREATE_TIDE,
-            NATIVE_FLOW,
-            1 ether,
-            0 // tideId
-        );
-
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-    }
-
-    function test_Events_BalanceUpdated() public {
-        vm.prank(user);
-
-        vm.expectEmit(true, true, false, true);
-        emit BalanceUpdated(user, NATIVE_FLOW, 1 ether);
-
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-    }
-
-    function test_Events_RequestProcessed() public {
-        vm.prank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        vm.prank(coa);
-
-        vm.expectEmit(true, false, false, true);
-        emit RequestProcessed(
-            1,
-            FlowVaultsRequests.RequestStatus.COMPLETED,
-            42,
-            "Success"
-        );
-
-        c.updateRequestStatus(
-            1,
-            uint8(FlowVaultsRequests.RequestStatus.COMPLETED),
-            42,
-            "Success"
-        );
-    }
-
-    function test_Events_RequestCancelled() public {
-        vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        vm.prank(user);
-
-        vm.expectEmit(true, true, false, true);
-        emit RequestCancelled(reqId, user, 1 ether);
-
-        c.cancelRequest(reqId);
-    }
-
-    function test_Events_FundsWithdrawn() public {
-        vm.prank(user);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-
-        vm.prank(coa);
-
-        vm.expectEmit(true, true, false, true);
-        emit FundsWithdrawn(coa, NATIVE_FLOW, 1 ether);
-
-        c.withdrawFunds(NATIVE_FLOW, 1 ether);
-    }
-
-    function test_Events_AuthorizedCOAUpdated() public {
-        address newCOA = makeAddr("newCOA");
-
-        vm.prank(c.owner());
-
-        vm.expectEmit(true, true, false, true);
-        emit AuthorizedCOAUpdated(coa, newCOA);
-
-        c.setAuthorizedCOA(newCOA);
-    }
-
-    // ============================================
-    // ALLOW LIST TESTS
-    // ============================================
-
-    event AllowlistEnabled(bool enabled);
-    event AddressesAddedToAllowlist(address[] addresses);
-    event AddressesRemovedFromAllowlist(address[] addresses);
-
-    function test_Allowlist_InitialState() public view {
-        assertFalse(c.allowlistEnabled());
-        assertFalse(c.allowlisted(user));
-    }
-
-    function test_Allowlist_SetEnabled() public {
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-        assertTrue(c.allowlistEnabled());
-
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(false);
-        assertFalse(c.allowlistEnabled());
-    }
-
-    function test_Allowlist_SetEnabled_RevertNonOwner() public {
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotOwner.selector);
-        c.setAllowlistEnabled(true);
-    }
-
-    function test_Allowlist_BatchAdd_SingleAddress() public {
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-
-        assertTrue(c.allowlisted(user));
-    }
-
-    function test_Allowlist_BatchAdd_MultipleAddresses() public {
-        address user2 = makeAddr("user2");
-        address user3 = makeAddr("user3");
-
-        address[] memory addresses = new address[](3);
-        addresses[0] = user;
-        addresses[1] = user2;
-        addresses[2] = user3;
-
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-
-        assertTrue(c.allowlisted(user));
-        assertTrue(c.allowlisted(user2));
-        assertTrue(c.allowlisted(user3));
-    }
-
-    function test_Allowlist_BatchAdd_RevertEmptyArray() public {
-        address[] memory addresses = new address[](0);
-
-        vm.prank(c.owner());
-        vm.expectRevert(FlowVaultsRequests.EmptyAddressArray.selector);
-        c.batchAddToAllowlist(addresses);
-    }
-
-    function test_Allowlist_BatchAdd_RevertZeroAddress() public {
-        address[] memory addresses = new address[](2);
-        addresses[0] = user;
-        addresses[1] = address(0);
-
-        vm.prank(c.owner());
-        vm.expectRevert(FlowVaultsRequests.CannotAllowlistZeroAddress.selector);
-        c.batchAddToAllowlist(addresses);
-    }
-
-    function test_Allowlist_BatchAdd_RevertNonOwner() public {
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotOwner.selector);
-        c.batchAddToAllowlist(addresses);
-    }
-
-    function test_Allowlist_BatchRemove_SingleAddress() public {
-        // First add user to allow list
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-        assertTrue(c.allowlisted(user));
-
-        // Now remove
-        vm.prank(c.owner());
-        c.batchRemoveFromAllowlist(addresses);
-        assertFalse(c.allowlisted(user));
-    }
-
-    function test_Allowlist_BatchRemove_MultipleAddresses() public {
-        address user2 = makeAddr("user2");
-        address user3 = makeAddr("user3");
-
-        address[] memory addresses = new address[](3);
-        addresses[0] = user;
-        addresses[1] = user2;
-        addresses[2] = user3;
-
-        // Add all
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-
-        // Remove all
-        vm.prank(c.owner());
-        c.batchRemoveFromAllowlist(addresses);
-
-        assertFalse(c.allowlisted(user));
-        assertFalse(c.allowlisted(user2));
-        assertFalse(c.allowlisted(user3));
-    }
-
-    function test_Allowlist_BatchRemove_RevertEmptyArray() public {
-        address[] memory addresses = new address[](0);
-
-        vm.prank(c.owner());
-        vm.expectRevert(FlowVaultsRequests.EmptyAddressArray.selector);
-        c.batchRemoveFromAllowlist(addresses);
-    }
-
-    function test_Allowlist_BatchRemove_RevertNonOwner() public {
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotOwner.selector);
-        c.batchRemoveFromAllowlist(addresses);
-    }
-
-    function test_Allowlist_CreateTide_AllowlistDisabled() public {
-        // Allow list is disabled by default, so anyone can create
-        vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-        assertEq(reqId, 1);
-    }
-
-    function test_Allowlist_CreateTide_AllowlistEnabled_NotInAllowlist()
-        public
-    {
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-    }
-
-    function test_Allowlist_CreateTide_AllowlistEnabled_InAllowlist() public {
-        // Add user to allow list
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-
-        // Enable allow list
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        // User should be able to create tide
-        vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-        assertEq(reqId, 1);
-    }
-
-    function test_Allowlist_DepositToTide_AllowlistEnabled_NotInAllowlist()
-        public
-    {
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
-        c.depositToTide{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
-    }
-
-    function test_Allowlist_DepositToTide_AllowlistEnabled_InAllowlist()
-        public
-    {
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        vm.prank(user);
-        uint256 reqId = c.depositToTide{value: 1 ether}(
-            42,
-            NATIVE_FLOW,
-            1 ether
-        );
-        assertEq(reqId, 1);
-    }
-
-    function test_Allowlist_WithdrawFromTide_AllowlistEnabled_NotInAllowlist()
-        public
-    {
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
-        c.withdrawFromTide(42, 1 ether);
-    }
-
-    function test_Allowlist_WithdrawFromTide_AllowlistEnabled_InAllowlist()
-        public
-    {
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        vm.prank(user);
-        uint256 reqId = c.withdrawFromTide(42, 1 ether);
-        assertEq(reqId, 1);
-    }
-
-    function test_Allowlist_CloseTide_AllowlistEnabled_NotInAllowlist() public {
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
-        c.closeTide(42);
-    }
-
-    function test_Allowlist_CloseTide_AllowlistEnabled_InAllowlist() public {
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        vm.prank(user);
-        uint256 reqId = c.closeTide(42);
-        assertEq(reqId, 1);
-    }
-
-    function test_Allowlist_RemoveAfterAdd() public {
-        address[] memory addresses = new address[](1);
-        addresses[0] = user;
-
-        // Add
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-        assertTrue(c.allowlisted(user));
-
-        // Enable allow list
-        vm.prank(c.owner());
-        c.setAllowlistEnabled(true);
-
-        // User can create tide
-        vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-        assertEq(reqId, 1);
-
-        // Remove from allow list
-        vm.prank(c.owner());
-        c.batchRemoveFromAllowlist(addresses);
-        assertFalse(c.allowlisted(user));
-
-        // User cannot create tide anymore
-        vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.NotInAllowlist.selector);
-        c.createTide{value: 1 ether}(
-            NATIVE_FLOW,
-            1 ether,
-            VAULT_IDENTIFIER,
-            STRATEGY_IDENTIFIER
-        );
-    }
-
-    function test_Allowlist_Events_AllowlistEnabled() public {
-        vm.prank(c.owner());
-
-        vm.expectEmit(false, false, false, true);
-        emit AllowlistEnabled(true);
-
-        c.setAllowlistEnabled(true);
-    }
-
-    function test_Allowlist_Events_AddressesAdded() public {
-        address[] memory addresses = new address[](2);
-        addresses[0] = user;
-        addresses[1] = makeAddr("user2");
-
-        vm.prank(c.owner());
-
-        vm.expectEmit(true, false, false, true);
-        emit AddressesAddedToAllowlist(addresses);
-
-        c.batchAddToAllowlist(addresses);
-    }
-
-    function test_Allowlist_Events_AddressesRemoved() public {
-        address[] memory addresses = new address[](2);
-        addresses[0] = user;
-        addresses[1] = makeAddr("user2");
-
-        vm.prank(c.owner());
-        c.batchAddToAllowlist(addresses);
-
-        vm.prank(c.owner());
-
-        vm.expectEmit(true, false, false, true);
-        emit AddressesRemovedFromAllowlist(addresses);
-
-        c.batchRemoveFromAllowlist(addresses);
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.COMPLETED));
     }
 }

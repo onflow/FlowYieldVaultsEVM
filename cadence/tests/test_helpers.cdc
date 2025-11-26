@@ -76,6 +76,137 @@ access(all) fun deployContracts() {
     )
     Test.expect(err, Test.beNil())
     
+    // Deploy FlowEVMBridge dependencies for FlowEVMBridgeUtils
+    // First deploy interfaces
+    err = Test.deployContract(
+        name: "FlowEVMBridgeHandlerInterfaces",
+        path: "../../imports/1e4aa0b87d10b141/FlowEVMBridgeHandlerInterfaces.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "IBridgePermissions",
+        path: "../../imports/1e4aa0b87d10b141/IBridgePermissions.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "ICrossVM",
+        path: "../../imports/1e4aa0b87d10b141/ICrossVM.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "ICrossVMAsset",
+        path: "../../imports/1e4aa0b87d10b141/ICrossVMAsset.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "CrossVMMetadataViews",
+        path: "../../imports/1d7e57aa55817448/CrossVMMetadataViews.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "CrossVMNFT",
+        path: "../../imports/1e4aa0b87d10b141/CrossVMNFT.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    // Deploy custom association types
+    err = Test.deployContract(
+        name: "FlowEVMBridgeCustomAssociationTypes",
+        path: "../../imports/1e4aa0b87d10b141/FlowEVMBridgeCustomAssociationTypes.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "FlowEVMBridgeCustomAssociations",
+        path: "../../imports/1e4aa0b87d10b141/FlowEVMBridgeCustomAssociations.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    // Deploy FlowEVMBridgeConfig
+    err = Test.deployContract(
+        name: "FlowEVMBridgeConfig",
+        path: "../../imports/1e4aa0b87d10b141/FlowEVMBridgeConfig.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    // Deploy Serialize (dependency of SerializeMetadata)
+    err = Test.deployContract(
+        name: "Serialize",
+        path: "../../imports/1e4aa0b87d10b141/Serialize.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "SerializeMetadata",
+        path: "../../imports/1e4aa0b87d10b141/SerializeMetadata.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    // Deploy FlowEVMBridgeUtils (required by FlowVaultsEVM)
+    err = Test.deployContract(
+        name: "FlowEVMBridgeUtils",
+        path: "../../imports/1e4aa0b87d10b141/FlowEVMBridgeUtils.cdc",
+        arguments: ["0x0000000000000000000000000000000000000000"]
+    )
+    Test.expect(err, Test.beNil())
+    
+    // Deploy FlowEVMBridge interface contracts
+    err = Test.deployContract(
+        name: "IEVMBridgeNFTMinter",
+        path: "../../imports/1e4aa0b87d10b141/IEVMBridgeNFTMinter.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "IEVMBridgeTokenMinter",
+        path: "../../imports/1e4aa0b87d10b141/IEVMBridgeTokenMinter.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "IFlowEVMNFTBridge",
+        path: "../../imports/1e4aa0b87d10b141/IFlowEVMNFTBridge.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    err = Test.deployContract(
+        name: "IFlowEVMTokenBridge",
+        path: "../../imports/1e4aa0b87d10b141/IFlowEVMTokenBridge.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    // Deploy CrossVMToken
+    err = Test.deployContract(
+        name: "CrossVMToken",
+        path: "../../imports/1e4aa0b87d10b141/CrossVMToken.cdc",
+        arguments: []
+    )
+    Test.expect(err, Test.beNil())
+    
+    // Note: We skip deploying FlowEVMBridge, FlowEVMBridgeNFTEscrow, FlowEVMBridgeTokenEscrow,
+    // and FlowEVMBridgeTemplates as they have access control issues and are not needed.
+    // FlowVaultsEVM only requires FlowEVMBridgeUtils and FlowEVMBridgeConfig which are already deployed.
+    
     // Deploy FlowVaultsEVM
     err = Test.deployContract(
         name: "FlowVaultsEVM",

@@ -1,30 +1,27 @@
 import "FlowVaultsEVM"
 import "FlowVaultsClosedBeta"
+import "FlowVaults"
 import "EVM"
+import "FungibleToken"
 
-/// Setup Worker transaction for FlowVaultsEVM Intermediate Package
-/// Handles both new beta badge creation and existing beta badge usage
+/// @title Setup Worker with Badge
+/// @notice Creates and configures the FlowVaultsEVM Worker resource
+/// @dev Sets up all required capabilities: COA, TideManager, BetaBadge, and FeeProvider.
+///      Also sets the FlowVaultsRequests contract address.
 ///
-/// @param flowVaultsRequestsAddress: The EVM address of the FlowVaultsRequests contract
+/// @param flowVaultsRequestsAddress The EVM address of the FlowVaultsRequests contract
 ///
 transaction(flowVaultsRequestsAddress: String) {
     prepare(signer: auth(BorrowValue, SaveValue, LoadValue, Storage, Capabilities, CopyValue, IssueStorageCapabilityController) &Account) {
-                
-        // ========================================
-        // Step 1: Get or create beta badge capability
-        // ========================================
-        
         var betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>? = nil
-        
-        // First, try to find existing beta badge in standard storage path
+
         let standardStoragePath = FlowVaultsClosedBeta.UserBetaCapStoragePath
         if signer.storage.type(at: standardStoragePath) != nil {
             betaBadgeCap = signer.storage.copy<Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>>(
                 from: standardStoragePath
             )
         }
-        
-        // If not found in standard path, try the specific user path
+
         if betaBadgeCap == nil {
             let userSpecificPath = /storage/FlowVaultsUserBetaCap_0x3bda2f90274dbc9b
             if signer.storage.type(at: userSpecificPath) != nil {
@@ -33,49 +30,53 @@ transaction(flowVaultsRequestsAddress: String) {
                 )
             }
         }
-        
-        // If still no beta badge found, create a new one (requires Admin)
+
         if betaBadgeCap == nil {
-            
             let betaAdminHandle = signer.storage.borrow<auth(FlowVaultsClosedBeta.Admin) &FlowVaultsClosedBeta.AdminHandle>(
                 from: FlowVaultsClosedBeta.AdminHandleStoragePath
             ) ?? panic("Could not borrow AdminHandle - you need admin access or an existing beta badge")
-            
+
             betaBadgeCap = betaAdminHandle.grantBeta(addr: signer.address)
             signer.storage.save(betaBadgeCap!, to: standardStoragePath)
         }
-        
-        // Verify the capability is valid
+
         let betaRef = betaBadgeCap!.borrow()
             ?? panic("Beta badge capability does not contain correct reference")
-        
-        // ========================================
-        // Step 2: Setup COA capability
-        // ========================================
-        
+
+        let coaCap = signer.capabilities.storage.issue<auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount>(
+            /storage/evm
+        )
+
+        let coaRef = coaCap.borrow()
+            ?? panic("Could not borrow COA capability from /storage/evm")
+
+        if signer.storage.type(at: FlowVaults.TideManagerStoragePath) == nil {
+            signer.storage.save(<-FlowVaults.createTideManager(betaRef: betaRef), to: FlowVaults.TideManagerStoragePath)
+            let cap = signer.capabilities.storage.issue<&FlowVaults.TideManager>(FlowVaults.TideManagerStoragePath)
+            signer.capabilities.publish(cap, at: FlowVaults.TideManagerPublicPath)
+        }
+
+        let tideManagerCap = signer.capabilities.storage.issue<auth(FungibleToken.Withdraw) &FlowVaults.TideManager>(
+            FlowVaults.TideManagerStoragePath
+        )
+
+        let feeProviderCap = signer.capabilities.storage.issue<auth(FungibleToken.Withdraw) &{FungibleToken.Provider}>(
+            /storage/flowTokenVault
+        )
+
         let admin = signer.storage.borrow<&FlowVaultsEVM.Admin>(
             from: FlowVaultsEVM.AdminStoragePath
         ) ?? panic("Could not borrow FlowVaultsEVM Admin")
-        
-        // Issue a storage capability to the COA at /storage/evm
-        let coaCap = signer.capabilities.storage.issue<auth(EVM.Call, EVM.Withdraw) &EVM.CadenceOwnedAccount>(
-            /storage/evm
+
+        let worker <- admin.createWorker(
+            coaCap: coaCap,
+            tideManagerCap: tideManagerCap,
+            betaBadgeCap: betaBadgeCap!,
+            feeProviderCap: feeProviderCap
         )
-        
-        // Verify the capability works
-        let coaRef = coaCap.borrow()
-            ?? panic("Could not borrow COA capability from /storage/evm")
-        
-        // Create worker with the COA capability and beta badge capability
-        let worker <- admin.createWorker(coaCap: coaCap, betaBadgeCap: betaBadgeCap!)
-        
-        // Save worker to storage
+
         signer.storage.save(<-worker, to: FlowVaultsEVM.WorkerStoragePath)
-        
-        // ========================================
-        // Step 3: Set FlowVaultsRequests Contract Address
-        // ========================================
-        
+
         let evmAddress = EVM.addressFromString(flowVaultsRequestsAddress)
         admin.setFlowVaultsRequestsAddress(evmAddress)
     }

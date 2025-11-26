@@ -31,9 +31,9 @@ access(all)
 fun testContractInitialState() {
     // Verify contract initializes with correct default values
     
-    // MAX_REQUESTS_PER_TX should be initialized to a reasonable default (1 per original contract)
+    // maxRequestsPerTx should be initialized to a reasonable default (1 per original contract)
     let maxRequests = getMaxRequestsConfig()
-    Test.assert(maxRequests == 1, message: "MAX_REQUESTS_PER_TX should be 1")
+    Test.assert(maxRequests == 1, message: "maxRequestsPerTx should be 1")
     
     // FlowVaultsRequests address should be nil initially
     let requestsAddress = getRequestsAddress()
@@ -56,13 +56,13 @@ fun testOnlyAdminCanupdateRequestsAddress() {
 access(all)
 fun testOnlyAdminCanUpdateMaxRequests() {
     // --- act & assert ------------------------------------------------------
-    // Admin should be able to update MAX_REQUESTS_PER_TX
+    // Admin should be able to update maxRequestsPerTx
     let adminResult = updateMaxRequests(admin, 16)
     Test.expect(adminResult, Test.beSucceeded())
-    
+
     // Verify the update was applied by reading via script
     let updatedMax = getMaxRequestsConfig()
-    Test.assert(updatedMax! == 16, message: "MAX_REQUESTS_PER_TX should be updated to 16")
+    Test.assert(updatedMax! == 16, message: "maxRequestsPerTx should be updated to 16")
 }
 
 access(all)

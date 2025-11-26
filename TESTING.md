@@ -1,13 +1,40 @@
 # FlowVaults EVM Integration - Testing Documentation
 
-**Status**: ✅ 19/19 tests passing (100%)  
-**Last Updated**: November 17, 2025
+**Status**: ✅ 56/56 tests passing (100%)
+**Last Updated**: November 26, 2025
 
 ## Overview
 
-Comprehensive test suite for the Flow Vaults EVM Integration, covering request lifecycle, access control, and error handling. All tests follow Cadence testing best practices.
+Comprehensive test suite for the Flow Vaults EVM Integration, covering both Solidity and Cadence components. Tests validate request lifecycle, access control, error handling, allowlist/blocklist functionality, and cross-VM integration.
+
+## Test Summary
+
+| Component | Tests | Status |
+|-----------|-------|--------|
+| **Solidity (EVM)** | 37 | ✅ All passing |
+| **Cadence (Flow)** | 19 | ✅ All passing |
+| **Total** | **56** | **100% passing** |
 
 ## Test Organization
+
+### Solidity Tests (EVM Side)
+
+```
+solidity/test/
+└── FlowVaultsRequests.t.sol        # 37 tests - Complete EVM contract testing
+```
+
+**Test Categories**:
+- User request creation (CREATE/DEPOSIT/WITHDRAW/CLOSE) - 8 tests
+- COA operations & authorization - 7 tests
+- Request lifecycle & cancellation - 3 tests
+- Events & state management - 6 tests
+- Pagination & queries - 3 tests
+- Multi-user isolation - 2 tests
+- Admin functions - 5 tests
+- **Allowlist functionality** - 3 tests
+
+### Cadence Tests (Flow Side)
 
 ```
 cadence/tests/
@@ -25,21 +52,31 @@ cadence/tests/
 
 ## Running Tests
 
-### Run Individual Test Files
+### Solidity Tests (Foundry)
+
 ```bash
-# Request lifecycle tests (8 tests)
-flow test cadence/tests/evm_bridge_lifecycle_test.cdc
+# Run all Solidity tests (33 tests)
+cd solidity && forge test
 
-# Access control tests (7 tests)
-flow test cadence/tests/access_control_test.cdc
+# Run with verbosity
+cd solidity && forge test -vvv
 
-# Error handling tests (4 tests)
-flow test cadence/tests/error_handling_test.cdc
+# Run specific test
+cd solidity && forge test --match-test test_CreateTide
+
+# Run gas report
+cd solidity && forge test --gas-report
 ```
 
-### Run All Tests
+### Cadence Tests (Flow CLI)
+
 ```bash
-# Run each test file
+# Run individual test files
+flow test cadence/tests/evm_bridge_lifecycle_test.cdc  # 8 tests
+flow test cadence/tests/access_control_test.cdc        # 7 tests
+flow test cadence/tests/error_handling_test.cdc        # 4 tests
+
+# Run all Cadence tests
 for test in cadence/tests/*_test.cdc; do
     flow test "$test"
 done
@@ -47,163 +84,56 @@ done
 
 ---
 
-## Test Coverage
+## Solidity Test Coverage (37 tests)
 
-### 1. EVM Bridge Lifecycle (8 tests)
+| Category | Tests | Key Focus |
+|----------|-------|-----------|
+| User request creation | 8 | CREATE/DEPOSIT/WITHDRAW/CLOSE, validation, cancellation |
+| COA operations | 7 | Authorized worker operations, startProcessing, completeProcessing |
+| Request lifecycle | 3 | End-to-end flows, ownership validation |
+| Events & state | 6 | Event emission, state tracking |
+| Pagination & queries | 3 | Batch retrieval, Cadence compatibility |
+| Multi-user isolation | 2 | Independent balances, no cross-user interference |
+| Admin functions | 5 | SetAuthorizedCOA, ownership transfer, token config |
+| Allowlist | 3 | Beta access, batch operations, error handling |
 
-Tests the complete lifecycle of EVM-to-Cadence bridge operations.
-
-#### Tests:
-- ✅ `testCreateTideFromEVMRequest` - CREATE_TIDE request validation
-- ✅ `testDepositToExistingTide` - DEPOSIT_TO_TIDE request validation
-- ✅ `testWithdrawFromTide` - WITHDRAW_FROM_TIDE request validation
-- ✅ `testCloseTideComplete` - CLOSE_TIDE request validation
-- ✅ `testRequestStatusTransitions` - PENDING → COMPLETED/FAILED transitions
-- ✅ `testMultipleUsersIndependentTides` - Multi-user isolation
-- ✅ `testProcessResultStructure` - ProcessResult validation
-- ✅ `testVaultAndStrategyIdentifiers` - Identifier preservation
-
-#### Key Assertions:
-- Request types properly structured (CREATE, DEPOSIT, WITHDRAW, CLOSE)
-- Status transitions work correctly
-- Multiple users have independent Tides
-- Vault and strategy identifiers preserved
+**Key Validations**:
+- Request IDs increment, pending balances track escrow
+- Only authorized COA can update requests/balances
+- Two-phase commit (startProcessing → completeProcessing) maintains consistency
+- Allowlist/blocklist enforce access control
+- No double-spending or cross-user vulnerabilities
 
 ---
 
-### 2. Access Control & Security (15 tests)
+## Cadence Test Coverage (19 tests)
 
-Tests admin controls, permissions, and security boundaries.
+| Test File | Tests | Key Focus |
+|-----------|-------|-----------|
+| `evm_bridge_lifecycle_test.cdc` | 8 | Request lifecycle (CREATE → DEPOSIT → WITHDRAW → CLOSE), multi-user isolation |
+| `access_control_test.cdc` | 7 | Admin controls, COA requirements, beta badge enforcement |
+| `error_handling_test.cdc` | 4 | Edge cases, invalid requests, boundary conditions |
 
-#### Tests:
-- ✅ `testOnlyAdminCanupdateRequestsAddress` - Admin-only address setting
-- ✅ `testOnlyAdminCanUpdateMaxRequests` - Admin-only config updates
-- ✅ `testMaxRequestsValidation` - Value validation (> 0, ≤ 100)
-- ✅ `testRequestsAddressCanOnlyBeSetOnce` - Initial address lock
-- ✅ `testRequestsAddressCanBeUpdated` - Address update capability
-- ✅ `testWorkerCreationRequiresCOA` - COA requirement enforcement
-- ✅ `testWorkerCreationRequiresBetaBadge` - Beta badge requirement
-- ✅ `testMaxRequestsUpdateEmitsEvent` - Event emission on update
-- ✅ `testRequestsAddressSetEmitsEvent` - Event emission on address set
-- ✅ `testContractInitialState` - Proper initialization
-- ✅ `testTidesByEVMAddressMapping` - EVM address mapping
-- ✅ `testWorkerStoragePaths` - Storage path validation
-- ✅ `testRequestTypeEnumValues` - RequestType enum correctness
-- ✅ `testRequestStatusEnumValues` - RequestStatus enum correctness
-- ✅ `testNativeFlowAddressConstant` - Native FLOW address constant
-
-#### Key Assertions:
+**Key Validations**:
+- Request types properly structured and processed
 - Admin resource required for privileged operations
-- MAX_REQUESTS_PER_TX validation enforced
-- Worker creation requires both COA and beta badge
-- Storage paths match contract definitions
-- Enum values match Solidity contract
-
----
-
-### 3. Error Handling & Edge Cases (19 tests)
-
-Tests error scenarios, boundary conditions, and edge cases.
-
-#### Tests:
-- ✅ `testInvalidRequestType` - Unknown request type handling
-- ✅ `testZeroAmountDeposit` - Zero amount deposit validation
-- ✅ `testZeroAmountWithdrawal` - Zero amount withdrawal validation
-- ✅ `testDepositToNonExistentTide` - Invalid Tide ID handling
-- ✅ `testWithdrawFromNonExistentTide` - Invalid Tide ID handling
-- ✅ `testCloseNonExistentTide` - Invalid Tide ID handling
-- ✅ `testMissingFlowVaultsRequestsAddress` - Precondition enforcement
-- ✅ `testRequestStatusCompletedStructure` - COMPLETED status structure
-- ✅ `testRequestStatusFailedStructure` - FAILED status structure
-- ✅ `testProcessResultSuccess` - Successful result structure
-- ✅ `testProcessResultFailure` - Failure result structure
-- ✅ `testVeryLargeAmount` - Large amount handling (1M FLOW)
-- ✅ `testVerySmallAmount` - Small amount handling (1 wei)
-- ✅ `testMaxUInt256Amount` - Maximum UInt256 value
-- ✅ `testEmptyVaultIdentifier` - Empty vault identifier
-- ✅ `testEmptyStrategyIdentifier` - Empty strategy identifier
-- ✅ `testLongErrorMessage` - Long error message handling
-- ✅ `testAllZeroEVMAddress` - Zero EVM address
-- ✅ `testMaxEVMAddress` - Maximum EVM address
-
-#### Key Assertions:
+- Worker creation requires COA and beta badge
 - Invalid requests handled gracefully
-- Boundary values tested (zero, very large, max UInt256)
-- Edge case EVM addresses handled
-- Error messages properly structured
+- Boundary values tested (zero, max UInt256)
 
 ---
 
-### 4. FlowVaults-sc Integration (15 tests)
+## Detailed Test Summary
 
-Tests integration between FlowVaultsEVM Worker and FlowVaults-sc TideManager, validating the core bridge functionality.
-
-#### Tests:
-- ✅ `testWorkerCanAccessTideManager` - Worker-TideManager connection
-- ✅ `testWorkerHasBetaBadgeAccess` - Beta badge validation
-- ✅ `testProcessRequestsWithNoEVMRequests` - Empty request handling
-- ✅ `testWorkerTracksEVMUserTides` - EVM user Tide tracking
-- ✅ `testMaxRequestsPerTxConfiguration` - Config update mechanism
-- ✅ `testWorkerCOAHasFlowBalance` - COA existence validation
-- ✅ `testProcessCreateTideIntegration` - CREATE → TideManager.createTide()
-- ✅ `testProcessDepositIntegration` - DEPOSIT → TideManager.depositToTide()
-- ✅ `testProcessWithdrawIntegration` - WITHDRAW → TideManager.withdrawFromTide()
-- ✅ `testProcessCloseTideIntegration` - CLOSE → TideManager.closeTide()
-- ✅ `testInvalidVaultTypeRejected` - FlowVaults vault type validation
-- ✅ `testInvalidStrategyTypeRejected` - FlowVaults strategy validation
-- ✅ `testUnauthorizedTideAccessBlocked` - Ownership verification
-- ✅ `testBetaBadgeRequiredForTideOperations` - Beta badge enforcement
-- ✅ `testWorkerBetaBadgeIsValid` - Badge capability validation
-
-#### Key Integration Points:
-- Worker → TideManager lifecycle methods
-- Beta badge authentication for FlowVaults-sc
-- EVM user ownership tracking
-- Request processing → Tide operations mapping
-- Vault and strategy type validation by FlowVaults-sc
+| Component | Tests | Categories |
+|-----------|-------|------------|
+| **Solidity** | 37 | Request creation (8), COA ops (7), Lifecycle (3), Events (6), Pagination (3), Multi-user (2), Admin (5), Allowlist (3) |
+| **Cadence** | 19 | Lifecycle (8), Access control (7), Error handling (4) |
+| **Total** | **56** | **Complete cross-VM coverage** |
 
 ---
 
-## Test Summary
-
-| Test File | Tests | Purpose |
-|-----------|-------|---------|  
-| `evm_bridge_lifecycle_test.cdc` | 8 | Core request lifecycle (CREATE → DEPOSIT → WITHDRAW → CLOSE) |
-| `access_control_test.cdc` | 7 | Security boundaries and admin controls |
-| `error_handling_test.cdc` | 4 | Edge cases and error scenarios |
-| **Total** | **19** | **Complete test coverage** |---
-
-## Test Helpers
-
-From `test_helpers.cdc`:
-
-### Setup Functions
-- `deployContracts()` - Deploy all required contracts
-- `setupCOA(signer)` - Setup COA for account
-- `setupWorkerWithBadge(admin)` - Create worker with beta badge
-
-### Admin Operations
-- `updateRequestsAddress(signer, address)` - Set FlowVaultsRequests address
-- `updateMaxRequests(signer, maxRequests)` - Update MAX_REQUESTS_PER_TX
-
-### Query Functions
-- `getTideIDsForEVMAddress(evmAddress)` - Get Tide IDs for EVM user
-- `getRequestsAddress()` - Get FlowVaultsRequests address
-- `getMaxRequestsConfig()` - Get MAX_REQUESTS_PER_TX value
-- `isHandlerPaused()` - Check handler pause status
-- `getCOAAddress(accountAddress)` - Get COA address
-
-### Assertion Helpers
-- `assertSuccess(result, message)` - Assert transaction succeeded
-- `assertFailed(result, message)` - Assert transaction failed
-
-### Test Constants
-- `admin` - Admin test account
-- `mockEVMAddr` - Mock EVM address
-- `mockRequestsAddr` - Mock FlowVaultsRequests address
-- `nativeFlowAddr` - Native FLOW EVM address (0xFFfFfFff...)
-- `mockVaultIdentifier` - Mock vault type identifier
-- `mockStrategyIdentifier` - Mock strategy identifier
+## Test Helpers (Cadence)
 
 ---
 
@@ -211,57 +141,90 @@ From `test_helpers.cdc`:
 
 ### Latest Test Run
 
+#### Solidity Tests (Foundry)
 ```
-[1/3] evm_bridge_lifecycle_test
-✅ 8/8 tests passed
-
-[2/3] access_control_test
-✅ 7/7 tests passed
-
-[3/3] error_handling_test
-✅ 4/4 tests passed
-
-Total: 19/19 tests passing (100%)
+Ran 37 tests for test/FlowVaultsRequests.t.sol:FlowVaultsRequestsTest
+[PASS] test_AcceptOwnership_RevertNotPendingOwner()
+[PASS] test_Allowlist()
+[PASS] test_Blocklist()
+[PASS] test_BlocklistTakesPrecedence()
+[PASS] test_CancelRequest_RefundsFunds()
+[PASS] test_CancelRequest_RevertAlreadyCancelled()
+[PASS] test_CancelRequest_RevertNotOwner()
+[PASS] test_CloseTide()
+[PASS] test_CompleteProcessing_CloseTideRemovesOwnership()
+[PASS] test_CompleteProcessing_FailureRefundsBalance()
+[PASS] test_CompleteProcessing_RevertNotProcessing()
+[PASS] test_CompleteProcessing_Success()
+[PASS] test_CreateTide()
+[PASS] test_CreateTide_RevertBelowMinimum()
+[PASS] test_CreateTide_RevertMsgValueMismatch()
+[PASS] test_CreateTide_RevertZeroAmount()
+[PASS] test_DepositToTide()
+[PASS] test_DepositToTide_RevertInvalidTideId()
+[PASS] test_DepositToTide_RevertNotOwner()
+[PASS] test_DropRequests()
+[PASS] test_FullCreateTideLifecycle()
+[PASS] test_FullWithdrawLifecycle()
+[PASS] test_GetPendingRequestsUnpacked()
+[PASS] test_GetPendingRequestsUnpacked_Pagination()
+[PASS] test_MaxPendingRequests_EnforcesLimit()
+[PASS] test_SetAuthorizedCOA()
+[PASS] test_SetAuthorizedCOA_RevertZeroAddress()
+[PASS] test_SetMaxPendingRequestsPerUser()
+[PASS] test_SetTokenConfig()
+[PASS] test_StartProcessing_RevertNotPending()
+[PASS] test_StartProcessing_RevertUnauthorized()
+[PASS] test_StartProcessing_Success()
+[PASS] test_TransferOwnership_NewOwnerHasAdminRights()
+[PASS] test_TransferOwnership_RevertNotOwner()
+[PASS] test_TransferOwnership_TwoStepProcess()
+[PASS] test_UserBalancesAreSeparate()
+[PASS] test_WithdrawFromTide()
 ```
 
-### Test Execution Details
+#### Cadence Tests (Flow CLI)
+```
+evm_bridge_lifecycle_test.cdc: 8 tests PASS
+- testCreateTideFromEVMRequest
+- testDepositToExistingTide
+- testWithdrawFromTide
+- testCloseTideComplete
+- testRequestStatusTransitions
+- testMultipleUsersIndependentTides
+- testProcessResultStructure
+- testVaultAndStrategyIdentifiers
 
-#### evm_bridge_lifecycle_test.cdc
-- testCreateTideFromEVMRequest: ✅ PASS
-- testDepositToExistingTide: ✅ PASS
-- testWithdrawFromTide: ✅ PASS
-- testCloseTideComplete: ✅ PASS
-- testRequestStatusTransitions: ✅ PASS
-- testMultipleUsersIndependentTides: ✅ PASS
-- testProcessResultStructure: ✅ PASS
-- testVaultAndStrategyIdentifiers: ✅ PASS
+access_control_test.cdc: 7 tests PASS
+- testContractInitialState
+- testOnlyAdminCanupdateRequestsAddress
+- testOnlyAdminCanUpdateMaxRequests
+- testRequestsAddressCanBeUpdated
+- testWorkerCreationRequiresCOA
+- testWorkerCreationRequiresBetaBadge
+- testTidesByEVMAddressMapping
 
-#### access_control_test.cdc
-- testOnlyAdminCanupdateRequestsAddress: ✅ PASS
-- testOnlyAdminCanUpdateMaxRequests: ✅ PASS
-- testRequestsAddressCanBeUpdated: ✅ PASS
-- testWorkerCreationRequiresCOA: ✅ PASS
-- testWorkerCreationRequiresBetaBadge: ✅ PASS
-- testContractInitialState: ✅ PASS
-- testTidesByEVMAddressMapping: ✅ PASS
+error_handling_test.cdc: 4 tests PASS
+- testInvalidRequestType
+- testZeroAmountWithdrawal
+- testRequestStatusCompletedStructure
+- testRequestStatusFailedStructure
+```
 
-#### error_handling_test.cdc
-- testInvalidRequestType: ✅ PASS
-- testZeroAmountWithdrawal: ✅ PASS
-- testRequestStatusCompletedStructure: ✅ PASS
-- testRequestStatusFailedStructure: ✅ PASS
+**Total: 56/56 tests passing (100%)**
 
 ---
 
 ## Testing Patterns
 
-### File Structure
-Each test file follows a standard template:
-```cadence
-import Test
-import "FlowVaultsEVM"
-import "test_helpers.cdc"
+### Solidity (Foundry)
+- Uses Forge standard library for assertions
+- Helper contract exposes internal state for testing
+- Event expectations with `vm.expectEmit()`
+- Gas reporting available with `--gas-report`
 
+### Cadence (Flow Testing Framework)
+```cadence
 access(all) fun setup() {
     deployContracts()
     // Additional setup...
@@ -272,37 +235,19 @@ access(all) fun testFeatureName() {
 }
 ```
 
-### Assertion Style
+**Assertions**:
 - `Test.expect(result, Test.beSucceeded())` - Transaction success
 - `Test.assertEqual(expected, actual)` - Value equality
 - `Test.assert(condition, message: "...")` - Boolean conditions
-
-### Test Isolation
-- Deploy contracts once in `setup()`
-- Tests are independent and can run in any order
-- State may persist between tests in same file
-
----
-
-## Common Issues
-
-### Issue: "cannot find declaration"
-**Solution**: Ensure all imports are correct and contracts are deployed
-
-### Issue: Tests fail after contract changes
-**Solution**: Verify contract changes are compatible with test assertions
-
-### Issue: Precondition failures
-**Solution**: Check that required setup (COA, beta badge, addresses) is complete
 
 ---
 
 ## CI/CD Integration
 
-Tests are ready for continuous integration:
-
 ```yaml
-# Example CI workflow
+- name: Run Solidity Tests
+  run: cd solidity && forge test
+
 - name: Run Cadence Tests
   run: |
     flow test cadence/tests/evm_bridge_lifecycle_test.cdc
@@ -312,24 +257,4 @@ Tests are ready for continuous integration:
 
 ---
 
-## Success Criteria
-
-✅ **Coverage**: All public functions tested  
-✅ **Security**: All access controls validated  
-✅ **Robustness**: Edge cases and errors handled  
-✅ **Documentation**: Each test clearly documents intent  
-✅ **Maintainability**: Reusable helpers and consistent patterns  
-
----
-
-## Future Enhancements
-
-Potential areas for expansion:
-- Integration tests with actual EVM contract interaction
-- Performance tests for batch processing optimization
-- End-to-end tests with multiple concurrent users
-- Gas consumption analysis and optimization
-
----
-
-**Built with Cadence Testing Framework** | **100% Test Coverage**
+**Built with Foundry & Cadence Testing Framework** | **56 tests passing**

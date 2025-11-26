@@ -238,20 +238,20 @@ fun testProcessResultStructure() {
         tideId: 42,
         message: "Tide created successfully"
     )
-    
+
     Test.assert(successResult.success)
     Test.assertEqual(42 as UInt64, successResult.tideId)
     Test.assertEqual("Tide created successfully", successResult.message)
-    
-    // Test failure result
+
+    // Test failure result (NO_TIDE_ID sentinel for "no tide")
     let failureResult = FlowVaultsEVM.ProcessResult(
         success: false,
-        tideId: 0,
+        tideId: FlowVaultsEVM.noTideId,
         message: "Insufficient COA balance"
     )
-    
+
     Test.assert(!failureResult.success)
-    Test.assertEqual(0 as UInt64, failureResult.tideId)
+    Test.assertEqual(FlowVaultsEVM.noTideId, failureResult.tideId)
     Test.assertEqual("Insufficient COA balance", failureResult.message)
 }
 

@@ -1,31 +1,30 @@
 import "FlowVaultsEVM"
 
-/// Get the current MAX_REQUESTS_PER_TX value and related statistics
-/// 
-/// This helps you understand current batch processing configuration
-/// and make informed decisions about tuning
+/// @title Get Max Requests Config
+/// @notice Returns the current maxRequestsPerTx value and throughput estimates
+/// @return Dictionary with current config and throughput calculations
 ///
 access(all) fun main(): {String: AnyStruct} {
-    let maxRequestsPerTx = FlowVaultsEVM.MAX_REQUESTS_PER_TX
-    
-    // Calculate some helpful metrics
+    let maxRequestsPerTx = FlowVaultsEVM.maxRequestsPerTx
+
     let executionsPerHourAt5s = 720
     let executionsPerHourAt60s = 60
-    
-    let maxThroughputPerHour5s = maxRequestsPerTx * executionsPerHourAt5s
-    let maxThroughputPerHour60s = maxRequestsPerTx * executionsPerHourAt60s
-    
+
+    let throughput: {String: Int} = {
+        "at5sDelay": maxRequestsPerTx * executionsPerHourAt5s,
+        "at60sDelay": maxRequestsPerTx * executionsPerHourAt60s
+    }
+
+    let gasEstimate: {String: String} = {
+        "description": "Varies based on request complexity",
+        "rangePerRequest": "~100k-500k gas",
+        "totalRange": calculateGasRange(maxRequestsPerTx)
+    }
+
     return {
         "currentMaxRequestsPerTx": maxRequestsPerTx,
-        "maxThroughputPerHour": {
-            "at5sDelay": maxThroughputPerHour5s,
-            "at60sDelay": maxThroughputPerHour60s
-        },
-        "estimatedGasPerExecution": {
-            "description": "Varies based on request complexity",
-            "rangePerRequest": "~100k-500k gas",
-            "totalRange": calculateGasRange(maxRequestsPerTx)
-        },
+        "maxThroughputPerHour": throughput,
+        "estimatedGasPerExecution": gasEstimate,
         "recommendations": getRecommendations(maxRequestsPerTx)
     }
 }
@@ -38,18 +37,18 @@ access(all) fun calculateGasRange(_ batchSize: Int): String {
 
 access(all) fun getRecommendations(_ current: Int): [String] {
     let recommendations: [String] = []
-    
+
     if current < 5 {
-        recommendations.append("⚠️  Very small batch size - consider increasing for efficiency")
+        recommendations.append("Very small batch size - consider increasing for efficiency")
     } else if current < 10 {
-        recommendations.append("✅ Conservative batch size - good for testing")
+        recommendations.append("Conservative batch size - good for testing")
     } else if current <= 30 {
-        recommendations.append("✅ Optimal batch size range")
+        recommendations.append("Optimal batch size range")
     } else if current <= 50 {
-        recommendations.append("⚠️  Large batch size - monitor for gas issues")
+        recommendations.append("Large batch size - monitor for gas issues")
     } else {
-        recommendations.append("🚨 Very large batch size - high risk of gas limits")
+        recommendations.append("Very large batch size - high risk of gas limits")
     }
-    
+
     return recommendations
 }

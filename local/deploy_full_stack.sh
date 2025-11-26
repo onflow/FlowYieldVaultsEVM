@@ -3,11 +3,26 @@
 set -e  # Exit on any error
 
 # Configuration - Edit these values as needed
+# Test accounts derived from simple private keys (for local testing only!)
+# Private Key 0x2 -> Deployer
 DEPLOYER_EOA="0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF"
 DEPLOYER_FUNDING="50.46"
 
+# Private Key 0x3 -> User A (default test user)
 USER_A_EOA="0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69"
 USER_A_FUNDING="1234.12"
+
+# Private Key 0x4 -> User B
+USER_B_EOA="0x1efF47bc3a10a45D4B230B5d10E37751FE6AA718"
+USER_B_FUNDING="500.0"
+
+# Private Key 0x5 -> User C
+USER_C_EOA="0xe1AB8145F7E55DC933d51a18c793F901A3A0b276"
+USER_C_FUNDING="500.0"
+
+# Private Key 0x6 -> User D
+USER_D_EOA="0xE57bFE9F44b819898F47BF37E5AF72a0783e1141"
+USER_D_FUNDING="500.0"
 
 RPC_URL="localhost:8545"
 
@@ -51,12 +66,27 @@ echo "=== Setting up accounts ==="
 # Fund deployer on EVM side
 echo "Funding deployer account ($DEPLOYER_EOA) with $DEPLOYER_FUNDING FLOW..."
 flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc \
-  "$DEPLOYER_EOA" "$DEPLOYER_FUNDING"
+  "$DEPLOYER_EOA" "$DEPLOYER_FUNDING" --compute-limit 9999
 
 # Fund userA on EVM side
 echo "Funding userA account ($USER_A_EOA) with $USER_A_FUNDING FLOW..."
 flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc \
-  "$USER_A_EOA" "$USER_A_FUNDING"
+  "$USER_A_EOA" "$USER_A_FUNDING" --compute-limit 9999
+
+# Fund userB on EVM side
+echo "Funding userB account ($USER_B_EOA) with $USER_B_FUNDING FLOW..."
+flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc \
+  "$USER_B_EOA" "$USER_B_FUNDING" --compute-limit 9999
+
+# Fund userC on EVM side
+echo "Funding userC account ($USER_C_EOA) with $USER_C_FUNDING FLOW..."
+flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc \
+  "$USER_C_EOA" "$USER_C_FUNDING" --compute-limit 9999
+
+# Fund userD on EVM side
+echo "Funding userD account ($USER_D_EOA) with $USER_D_FUNDING FLOW..."
+flow transactions send ./cadence/transactions/fund_evm_from_coa.cdc \
+  "$USER_D_EOA" "$USER_D_FUNDING" --compute-limit 9999
 
 echo "✓ Accounts setup complete"
 echo ""
@@ -112,12 +142,10 @@ echo "✓ EVM Gateway confirmed ready for deployment"
 # Deploy FlowVaultsRequests Solidity contract
 echo "Deploying FlowVaultsRequests contract to $RPC_URL..."
 DEPLOYMENT_OUTPUT=$(forge script ./solidity/script/DeployFlowVaultsRequests.s.sol \
+  --root ./solidity \
   --rpc-url "http://$RPC_URL" \
   --broadcast \
-  --legacy \
-  --optimize \
-  --optimizer-runs 1000 \
-  --via-ir 2>&1)
+  --legacy 2>&1)
 
 echo "$DEPLOYMENT_OUTPUT"
 
@@ -145,7 +173,7 @@ flow project deploy || echo "⚠ Some contracts may already be deployed, continu
 echo "Setting up worker with badge for contract $FLOW_VAULTS_REQUESTS_CONTRACT..."
 flow transactions send ./cadence/transactions/setup_worker_with_badge.cdc \
   "$FLOW_VAULTS_REQUESTS_CONTRACT" \
-  --signer tidal --gas-limit 9999
+  --signer tidal --compute-limit 9999
 
 echo "✓ Project initialization complete"
 
