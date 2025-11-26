@@ -3,16 +3,18 @@ import "FlowVaultsEVM"
 /// @title Get Request Details
 /// @notice Returns details of the first pending request from FlowVaultsRequests
 /// @param contractAddr The address where FlowVaultsEVM Worker is stored
+/// @param startIndex The index to start fetching requests from
+/// @param count The number of requests to fetch
 /// @return Dictionary with request details or empty message if none pending
 ///
-access(all) fun main(contractAddr: Address): {String: AnyStruct} {
+access(all) fun main(contractAddr: Address, startIndex: Int, count: Int): {String: AnyStruct} {
     let account = getAuthAccount<auth(Storage) &Account>(contractAddr)
 
     let worker = account.storage.borrow<&FlowVaultsEVM.Worker>(
         from: FlowVaultsEVM.WorkerStoragePath
     ) ?? panic("No Worker found")
 
-    let requests = worker.getPendingRequestsFromEVM()
+    let requests = worker.getPendingRequestsFromEVM(startIndex: startIndex, count: count)
 
     if requests.length == 0 {
         return {"message": "No pending requests"}

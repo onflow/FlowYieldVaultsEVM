@@ -89,17 +89,19 @@ access(all) contract FlowVaultsTransactionHandler {
     )
 
     /// @notice Emitted when parallel executions are scheduled
-    /// @param transactionIds Array of scheduled transaction IDs
+    /// @param coordinatorId The coordinator transaction ID
+    /// @param workerIds Array of worker transaction IDs
     /// @param scheduledFor Timestamp when executions are scheduled
     /// @param delaySeconds Delay from current time
     /// @param pendingRequests Current pending request count
-    /// @param parallelCount Number of parallel transactions scheduled
+    /// @param workerCount Number of worker transactions scheduled
     access(all) event ParallelExecutionsScheduled(
-        transactionIds: [UInt64],
+        coordinatorId: UInt64,
+        workerIds: [UInt64],
         scheduledFor: UFix64,
         delaySeconds: UFix64,
         pendingRequests: Int,
-        parallelCount: Int
+        workerCount: Int
     )
 
     /// @notice Emitted when execution is skipped
@@ -108,6 +110,14 @@ access(all) contract FlowVaultsTransactionHandler {
     access(all) event ExecutionSkipped(
         transactionId: UInt64,
         reason: String
+    )
+
+    /// @notice Emitted when all scheduled executions are stopped and cancelled
+    /// @param cancelledIds Array of cancelled transaction IDs
+    /// @param totalRefunded Total amount of FLOW refunded
+    access(all) event AllExecutionsStopped(
+        cancelledIds: [UInt64],
+        totalRefunded: UFix64
     )
 
     // ============================================
@@ -140,6 +150,55 @@ access(all) contract FlowVaultsTransactionHandler {
             FlowVaultsTransactionHandler.maxParallelTransactions = count
             emit MaxParallelTransactionsUpdated(oldValue: oldValue, newValue: count)
         }
+
+        /// @notice Stops all scheduled executions by pausing and cancelling all pending transactions
+        /// @dev This will pause the handler and cancel all scheduled transactions, refunding fees
+        /// @return Dictionary with cancelledIds array and totalRefunded amount
+        access(all) fun stopAll(): {String: AnyStruct} {
+            // First pause to prevent any new scheduling
+            FlowVaultsTransactionHandler.isPaused = true
+            emit HandlerPaused()
+
+            // Borrow the manager to cancel scheduled transactions
+            let manager = FlowVaultsTransactionHandler.account.storage
+                .borrow<auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}>(
+                    from: FlowTransactionSchedulerUtils.managerStoragePath
+                )
+
+            let cancelledIds: [UInt64] = []
+
+            if manager == nil {
+                emit AllExecutionsStopped(cancelledIds: [], totalRefunded: 0.0)
+                return {
+                    "cancelledIds": cancelledIds,
+                    "totalRefunded": 0.0
+                }
+            }
+
+            // Get all pending transaction IDs
+            let transactionIds = manager!.getTransactionIDs()
+            var totalRefunded: UFix64 = 0.0
+
+            // Get vault to deposit refunds
+            let vaultRef = FlowVaultsTransactionHandler.account.storage
+                .borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
+                ?? panic("Could not borrow FlowToken vault")
+
+            // Cancel each scheduled transaction
+            for id in transactionIds {
+                let refund <- manager!.cancel(id: id)
+                totalRefunded = totalRefunded + refund.balance
+                vaultRef.deposit(from: <-refund)
+                cancelledIds.append(id)
+            }
+
+            emit AllExecutionsStopped(cancelledIds: cancelledIds, totalRefunded: totalRefunded)
+
+            return {
+                "cancelledIds": cancelledIds,
+                "totalRefunded": totalRefunded
+            }
+        }
     }
 
     /// @notice Handler resource that implements FlowTransactionScheduler.TransactionHandler
@@ -157,9 +216,11 @@ access(all) contract FlowVaultsTransactionHandler {
         }
 
         /// @notice Executes the scheduled transaction
-        /// @dev Called by FlowTransactionScheduler when the scheduled time arrives
+        /// @dev Called by FlowTransactionScheduler when the scheduled time arrives.
+        ///      Uses coordinator pattern: coordinators (data=-1) schedule work,
+        ///      workers (data=workerIndex >= 0) process requests without scheduling.
         /// @param id The transaction ID being executed
-        /// @param data Optional data passed when scheduling (unused)
+        /// @param data Int: -1 = coordinator, >= 0 = worker index for offset-based fetching
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
             if FlowVaultsTransactionHandler.isPaused {
                 emit ExecutionSkipped(transactionId: id, reason: "Handler is paused")
@@ -172,24 +233,40 @@ access(all) contract FlowVaultsTransactionHandler {
                 return
             }
 
-            let pendingRequestsBefore = self.getPendingRequestCount(worker!)
+            // Determine if this is a coordinator (schedules) or worker (processes)
+            // Coordinator: data = -1, Worker: data = workerIndex (>= 0)
+            let workerIndex = (data as? Int) ?? -1
+            let isCoordinator = workerIndex < 0
 
-            worker!.processRequests()
+            if isCoordinator {
+                // Coordinator: check pending count and schedule workers + next coordinator
+                let pendingRequests = self.getPendingRequestCount(worker!)
+                let nextDelay = FlowVaultsTransactionHandler.getDelayForPendingCount(pendingRequests)
 
-            let pendingRequestsAfter = self.getPendingRequestCount(worker!)
+                emit ScheduledExecutionTriggered(
+                    transactionId: id,
+                    pendingRequests: pendingRequests,
+                    nextExecutionDelaySeconds: nextDelay
+                )
 
-            self.executionCount = self.executionCount + 1
-            self.lastExecutionTime = getCurrentBlock().timestamp
+                self.scheduleNextExecution(nextDelay: nextDelay, pendingRequests: pendingRequests)
+            } else {
+                // Worker: process requests from offset, don't schedule anything
+                let maxRequestsPerTx = FlowVaultsEVM.maxRequestsPerTx
+                let startIndex = workerIndex * maxRequestsPerTx
+                worker!.processRequests(startIndex: startIndex, count: maxRequestsPerTx)
 
-            let nextDelay = FlowVaultsTransactionHandler.getDelayForPendingCount(pendingRequestsAfter)
+                self.executionCount = self.executionCount + 1
+                self.lastExecutionTime = getCurrentBlock().timestamp
 
-            emit ScheduledExecutionTriggered(
-                transactionId: id,
-                pendingRequests: pendingRequestsAfter,
-                nextExecutionDelaySeconds: nextDelay
-            )
+                let pendingRequestsAfter = self.getPendingRequestCount(worker!)
 
-            self.scheduleNextExecution(nextDelay: nextDelay, pendingRequests: pendingRequestsAfter)
+                emit ScheduledExecutionTriggered(
+                    transactionId: id,
+                    pendingRequests: pendingRequestsAfter,
+                    nextExecutionDelaySeconds: 0.0
+                )
+            }
         }
 
         access(self) fun scheduleNextExecution(nextDelay: UFix64, pendingRequests: Int) {
@@ -210,49 +287,66 @@ access(all) contract FlowVaultsTransactionHandler {
             let maxRequestsPerTx = FlowVaultsEVM.maxRequestsPerTx
             let maxParallel = FlowVaultsTransactionHandler.maxParallelTransactions
 
-            var parallelCount = 1
+            // Calculate how many workers are needed
+            var workerCount = 0
             if pendingRequests > 0 {
                 let neededTransactions = (pendingRequests + maxRequestsPerTx - 1) / maxRequestsPerTx
-                parallelCount = neededTransactions < maxParallel ? neededTransactions : maxParallel
+                workerCount = neededTransactions < maxParallel ? neededTransactions : maxParallel
             }
 
-            let transactionIds: [UInt64] = []
-            var i = 0
+            let vaultRef = FlowVaultsTransactionHandler.account.storage
+                .borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
+                ?? panic("missing FlowToken vault on contract account")
 
-            while i < parallelCount {
-                let estimate = FlowTransactionScheduler.estimate(
-                    data: nil,
+            // Schedule the next coordinator (data = -1)
+            let coordinatorEstimate = FlowTransactionScheduler.estimate(
+                data: -1,
+                timestamp: future,
+                priority: priority,
+                executionEffort: executionEffort
+            )
+            let coordinatorFees <- vaultRef.withdraw(amount: coordinatorEstimate.flowFee ?? 0.0) as! @FlowToken.Vault
+            let coordinatorId = manager.scheduleByHandler(
+                handlerTypeIdentifier: handlerTypeIdentifier,
+                handlerUUID: self.uuid,
+                data: -1,
+                timestamp: future,
+                priority: priority,
+                executionEffort: executionEffort,
+                fees: <-coordinatorFees
+            )
+
+            // Schedule workers (data = workerIndex for offset-based fetching)
+            let workerIds: [UInt64] = []
+            var i = 0
+            while i < workerCount {
+                let workerEstimate = FlowTransactionScheduler.estimate(
+                    data: i,
                     timestamp: future,
                     priority: priority,
                     executionEffort: executionEffort
                 )
-
-                let vaultRef = FlowVaultsTransactionHandler.account.storage
-                    .borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
-                    ?? panic("missing FlowToken vault on contract account")
-
-                let fees <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
-
-                let transactionId = manager.scheduleByHandler(
+                let workerFees <- vaultRef.withdraw(amount: workerEstimate.flowFee ?? 0.0) as! @FlowToken.Vault
+                let workerId = manager.scheduleByHandler(
                     handlerTypeIdentifier: handlerTypeIdentifier,
-                    handlerUUID: nil,
-                    data: nil,
+                    handlerUUID: self.uuid,
+                    data: i,
                     timestamp: future,
                     priority: priority,
                     executionEffort: executionEffort,
-                    fees: <-fees
+                    fees: <-workerFees
                 )
-
-                transactionIds.append(transactionId)
+                workerIds.append(workerId)
                 i = i + 1
             }
 
             emit ParallelExecutionsScheduled(
-                transactionIds: transactionIds,
+                coordinatorId: coordinatorId,
+                workerIds: workerIds,
                 scheduledFor: future,
                 delaySeconds: nextDelay,
                 pendingRequests: pendingRequests,
-                parallelCount: parallelCount
+                workerCount: workerCount
             )
         }
 

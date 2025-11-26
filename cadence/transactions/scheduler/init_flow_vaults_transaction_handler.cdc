@@ -6,9 +6,10 @@ import "FlowVaultsEVM"
 /// @notice Creates and configures the automated transaction handler
 /// @dev Run once after FlowVaultsEVM Worker is set up. Creates Handler resource
 ///      and issues both entitled and public capabilities for scheduling.
+///      Safe to run multiple times - will skip already-configured resources.
 ///
 transaction() {
-    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
+    prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability, UnpublishCapability) &Account) {
         if signer.storage.borrow<&FlowVaultsEVM.Worker>(from: FlowVaultsEVM.WorkerStoragePath) == nil {
             panic("FlowVaultsEVM Worker not found. Please initialize Worker first.")
         }
@@ -25,6 +26,9 @@ transaction() {
             .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(
                 FlowVaultsTransactionHandler.HandlerStoragePath
             )
+
+        // Unpublish existing capability if present, then publish new one
+        let _ = signer.capabilities.unpublish(FlowVaultsTransactionHandler.HandlerPublicPath)
 
         let publicCap = signer.capabilities.storage
             .issue<&{FlowTransactionScheduler.TransactionHandler}>(

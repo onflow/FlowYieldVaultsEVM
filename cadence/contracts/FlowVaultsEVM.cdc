@@ -323,15 +323,17 @@ access(all) contract FlowVaultsEVM {
         }
 
         /// @notice Processes pending requests from the EVM contract
-        /// @dev Fetches up to maxRequestsPerTx pending requests and processes each one.
+        /// @dev Fetches up to count pending requests and processes each one.
         ///      Uses two-phase commit pattern with startProcessing() and completeProcessing().
-        access(all) fun processRequests() {
+        /// @param startIndex The index to start fetching requests from
+        /// @param count The number of requests to fetch
+        access(all) fun processRequests(startIndex: Int, count: Int) {
             pre {
                 FlowVaultsEVM.flowVaultsRequestsAddress != nil: "FlowVaultsRequests address not set"
             }
 
             let totalPending = self.getPendingRequestCountFromEVM()
-            let requestsToProcess = self.getPendingRequestsFromEVM()
+            let requestsToProcess = self.getPendingRequestsFromEVM(startIndex: startIndex, count: count)
             let batchSize = requestsToProcess.length
 
             if batchSize == 0 {
@@ -872,12 +874,14 @@ access(all) contract FlowVaultsEVM {
             return Int(count256)
         }
 
-        /// @notice Fetches pending requests from the EVM contract (up to maxRequestsPerTx)
+        /// @notice Fetches pending requests from the EVM contract
+        /// @param startIndex The index to start fetching from
+        /// @param count The number of requests to fetch (use maxRequestsPerTx if not specified)
         /// @return Array of pending EVMRequest structs
-        access(all) fun getPendingRequestsFromEVM(): [EVMRequest] {
-            let startIndex = 0 as UInt256
-            let count = UInt256(FlowVaultsEVM.maxRequestsPerTx)
-            let calldata = EVM.encodeABIWithSignature("getPendingRequestsUnpacked(uint256,uint256)", [startIndex, count])
+        access(all) fun getPendingRequestsFromEVM(startIndex: Int, count: Int): [EVMRequest] {
+            let startIdx = UInt256(startIndex)
+            let cnt = UInt256(count)
+            let calldata = EVM.encodeABIWithSignature("getPendingRequestsUnpacked(uint256,uint256)", [startIdx, cnt])
 
             let callResult = self.getCOARef().dryCall(
                 to: FlowVaultsEVM.flowVaultsRequestsAddress!,
