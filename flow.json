@@ -21,7 +21,7 @@
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
-				"testnet": "54069c7c195d9c3c"
+				"testnet": "53918f43ba868eb2"
 			}
 		},
 		"FlowVaultsTransactionHandler": {
@@ -29,7 +29,7 @@
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
-				"testnet": "54069c7c195d9c3c"
+				"testnet": "53918f43ba868eb2"
 			}
 		}
 	},
@@ -487,12 +487,12 @@
 			}
 		},
 		"testnet-account": {
-			"address": "54069c7c195d9c3c",
+			"address": "53918f43ba868eb2",
 			"key": {
 				"type": "hex",
 				"signatureAlgorithm": "ECDSA_secp256k1",
 				"hashAlgorithm": "SHA2_256",
-				"privateKey": "cdb902b028f34a4d90b893c67da4b489880af86efa2a99c436b577ab7781d16d"
+				"privateKey": "fbf1930a14c973ca403b69e55c124550434e9fdf82b65393784a026df5874568"
 			}
 		},
 		"tidal": {

@@ -3,7 +3,7 @@ import "FlowVaultsTransactionHandler"
 /// @title Unpause Transaction Handler
 /// @notice Unpauses the automated transaction handler
 /// @dev After unpausing, manually schedule a new execution using
-///      schedule_initial_flow_vaults_execution.cdc to restart the chain.
+///      init_and_schedule.cdc to restart the chain.
 ///
 transaction() {
     prepare(signer: auth(BorrowValue) &Account) {
