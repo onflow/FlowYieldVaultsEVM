@@ -1,5 +1,7 @@
-# Forge lib
-lib/
+# Forge lib (track submodules, ignore the rest)
+lib/*
+!lib/forge-std/
+!lib/openzeppelin-contracts/
 
 # Compiler files
 cache/
