@@ -28,6 +28,9 @@ jobs:
       - name: Verify Flow CLI Installation
         run: flow version
       
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
@@ -35,7 +38,7 @@ jobs:
 
       - name: Install Solidity dependencies
         working-directory: ./solidity
-        run: forge install
+        run: forge install --no-git
 
       - name: Make scripts executable
         run: |
