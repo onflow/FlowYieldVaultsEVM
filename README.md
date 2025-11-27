@@ -89,7 +89,7 @@ forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOper
   --rpc-url http://localhost:8545 --broadcast --legacy
 
 # 3. Process requests (triggers Worker)
-flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
+flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
 ```
 
 ### EVM Operations
@@ -181,7 +181,7 @@ Coverage includes:
 ### Cadence Tests
 
 ```bash
-./scripts/run_cadence_tests.sh
+./local/run_cadence_tests.sh
 ```
 
 Or run individual test files:

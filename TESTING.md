@@ -43,9 +43,7 @@ cadence/tests/
 ├── error_handling_test.cdc         # 4 tests - Edge cases & errors
 ├── test_helpers.cdc                # Shared test utilities
 └── transactions/                   # Test-specific transactions
-    ├── setup_worker_for_test.cdc
-    ├── set_requests_address.cdc
-    └── update_max_requests.cdc
+    └── setup_worker_for_test.cdc
 ```
 
 ---

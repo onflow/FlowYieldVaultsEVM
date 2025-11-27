@@ -557,8 +557,9 @@ pre {
 | `HandlerPaused` | Processing paused |
 | `HandlerUnpaused` | Processing resumed |
 | `ScheduledExecutionTriggered` | Handler executed |
-| `ParallelExecutionsScheduled` | Next executions scheduled |
+| `NextExecutionScheduled` | Next execution scheduled |
 | `ExecutionSkipped` | Execution skipped (paused or error) |
+| `AllExecutionsStopped` | All executions cancelled and fees refunded |
 
 ---
 
