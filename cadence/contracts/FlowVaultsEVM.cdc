@@ -179,7 +179,8 @@ access(all) contract FlowVaultsEVM {
     /// @param evmAddress The EVM address of the user
     /// @param tideId The Tide ID receiving the deposit
     /// @param amount The deposited amount
-    access(all) event TideDepositedForEVMUser(evmAddress: String, tideId: UInt64, amount: UFix64)
+    /// @param isTideOwner Whether the depositor is the tide owner
+    access(all) event TideDepositedForEVMUser(evmAddress: String, tideId: UInt64, amount: UFix64, isTideOwner: Bool)
 
     /// @notice Emitted when funds are withdrawn from a Tide
     /// @param evmAddress The EVM address of the user
@@ -595,22 +596,6 @@ access(all) contract FlowVaultsEVM {
         access(self) fun processDepositToTide(_ request: EVMRequest): ProcessResult {
             let evmAddr = request.user.toString()
 
-            if let ownershipMap = FlowVaultsEVM.tideOwnershipLookup[evmAddr] {
-                if ownershipMap[request.tideId] != true {
-                    return ProcessResult(
-                        success: false,
-                        tideId: request.tideId,
-                        message: "User \(evmAddr) does not own Tide ID \(request.tideId)"
-                    )
-                }
-            } else {
-                return ProcessResult(
-                    success: false,
-                    tideId: request.tideId,
-                    message: "User \(evmAddr) has no Tides registered"
-                )
-            }
-
             if !self.startProcessing(requestId: request.id) {
                 return ProcessResult(
                     success: false,
@@ -640,7 +625,11 @@ access(all) contract FlowVaultsEVM {
             let betaRef = self.getBetaReference()
             self.getTideManagerRef().depositToTide(betaRef: betaRef, request.tideId, from: <-vault)
 
-            emit TideDepositedForEVMUser(evmAddress: evmAddr, tideId: request.tideId, amount: amount)
+            var isTideOwner = false
+            if let ownershipMap = FlowVaultsEVM.tideOwnershipLookup[evmAddr] {
+                isTideOwner = ownershipMap[request.tideId] ?? false
+            }
+            emit TideDepositedForEVMUser(evmAddress: evmAddr, tideId: request.tideId, amount: amount, isTideOwner: isTideOwner)
 
             return ProcessResult(
                 success: true,

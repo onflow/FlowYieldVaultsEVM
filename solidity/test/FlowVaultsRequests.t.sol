@@ -441,11 +441,17 @@ contract FlowVaultsRequestsTest is Test {
         c.depositToTide{value: 1 ether}(999, NATIVE_FLOW, 1 ether);
     }
 
-    function test_DepositToTide_RevertNotOwner() public {
-        // Tide 42 is owned by user, not user2
+    function test_DepositToTide_AnyoneCanDeposit() public {
+        // Tide 42 is owned by user, but user2 can deposit to it
         vm.prank(user2);
-        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.InvalidTideId.selector, 42, user2));
-        c.depositToTide{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.depositToTide{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
+
+        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE));
+        assertEq(req.tideId, 42);
+        assertEq(req.user, user2);
+        assertEq(req.amount, 1 ether);
+        assertEq(c.getUserPendingBalance(user2, NATIVE_FLOW), 1 ether);
     }
 
     // ============================================

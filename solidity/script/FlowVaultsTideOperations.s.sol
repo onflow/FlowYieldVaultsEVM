@@ -71,6 +71,7 @@ contract FlowVaultsTideOperations is Script {
     }
 
     /// @notice Deposits additional funds to an existing Tide
+    /// @dev Anyone can deposit to any valid Tide (not restricted to owner)
     /// @param contractAddress The FlowVaultsRequests contract address
     /// @param tideId The Tide ID to deposit to
     function depositToTide(address contractAddress, uint64 tideId) public {
@@ -80,7 +81,6 @@ contract FlowVaultsTideOperations is Script {
         FlowVaultsRequests requests = FlowVaultsRequests(payable(contractAddress));
 
         require(user.balance >= amount, "Insufficient balance");
-        require(requests.doesUserOwnTide(user, tideId), "User does not own this Tide");
 
         vm.startBroadcast(privateKey);
         uint256 requestId = requests.depositToTide{value: amount}(tideId, NATIVE_FLOW, amount);

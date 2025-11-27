@@ -638,7 +638,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         returns (uint256)
     {
         _validateDeposit(tokenAddress, amount);
-        _validateTideOwnership(tideId, msg.sender);
+        if (!validTideIds[tideId]) revert InvalidTideId(tideId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
 
         return
@@ -701,15 +701,19 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         Request storage request = requests[requestId];
 
         if (request.id != requestId) revert RequestNotFound();
-        if (request.user != msg.sender) revert NotRequestOwner();
+        if (request.user != msg.sender && msg.sender != owner())
+            revert NotRequestOwner();
         if (request.status != RequestStatus.PENDING)
             revert CanOnlyCancelPending();
 
         request.status = RequestStatus.FAILED;
-        request.message = "Cancelled by user";
+        string memory cancelMessage = msg.sender == request.user
+            ? "Cancelled by user"
+            : "Cancelled by admin";
+        request.message = cancelMessage;
 
-        if (userPendingRequestCount[msg.sender] > 0) {
-            userPendingRequestCount[msg.sender]--;
+        if (userPendingRequestCount[request.user] > 0) {
+            userPendingRequestCount[request.user]--;
         }
 
         _removePendingRequest(requestId);
@@ -721,18 +725,18 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             request.amount > 0
         ) {
             refundAmount = request.amount;
-            pendingUserBalances[msg.sender][request.tokenAddress] -= request
+            pendingUserBalances[request.user][request.tokenAddress] -= request
                 .amount;
             emit BalanceUpdated(
-                msg.sender,
+                request.user,
                 request.tokenAddress,
-                pendingUserBalances[msg.sender][request.tokenAddress]
+                pendingUserBalances[request.user][request.tokenAddress]
             );
 
-            _transferFunds(msg.sender, request.tokenAddress, request.amount);
+            _transferFunds(request.user, request.tokenAddress, request.amount);
 
             emit FundsWithdrawn(
-                msg.sender,
+                request.user,
                 request.tokenAddress,
                 request.amount
             );
@@ -743,7 +747,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             requestId,
             RequestStatus.FAILED,
             request.tideId,
-            "Cancelled by user"
+            cancelMessage
         );
     }
 
