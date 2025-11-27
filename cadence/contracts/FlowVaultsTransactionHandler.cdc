@@ -39,7 +39,7 @@ access(all) contract FlowVaultsTransactionHandler {
 
     /// @notice Mapping of pending request thresholds to execution delays (in seconds)
     /// @dev Higher pending counts result in shorter delays for faster processing
-    access(all) let thresholdToDelay: {Int: UFix64}
+    access(all) var thresholdToDelay: {Int: UFix64}
 
     /// @notice Default delay when no threshold matches
     access(all) let defaultDelay: UFix64
@@ -65,6 +65,10 @@ access(all) contract FlowVaultsTransactionHandler {
     /// @param oldValue The previous value
     /// @param newValue The new value
     access(all) event MaxParallelTransactionsUpdated(oldValue: Int, newValue: Int)
+
+    /// @notice Emitted when thresholdToDelay mapping is updated
+    /// @param newThresholds The new threshold to delay mapping
+    access(all) event ThresholdToDelayUpdated(newThresholds: {Int: UFix64})
 
     /// @notice Emitted when a scheduled execution is triggered
     /// @param transactionId The transaction ID that was executed
@@ -149,6 +153,16 @@ access(all) contract FlowVaultsTransactionHandler {
             let oldValue = FlowVaultsTransactionHandler.maxParallelTransactions
             FlowVaultsTransactionHandler.maxParallelTransactions = count
             emit MaxParallelTransactionsUpdated(oldValue: oldValue, newValue: count)
+        }
+
+        /// @notice Updates the threshold to delay mapping
+        /// @param newThresholds The new mapping of pending request thresholds to delays
+        access(all) fun setThresholdToDelay(newThresholds: {Int: UFix64}) {
+            pre {
+                newThresholds.length > 0: "Thresholds mapping cannot be empty"
+            }
+            FlowVaultsTransactionHandler.thresholdToDelay = newThresholds
+            emit ThresholdToDelayUpdated(newThresholds: newThresholds)
         }
 
         /// @notice Stops all scheduled executions by pausing and cancelling all pending transactions
