@@ -32,7 +32,11 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
-      
+
+      - name: Install Solidity dependencies
+        working-directory: ./solidity
+        run: forge install
+
       - name: Make scripts executable
         run: |
           chmod +x ./local/setup_and_run_emulator.sh
@@ -67,7 +71,7 @@ jobs:
       
       - name: Process Create Request
         run: |
-          flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
+          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
       
       - name: Verify Tide Creation
         run: |
@@ -122,7 +126,7 @@ jobs:
       
       - name: Process Deposit Request
         run: |
-          flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
+          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
       
       - name: Verify Deposit
         run: |
@@ -151,7 +155,7 @@ jobs:
       
       - name: Process Withdraw Request
         run: |
-          flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
+          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
       
       - name: Verify Withdrawal
         run: |
@@ -180,7 +184,7 @@ jobs:
       
       - name: Process Close Request
         run: |
-          flow transactions send ./cadence/transactions/process_requests.cdc --signer tidal --compute-limit 9999
+          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
       
       - name: Verify Tide Closed
         run: |

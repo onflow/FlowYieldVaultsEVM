@@ -41,14 +41,18 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
           submodules: recursive
-      
+
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
-      
+
+      - name: Install Solidity dependencies
+        working-directory: ./solidity
+        run: forge install
+
       - name: Make test script executable
         run: chmod +x ./local/run_solidity_tests.sh
-      
+
       - name: Run Solidity Tests
         run: ./local/run_solidity_tests.sh
