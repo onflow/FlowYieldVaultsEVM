@@ -31,15 +31,6 @@ transaction(flowVaultsRequestsAddress: String) {
             }
         }
 
-        if betaBadgeCap == nil {
-            let betaAdminHandle = signer.storage.borrow<auth(FlowVaultsClosedBeta.Admin) &FlowVaultsClosedBeta.AdminHandle>(
-                from: FlowVaultsClosedBeta.AdminHandleStoragePath
-            ) ?? panic("Could not borrow AdminHandle - you need admin access or an existing beta badge")
-
-            betaBadgeCap = betaAdminHandle.grantBeta(addr: signer.address)
-            signer.storage.save(betaBadgeCap!, to: standardStoragePath)
-        }
-
         let betaRef = betaBadgeCap!.borrow()
             ?? panic("Beta badge capability does not contain correct reference")
 
