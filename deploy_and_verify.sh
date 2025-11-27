@@ -69,44 +69,30 @@ echo "✅ Worker initialized and FlowVaultsRequests address set"
 echo ""
 
 # ==========================================
-# Step 4: Initialize Transaction Handler
+# Step 4: Initialize Transaction Handler & Schedule
 # ==========================================
-echo "🔧 Step 4: Initializing FlowVaultsTransactionHandler..."
-
-flow transactions send "$SCRIPT_DIR/cadence/transactions/scheduler/init_flow_vaults_transaction_handler.cdc" \
-    --network testnet \
-    --signer testnet-account \
-    --compute-limit 9999
-
-echo ""
-echo "✅ Transaction Handler initialized"
-echo ""
-
-# ==========================================
-# Step 5: Schedule Initial Execution
-# ==========================================
-echo "⏰ Step 5: Scheduling initial automated execution..."
+echo "🔧 Step 4: Initializing FlowVaultsTransactionHandler and scheduling initial execution..."
 echo "   - Delay: 10 seconds"
-echo "   - Priority: Medium (1)"
-echo "   - Execution Effort: 7499"
+echo "   - Priority: High (0)"
+echo "   - Execution Effort: 9999"
 
-flow transactions send "$SCRIPT_DIR/cadence/transactions/scheduler/schedule_initial_flow_vaults_execution.cdc" \
-    10.0 1 7499 \
+flow transactions send "$SCRIPT_DIR/cadence/transactions/scheduler/init_and_schedule.cdc" \
+    10.0 0 9999 \
     --network testnet \
     --signer testnet-account \
     --compute-limit 9999
 
 echo ""
-echo "✅ Initial execution scheduled"
+echo "✅ Transaction Handler initialized and initial execution scheduled"
 echo ""
 
 # ==========================================
-# Step 6: Verify Solidity Contract
+# Step 5: Verify Solidity Contract
 # ==========================================
 echo "⏳ Waiting 60 seconds for block explorer to index the deployment..."
 sleep 60
 
-echo "🔍 Step 6: Verifying Solidity contract..."
+echo "🔍 Step 5: Verifying Solidity contract..."
 echo "COA Address (constructor arg): $COA_ADDRESS"
 echo ""
 
@@ -137,8 +123,8 @@ echo "   https://evm-testnet.flowscan.io/address/$DEPLOYED_ADDRESS"
 echo ""
 echo "🔍 Useful Commands:"
 echo "   - Check pending requests:"
-echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc 0x53918f43ba868eb2 --network testnet"
+echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc 0x4135b56ffc55ecef --network testnet"
 echo ""
 echo "   - Check handler status:"
-echo "     flow scripts execute cadence/scripts/check_tidemanager_status.cdc 0x53918f43ba868eb2 --network testnet"
+echo "     flow scripts execute cadence/scripts/check_tidemanager_status.cdc 0x4135b56ffc55ecef --network testnet"
 echo ""
