@@ -1,34 +1,34 @@
-import "FlowVaultsEVM"
+import "FlowYieldVaultsEVM"
 
 /// @title Get Contract State
-/// @notice Returns the current state of the FlowVaultsEVM contract
-/// @param contractAddress The address where FlowVaultsEVM is deployed (unused but kept for compatibility)
+/// @notice Returns the current state of the FlowYieldVaultsEVM contract
+/// @param contractAddress The address where FlowYieldVaultsEVM is deployed (unused but kept for compatibility)
 /// @return Dictionary containing contract configuration and statistics
 ///
 access(all) fun main(contractAddress: Address): {String: AnyStruct} {
     let result: {String: AnyStruct} = {}
 
-    result["flowVaultsRequestsAddress"] = FlowVaultsEVM.getFlowVaultsRequestsAddress()?.toString() ?? "Not set"
-    result["maxRequestsPerTx"] = FlowVaultsEVM.maxRequestsPerTx
-    result["tidesByEVMAddress"] = FlowVaultsEVM.tidesByEVMAddress
+    result["flowYieldVaultsRequestsAddress"] = FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()?.toString() ?? "Not set"
+    result["maxRequestsPerTx"] = FlowYieldVaultsEVM.maxRequestsPerTx
+    result["yieldVaultsByEVMAddress"] = FlowYieldVaultsEVM.yieldVaultsByEVMAddress
 
-    result["WorkerStoragePath"] = FlowVaultsEVM.WorkerStoragePath.toString()
-    result["AdminStoragePath"] = FlowVaultsEVM.AdminStoragePath.toString()
+    result["WorkerStoragePath"] = FlowYieldVaultsEVM.WorkerStoragePath.toString()
+    result["AdminStoragePath"] = FlowYieldVaultsEVM.AdminStoragePath.toString()
 
-    var totalTides = 0
+    var totalYieldVaults = 0
     var totalEVMAddresses = 0
-    for evmAddress in FlowVaultsEVM.tidesByEVMAddress.keys {
+    for evmAddress in FlowYieldVaultsEVM.yieldVaultsByEVMAddress.keys {
         totalEVMAddresses = totalEVMAddresses + 1
-        let tideIds = FlowVaultsEVM.tidesByEVMAddress[evmAddress]!
-        totalTides = totalTides + tideIds.length
+        let yieldVaultIds = FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddress]!
+        totalYieldVaults = totalYieldVaults + yieldVaultIds.length
     }
 
     result["totalEVMAddresses"] = totalEVMAddresses
-    result["totalTides"] = totalTides
+    result["totalYieldVaults"] = totalYieldVaults
 
     let evmAddressDetails: {String: Int} = {}
-    for evmAddress in FlowVaultsEVM.tidesByEVMAddress.keys {
-        evmAddressDetails[evmAddress] = FlowVaultsEVM.tidesByEVMAddress[evmAddress]!.length
+    for evmAddress in FlowYieldVaultsEVM.yieldVaultsByEVMAddress.keys {
+        evmAddressDetails[evmAddress] = FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddress]!.length
     }
     result["evmAddressDetails"] = evmAddressDetails
 

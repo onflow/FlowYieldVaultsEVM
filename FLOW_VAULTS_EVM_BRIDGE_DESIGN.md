@@ -1,12 +1,12 @@
-# Flow Vaults Cross-VM Bridge: Technical Design
+# Flow YieldVaults Cross-VM Bridge: Technical Design
 
 ## Purpose
 
-Enable Flow EVM users to interact with Flow Vaults's Cadence-based yield protocol through an asynchronous cross-VM bridge.
+Enable Flow EVM users to interact with Flow YieldVaults's Cadence-based yield protocol through an asynchronous cross-VM bridge.
 
 ## Model
 
-EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence worker periodically processes these requests, bridges funds via COA, and manages Tide positions on their behalf.
+EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence worker periodically processes these requests, bridges funds via COA, and manages YieldVault positions on their behalf.
 
 ---
 
@@ -19,7 +19,7 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │                              Flow EVM                                       │
 │                                                                             │
 │  ┌──────────────┐         ┌─────────────────────────┐                       │
-│  │   EVM User   │────────▶│   FlowVaultsRequests    │                       │
+│  │   EVM User   │────────▶│   FlowYieldVaultsRequests    │                       │
 │  │              │         │                         │                       │
 │  │  - Deposit   │         │  - Request queue        │                       │
 │  │  - Request   │◀────────│  - Fund escrow          │                       │
@@ -34,35 +34,35 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │                              Flow Cadence                                   │
 │                                       ▼                                     │
 │  ┌────────────────────────────────────────────────────────────┐             │
-│  │                      FlowVaultsEVM                         │             │
+│  │                      FlowYieldVaultsEVM                         │             │
 │  │                                                            │             │
 │  │  ┌─────────────────────────────────────────────────────┐   │             │
 │  │  │                     Worker                          │   │             │
 │  │  │                                                     │   │             │
 │  │  │  Capabilities:                                      │   │             │
 │  │  │  - coaCap (EVM.Call, EVM.Withdraw, EVM.Bridge)      │   │             │
-│  │  │  - tideManagerCap (FungibleToken.Withdraw)          │   │             │
-│  │  │  - betaBadgeCap (FlowVaultsClosedBeta.Beta)         │   │             │
+│  │  │  - yieldVaultManagerCap (FungibleToken.Withdraw)          │   │             │
+│  │  │  - betaBadgeCap (FlowYieldVaultsClosedBeta.Beta)         │   │             │
 │  │  │  - feeProviderCap (FungibleToken.Withdraw)          │   │             │
 │  │  │                                                     │   │             │
 │  │  │  Functions:                                         │   │             │
 │  │  │  - processRequests()                                │   │             │
-│  │  │  - processCreateTide()                              │   │             │
-│  │  │  - processDepositToTide()                           │   │             │
-│  │  │  - processWithdrawFromTide()                        │   │             │
-│  │  │  - processCloseTide()                               │   │             │
+│  │  │  - processCreateYieldVault()                              │   │             │
+│  │  │  - processDepositToYieldVault()                           │   │             │
+│  │  │  - processWithdrawFromYieldVault()                        │   │             │
+│  │  │  - processCloseYieldVault()                               │   │             │
 │  │  └─────────────────────────────────────────────────────┘   │             │
 │  │                                                            │             │
 │  │  State:                                                    │             │
-│  │  - tidesByEVMAddress: {String: [UInt64]}                   │             │
-│  │  - tideOwnershipLookup: {String: {UInt64: Bool}}           │             │
-│  │  - flowVaultsRequestsAddress: EVM.EVMAddress?              │             │
+│  │  - yieldVaultsByEVMAddress: {String: [UInt64]}                   │             │
+│  │  - yieldVaultOwnershipLookup: {String: {UInt64: Bool}}           │             │
+│  │  - flowYieldVaultsRequestsAddress: EVM.EVMAddress?              │             │
 │  │  - maxRequestsPerTx: Int (default: 1)                      │             │
 │  └────────────────────────────────────────────────────────────┘             │
 │                              ▲                                              │
 │                              │ triggers                                     │
 │  ┌───────────────────────────┴────────────────────────────────-┐            │
-│  │            FlowVaultsTransactionHandler                     │            │
+│  │            FlowYieldVaultsTransactionHandler                     │            │
 │  │                                                             │            │
 │  │  - Implements FlowTransactionScheduler.TransactionHandler   │            │
 │  │  - Auto-schedules next execution after each run             │            │
@@ -76,12 +76,12 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 
 ### Core Components
 
-#### 1. FlowVaultsRequests (Solidity - Flow EVM)
+#### 1. FlowYieldVaultsRequests (Solidity - Flow EVM)
 
 Request queue and fund escrow contract.
 
 **Responsibilities:**
-- Accept and queue user requests (CREATE_TIDE, DEPOSIT_TO_TIDE, WITHDRAW_FROM_TIDE, CLOSE_TIDE)
+- Accept and queue user requests (CREATE_YIELDVAULT, DEPOSIT_TO_YIELDVAULT, WITHDRAW_FROM_YIELDVAULT, CLOSE_YIELDVAULT)
 - Escrow deposited funds until processing
 - Track user balances and pending request counts
 - Enforce access control (allowlist/blocklist)
@@ -97,11 +97,11 @@ mapping(address => uint256) public userPendingRequestCount;
 // Balance tracking
 mapping(address => mapping(address => uint256)) public pendingUserBalances;
 
-// Tide ownership (EVM-side mirror)
-mapping(uint64 => bool) public validTideIds;
-mapping(uint64 => address) public tideOwners;
-mapping(address => uint64[]) public tidesByUser;
-mapping(address => mapping(uint64 => bool)) public userOwnsTide;
+// YieldVault ownership (EVM-side mirror)
+mapping(uint64 => bool) public validYieldVaultIds;
+mapping(uint64 => address) public yieldVaultOwners;
+mapping(address => uint64[]) public yieldVaultsByUser;
+mapping(address => mapping(uint64 => bool)) public userOwnsYieldVault;
 
 // Access control
 address public authorizedCOA;
@@ -111,32 +111,32 @@ mapping(address => bool) public allowlisted;
 mapping(address => bool) public blocklisted;
 ```
 
-#### 2. FlowVaultsEVM (Cadence)
+#### 2. FlowYieldVaultsEVM (Cadence)
 
-Worker contract that processes EVM requests and manages Tide positions.
+Worker contract that processes EVM requests and manages YieldVault positions.
 
 **Responsibilities:**
 - Fetch pending requests from EVM via `getPendingRequestsUnpacked()`
 - Execute two-phase commit (startProcessing → operation → completeProcessing)
-- Create, deposit to, withdraw from, and close Tides
+- Create, deposit to, withdraw from, and close YieldVaults
 - Bridge funds between EVM and Cadence via COA
-- Track Tide ownership by EVM address
+- Track YieldVault ownership by EVM address
 
 **Key State:**
 ```cadence
-// Tide ownership tracking
-access(all) let tidesByEVMAddress: {String: [UInt64]}
-access(all) let tideOwnershipLookup: {String: {UInt64: Bool}}
+// YieldVault ownership tracking
+access(all) let yieldVaultsByEVMAddress: {String: [UInt64]}
+access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
 
 // Configuration
-access(all) var flowVaultsRequestsAddress: EVM.EVMAddress?
+access(all) var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
 access(all) var maxRequestsPerTx: Int  // Default: 1, max: 100
 
 // Constants
 access(all) let nativeFlowEVMAddress: EVM.EVMAddress  // 0xFFfF...FfFFFfF
 ```
 
-#### 3. FlowVaultsTransactionHandler (Cadence)
+#### 3. FlowYieldVaultsTransactionHandler (Cadence)
 
 Scheduled transaction handler with auto-scheduling.
 
@@ -176,17 +176,17 @@ Bridge account controlled by the Worker.
 ### Request (Solidity)
 
 ```solidity
-// Sentinel value for "no tide" (type(uint64).max)
-uint64 public constant NO_TIDE_ID = type(uint64).max;
+// Sentinel value for "no yieldvault" (type(uint64).max)
+uint64 public constant NO_YIELDVAULT_ID = type(uint64).max;
 
 struct Request {
     uint256 id;                  // Auto-incrementing ID (starts at 1)
     address user;                // Request creator
-    RequestType requestType;     // CREATE_TIDE | DEPOSIT_TO_TIDE | WITHDRAW_FROM_TIDE | CLOSE_TIDE
+    RequestType requestType;     // CREATE_YIELDVAULT | DEPOSIT_TO_YIELDVAULT | WITHDRAW_FROM_YIELDVAULT | CLOSE_YIELDVAULT
     RequestStatus status;        // PENDING | PROCESSING | COMPLETED | FAILED
     address tokenAddress;        // NATIVE_FLOW (0xFFfF...FfFFFfF) or ERC20 address
-    uint256 amount;              // Amount in wei (0 for CLOSE_TIDE)
-    uint64 tideId;               // Target Tide ID (NO_TIDE_ID for CREATE_TIDE until completed)
+    uint256 amount;              // Amount in wei (0 for CLOSE_YIELDVAULT)
+    uint64 yieldVaultId;               // Target YieldVault ID (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed)
     uint256 timestamp;           // Block timestamp when created
     string message;              // Status message or error reason
     string vaultIdentifier;      // Cadence vault type (e.g., "A.xxx.FlowToken.Vault")
@@ -194,10 +194,10 @@ struct Request {
 }
 
 enum RequestType {
-    CREATE_TIDE,        // 0
-    DEPOSIT_TO_TIDE,    // 1
-    WITHDRAW_FROM_TIDE, // 2
-    CLOSE_TIDE          // 3
+    CREATE_YIELDVAULT,        // 0
+    DEPOSIT_TO_YIELDVAULT,    // 1
+    WITHDRAW_FROM_YIELDVAULT, // 2
+    CLOSE_YIELDVAULT          // 3
 }
 
 enum RequestStatus {
@@ -218,7 +218,7 @@ access(all) struct EVMRequest {
     access(all) let status: UInt8
     access(all) let tokenAddress: EVM.EVMAddress
     access(all) let amount: UInt256
-    access(all) let tideId: UInt64
+    access(all) let yieldVaultId: UInt64
     access(all) let timestamp: UInt256
     access(all) let message: String
     access(all) let vaultIdentifier: String
@@ -229,12 +229,12 @@ access(all) struct EVMRequest {
 ### ProcessResult (Cadence)
 
 ```cadence
-/// Sentinel value for "no tide" (UInt64.max)
-access(all) let noTideId: UInt64 = UInt64.max
+/// Sentinel value for "no yieldvault" (UInt64.max)
+access(all) let noYieldVaultId: UInt64 = UInt64.max
 
 access(all) struct ProcessResult {
     access(all) let success: Bool
-    access(all) let tideId: UInt64  // Uses noTideId as sentinel for "no tide"
+    access(all) let yieldVaultId: UInt64  // Uses noYieldVaultId as sentinel for "no yieldvault"
     access(all) let message: String
 }
 ```
@@ -243,14 +243,14 @@ access(all) struct ProcessResult {
 
 ## Request Processing Flows
 
-### CREATE_TIDE
+### CREATE_YIELDVAULT
 
 ```
 ┌─────────────┐     ┌────────────────────┐     ┌─────────────────┐     ┌──────────────┐
-│  EVM User   │     │ FlowVaultsRequests │     │  FlowVaultsEVM  │     │  Flow Vaults │
+│  EVM User   │     │ FlowYieldVaultsRequests │     │  FlowYieldVaultsEVM  │     │  Flow YieldVaults │
 └──────┬──────┘     └─────────┬──────────┘     └────────┬────────┘     └──────┬───────┘
        │                      │                         │                      │
-       │ createTide(token,    │                         │                      │
+       │ createYieldVault(token,    │                         │                      │
        │ amount, vault, strat)│                         │                      │
        │─────────────────────▶│                         │                      │
        │                      │ Escrow funds            │                      │
@@ -274,65 +274,65 @@ access(all) struct ProcessResult {
        │                      │                         │      $FLOW           │
        │                      │                         │◀─────────────────────│
        │                      │                         │                      │
-       │                      │                         │ createTide(vault)    │
+       │                      │                         │ createYieldVault(vault)    │
        │                      │                         │─────────────────────▶│
-       │                      │                         │      tideId          │
+       │                      │                         │      yieldVaultId          │
        │                      │                         │◀─────────────────────│
        │                      │                         │                      │
-       │                      │                         │ Store tideId mapping │
+       │                      │                         │ Store yieldVaultId mapping │
        │                      │                         │                      │
        │                      │ completeProcessing(id,  │                      │
-       │                      │   true, tideId, msg)    │                      │
+       │                      │   true, yieldVaultId, msg)    │                      │
        │                      │◀────────────────────────│                      │
        │                      │ Mark COMPLETED          │                      │
-       │                      │ Register Tide           │                      │
+       │                      │ Register YieldVault           │                      │
        │                      │────────────────────────▶│                      │
 ```
 
-### DEPOSIT_TO_TIDE
+### DEPOSIT_TO_YIELDVAULT
 
 ```
-1. User calls depositToTide(tideId, token, amount)
-2. Contract validates Tide ownership
+1. User calls depositToYieldVault(yieldVaultId, token, amount)
+2. Contract validates YieldVault ownership
 3. Contract escrows funds, creates PENDING request
 4. Worker fetches request via getPendingRequestsUnpacked()
-5. Worker validates Tide ownership (O(1) lookup)
+5. Worker validates YieldVault ownership (O(1) lookup)
 6. Worker calls startProcessing() → PROCESSING, balance deducted
 7. COA withdraws funds from its balance
-8. Worker deposits to Tide via TideManager
+8. Worker deposits to YieldVault via YieldVaultManager
 9. Worker calls completeProcessing() → COMPLETED
 ```
 
-### WITHDRAW_FROM_TIDE
+### WITHDRAW_FROM_YIELDVAULT
 
 ```
-1. User calls withdrawFromTide(tideId, amount)
-2. Contract validates Tide ownership
+1. User calls withdrawFromYieldVault(yieldVaultId, amount)
+2. Contract validates YieldVault ownership
 3. Contract creates PENDING request (no escrow needed)
 4. Worker fetches request via getPendingRequestsUnpacked()
-5. Worker validates Tide ownership
+5. Worker validates YieldVault ownership
 6. Worker calls startProcessing() → PROCESSING
-7. Worker withdraws from Tide via TideManager
+7. Worker withdraws from YieldVault via YieldVaultManager
 8. Worker bridges funds to EVM via COA.deposit()
 9. COA transfers $FLOW directly to user's EVM address
 10. Worker calls completeProcessing() → COMPLETED
 ```
 
-### CLOSE_TIDE
+### CLOSE_YIELDVAULT
 
 ```
-1. User calls closeTide(tideId)
-2. Contract validates Tide ownership
+1. User calls closeYieldVault(yieldVaultId)
+2. Contract validates YieldVault ownership
 3. Contract creates PENDING request (amount = 0)
 4. Worker fetches request via getPendingRequestsUnpacked()
-5. Worker validates Tide ownership
+5. Worker validates YieldVault ownership
 6. Worker calls startProcessing() → PROCESSING
-7. Worker closes Tide via TideManager, receives all funds
+7. Worker closes YieldVault via YieldVaultManager, receives all funds
 8. Worker bridges funds to EVM via COA.deposit()
 9. COA transfers all $FLOW to user's EVM address
-10. Worker removes Tide from ownership mappings
+10. Worker removes YieldVault from ownership mappings
 11. Worker calls completeProcessing() → COMPLETED
-12. Contract unregisters Tide ownership
+12. Contract unregisters YieldVault ownership
 ```
 
 ### Request Cancellation
@@ -357,7 +357,7 @@ The bridge uses a two-phase commit pattern for atomic state management:
 function startProcessing(uint256 requestId) external onlyAuthorizedCOA {
     // 1. Validate request exists and is PENDING
     // 2. Mark as PROCESSING
-    // 3. For CREATE_TIDE/DEPOSIT_TO_TIDE: Deduct user balance
+    // 3. For CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT: Deduct user balance
     // 4. Emit RequestProcessed event
 }
 ```
@@ -370,14 +370,14 @@ function startProcessing(uint256 requestId) external onlyAuthorizedCOA {
 function completeProcessing(
     uint256 requestId,
     bool success,
-    uint64 tideId,
+    uint64 yieldVaultId,
     string calldata message
 ) external onlyAuthorizedCOA {
     // 1. Validate request is PROCESSING
     // 2. Mark as COMPLETED or FAILED
     // 3. On failure: Refund user balance
-    // 4. On CREATE_TIDE success: Register Tide ownership
-    // 5. On CLOSE_TIDE success: Unregister Tide ownership
+    // 4. On CREATE_YIELDVAULT success: Register YieldVault ownership
+    // 5. On CLOSE_YIELDVAULT success: Unregister YieldVault ownership
     // 6. Remove from pending queue
     // 7. Emit RequestProcessed event
 }
@@ -449,21 +449,21 @@ function getPendingRequestCount() returns (uint256);
 // User's pending request count
 function getUserPendingRequestCount(address user) returns (uint256);
 
-// User's Tide IDs
-function getTideIDsForUser(address user) returns (uint64[] memory);
+// User's YieldVault IDs
+function getYieldVaultIDsForUser(address user) returns (uint64[] memory);
 
 // Ownership check (O(1))
-function doesUserOwnTide(address user, uint64 tideId) returns (bool);
+function doesUserOwnYieldVault(address user, uint64 yieldVaultId) returns (bool);
 ```
 
 ### Cadence Side
 
 ```cadence
-// Tide IDs by EVM address
-access(all) view fun getTideIDsForEVMAddress(_ evmAddress: String): [UInt64]
+// YieldVault IDs by EVM address
+access(all) view fun getYieldVaultIDsForEVMAddress(_ evmAddress: String): [UInt64]
 
 // Ownership check (O(1))
-access(all) view fun doesEVMAddressOwnTide(evmAddress: String, tideId: UInt64): Bool
+access(all) view fun doesEVMAddressOwnYieldVault(evmAddress: String, yieldVaultId: UInt64): Bool
 ```
 
 ---
@@ -474,25 +474,25 @@ access(all) view fun doesEVMAddressOwnTide(evmAddress: String, tideId: UInt64): 
 
 | Component | Mechanism | Details |
 |-----------|-----------|---------|
-| FlowVaultsRequests | `onlyAuthorizedCOA` | Only COA can call processing functions |
-| FlowVaultsRequests | `onlyOwner` | Admin functions restricted to owner |
-| FlowVaultsRequests | `onlyAllowlisted` | Optional whitelist for users |
-| FlowVaultsRequests | `notBlocklisted` | Optional blacklist for users |
-| FlowVaultsEVM | Capability-based | Worker requires valid COA, TideManager, BetaBadge caps |
-| FlowVaultsTransactionHandler | Admin resource | Pause/unpause restricted to Admin holder |
+| FlowYieldVaultsRequests | `onlyAuthorizedCOA` | Only COA can call processing functions |
+| FlowYieldVaultsRequests | `onlyOwner` | Admin functions restricted to owner |
+| FlowYieldVaultsRequests | `onlyAllowlisted` | Optional whitelist for users |
+| FlowYieldVaultsRequests | `notBlocklisted` | Optional blacklist for users |
+| FlowYieldVaultsEVM | Capability-based | Worker requires valid COA, YieldVaultManager, BetaBadge caps |
+| FlowYieldVaultsTransactionHandler | Admin resource | Pause/unpause restricted to Admin holder |
 
-### Tide Ownership Verification
+### YieldVault Ownership Verification
 
 Both EVM and Cadence maintain ownership state with O(1) lookup:
 
 ```solidity
 // Solidity
-mapping(address => mapping(uint64 => bool)) public userOwnsTide;
+mapping(address => mapping(uint64 => bool)) public userOwnsYieldVault;
 ```
 
 ```cadence
 // Cadence
-access(all) let tideOwnershipLookup: {String: {UInt64: Bool}}
+access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
 ```
 
 Every operation verifies ownership before execution.
@@ -509,11 +509,11 @@ Every operation verifies ownership before execution.
 ```cadence
 // EVMRequest validation in constructor
 pre {
-    requestType >= RequestType.CREATE_TIDE.rawValue &&
-    requestType <= RequestType.CLOSE_TIDE.rawValue:
+    requestType >= RequestType.CREATE_YIELDVAULT.rawValue &&
+    requestType <= RequestType.CLOSE_YIELDVAULT.rawValue:
         "Invalid request type"
 
-    requestType == RequestType.CLOSE_TIDE.rawValue || amount > 0:
+    requestType == RequestType.CLOSE_YIELDVAULT.rawValue || amount > 0:
         "Amount must be greater than 0 for non-close operations"
 }
 ```
@@ -522,7 +522,7 @@ pre {
 
 ## Events
 
-### FlowVaultsRequests (Solidity)
+### FlowYieldVaultsRequests (Solidity)
 
 | Event | Description |
 |-------|-------------|
@@ -536,21 +536,21 @@ pre {
 | `BlocklistEnabled` | Blocklist toggled |
 | `TokenConfigured` | Token configuration changed |
 
-### FlowVaultsEVM (Cadence)
+### FlowYieldVaultsEVM (Cadence)
 
 | Event | Description |
 |-------|-------------|
 | `WorkerInitialized` | Worker created with COA |
-| `FlowVaultsRequestsAddressSet` | EVM contract address configured |
+| `FlowYieldVaultsRequestsAddressSet` | EVM contract address configured |
 | `RequestsProcessed` | Batch processing completed |
-| `TideCreatedForEVMUser` | New Tide created |
-| `TideDepositedForEVMUser` | Deposit to Tide |
-| `TideWithdrawnForEVMUser` | Withdrawal from Tide |
-| `TideClosedForEVMUser` | Tide closed |
+| `YieldVaultCreatedForEVMUser` | New YieldVault created |
+| `YieldVaultDepositedForEVMUser` | Deposit to YieldVault |
+| `YieldVaultWithdrawnForEVMUser` | Withdrawal from YieldVault |
+| `YieldVaultClosedForEVMUser` | YieldVault closed |
 | `RequestFailed` | Request processing failed |
 | `MaxRequestsPerTxUpdated` | Configuration changed |
 
-### FlowVaultsTransactionHandler (Cadence)
+### FlowYieldVaultsTransactionHandler (Cadence)
 
 | Event | Description |
 |-------|-------------|
@@ -582,7 +582,7 @@ pre {
 | `InsufficientBalance` | Not enough funds |
 | `BelowMinimumBalance` | Deposit below minimum |
 | `TooManyPendingRequests` | User at limit |
-| `InvalidTideId` | Tide not owned by user |
+| `InvalidYieldVaultId` | YieldVault not owned by user |
 
 ### Cadence Error Handling
 
@@ -594,7 +594,7 @@ Failed operations return `ProcessResult` with `success: false` and descriptive m
 
 ### Admin Functions
 
-#### FlowVaultsRequests
+#### FlowYieldVaultsRequests
 
 ```solidity
 function setAuthorizedCOA(address _coa) external onlyOwner;
@@ -609,17 +609,17 @@ function setMaxPendingRequestsPerUser(uint256 _max) external onlyOwner;
 function dropRequests(uint256[] calldata requestIds) external onlyOwner;
 ```
 
-#### FlowVaultsEVM
+#### FlowYieldVaultsEVM
 
 ```cadence
 // Admin resource functions
-access(all) fun setFlowVaultsRequestsAddress(_ address: EVM.EVMAddress)
-access(all) fun updateFlowVaultsRequestsAddress(_ address: EVM.EVMAddress)
+access(all) fun setFlowYieldVaultsRequestsAddress(_ address: EVM.EVMAddress)
+access(all) fun updateFlowYieldVaultsRequestsAddress(_ address: EVM.EVMAddress)
 access(all) fun updateMaxRequestsPerTx(_ newMax: Int)  // 1-100
 access(all) fun createWorker(...): @Worker
 ```
 
-#### FlowVaultsTransactionHandler
+#### FlowYieldVaultsTransactionHandler
 
 ```cadence
 // Admin resource functions
@@ -652,16 +652,16 @@ access(all) fun setMaxParallelTransactions(count: Int)
 ### Prerequisites
 
 1. Flow account with FLOW for deployment and fees
-2. FlowVaultsClosedBeta.BetaBadge for Tide creation
-3. FlowVaults.TideManager for managing positions
+2. FlowYieldVaultsClosedBeta.BetaBadge for YieldVault creation
+3. FlowYieldVaults.YieldVaultManager for managing positions
 4. COA with sufficient capabilities
 
 ### Deployment Order
 
-1. Deploy `FlowVaultsRequests` on EVM with COA address
-2. Deploy `FlowVaultsEVM` on Cadence
-3. Deploy `FlowVaultsTransactionHandler` on Cadence
-4. Configure `FlowVaultsEVM` with EVM contract address
+1. Deploy `FlowYieldVaultsRequests` on EVM with COA address
+2. Deploy `FlowYieldVaultsEVM` on Cadence
+3. Deploy `FlowYieldVaultsTransactionHandler` on Cadence
+4. Configure `FlowYieldVaultsEVM` with EVM contract address
 5. Create Worker with required capabilities
 6. Create Handler with Worker capability
 7. Register Handler with FlowTransactionScheduler

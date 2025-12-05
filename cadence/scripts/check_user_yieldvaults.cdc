@@ -1,9 +1,9 @@
-import "FlowVaultsEVM"
+import "FlowYieldVaultsEVM"
 
-/// @title Check User Tides
-/// @notice Returns the Tide IDs owned by an EVM address
+/// @title Check User YieldVaults
+/// @notice Returns the YieldVault IDs owned by an EVM address
 /// @param evmAddress The EVM address (with or without 0x prefix)
-/// @return Array of Tide IDs owned by the user
+/// @return Array of YieldVault IDs owned by the user
 ///
 access(all) fun main(evmAddress: String): [UInt64] {
     var normalizedAddress = evmAddress.toLower()
@@ -15,5 +15,5 @@ access(all) fun main(evmAddress: String): [UInt64] {
         normalizedAddress = "0".concat(normalizedAddress)
     }
 
-    return FlowVaultsEVM.getTideIDsForEVMAddress(normalizedAddress)
+    return FlowYieldVaultsEVM.getYieldVaultIDsForEVMAddress(normalizedAddress)
 }

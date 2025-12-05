@@ -1,4 +1,4 @@
-import "FlowVaultsTransactionHandler"
+import "FlowYieldVaultsTransactionHandler"
 
 /// @title Unpause Transaction Handler
 /// @notice Unpauses the automated transaction handler
@@ -7,8 +7,8 @@ import "FlowVaultsTransactionHandler"
 ///
 transaction() {
     prepare(signer: auth(BorrowValue) &Account) {
-        let admin = signer.storage.borrow<&FlowVaultsTransactionHandler.Admin>(
-            from: FlowVaultsTransactionHandler.AdminStoragePath
+        let admin = signer.storage.borrow<&FlowYieldVaultsTransactionHandler.Admin>(
+            from: FlowYieldVaultsTransactionHandler.AdminStoragePath
         ) ?? panic("Could not borrow Admin resource")
 
         admin.unpause()

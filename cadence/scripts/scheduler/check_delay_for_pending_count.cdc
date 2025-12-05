@@ -1,4 +1,4 @@
-import "FlowVaultsTransactionHandler"
+import "FlowYieldVaultsTransactionHandler"
 
 /// @title Check Delay for Pending Count
 /// @notice Returns the scheduling delay for a given number of pending requests
@@ -7,9 +7,9 @@ import "FlowVaultsTransactionHandler"
 /// @return Dictionary with delay info and load category
 ///
 access(all) fun main(pendingRequests: Int): {String: AnyStruct} {
-    let delay = FlowVaultsTransactionHandler.getDelayForPendingCount(pendingRequests)
-    let defaultDelay = FlowVaultsTransactionHandler.defaultDelay
-    let thresholds = FlowVaultsTransactionHandler.thresholdToDelay
+    let delay = FlowYieldVaultsTransactionHandler.getDelayForPendingCount(pendingRequests)
+    let defaultDelay = FlowYieldVaultsTransactionHandler.defaultDelay
+    let thresholds = FlowYieldVaultsTransactionHandler.thresholdToDelay
 
     return {
         "pendingRequests": pendingRequests,

@@ -1,36 +1,36 @@
-import "FlowVaultsEVM"
-import "FlowVaultsClosedBeta"
-import "FlowVaults"
+import "FlowYieldVaultsEVM"
+import "FlowYieldVaultsClosedBeta"
+import "FlowYieldVaults"
 import "EVM"
 import "FungibleToken"
 
 /// @title Setup Worker for Test
-/// @notice Test-specific Worker setup that doesn't set FlowVaultsRequests address
+/// @notice Test-specific Worker setup that doesn't set FlowYieldVaultsRequests address
 /// @dev Use this in tests where the address may already be configured.
 ///
 transaction() {
     prepare(signer: auth(BorrowValue, SaveValue, LoadValue, Storage, Capabilities, CopyValue, IssueStorageCapabilityController) &Account) {
-        var betaBadgeCap: Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>? = nil
+        var betaBadgeCap: Capability<auth(FlowYieldVaultsClosedBeta.Beta) &FlowYieldVaultsClosedBeta.BetaBadge>? = nil
 
-        let standardStoragePath = FlowVaultsClosedBeta.UserBetaCapStoragePath
+        let standardStoragePath = FlowYieldVaultsClosedBeta.UserBetaCapStoragePath
         if signer.storage.type(at: standardStoragePath) != nil {
-            betaBadgeCap = signer.storage.copy<Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>>(
+            betaBadgeCap = signer.storage.copy<Capability<auth(FlowYieldVaultsClosedBeta.Beta) &FlowYieldVaultsClosedBeta.BetaBadge>>(
                 from: standardStoragePath
             )
         }
 
         if betaBadgeCap == nil {
-            let userSpecificPath = /storage/FlowVaultsUserBetaCap_0x3bda2f90274dbc9b
+            let userSpecificPath = /storage/FlowYieldVaultsUserBetaCap_0x3bda2f90274dbc9b
             if signer.storage.type(at: userSpecificPath) != nil {
-                betaBadgeCap = signer.storage.copy<Capability<auth(FlowVaultsClosedBeta.Beta) &FlowVaultsClosedBeta.BetaBadge>>(
+                betaBadgeCap = signer.storage.copy<Capability<auth(FlowYieldVaultsClosedBeta.Beta) &FlowYieldVaultsClosedBeta.BetaBadge>>(
                     from: userSpecificPath
                 )
             }
         }
 
         if betaBadgeCap == nil {
-            let betaAdminHandle = signer.storage.borrow<auth(FlowVaultsClosedBeta.Admin) &FlowVaultsClosedBeta.AdminHandle>(
-                from: FlowVaultsClosedBeta.AdminHandleStoragePath
+            let betaAdminHandle = signer.storage.borrow<auth(FlowYieldVaultsClosedBeta.Admin) &FlowYieldVaultsClosedBeta.AdminHandle>(
+                from: FlowYieldVaultsClosedBeta.AdminHandleStoragePath
             ) ?? panic("Could not borrow AdminHandle - you need admin access or an existing beta badge")
 
             betaBadgeCap = betaAdminHandle.grantBeta(addr: signer.address)
@@ -47,31 +47,31 @@ transaction() {
         let coaRef = coaCap.borrow()
             ?? panic("Could not borrow COA capability - ensure COA is set up first")
 
-        if signer.storage.type(at: FlowVaults.TideManagerStoragePath) == nil {
-            signer.storage.save(<-FlowVaults.createTideManager(betaRef: betaRef), to: FlowVaults.TideManagerStoragePath)
-            let cap = signer.capabilities.storage.issue<&FlowVaults.TideManager>(FlowVaults.TideManagerStoragePath)
-            signer.capabilities.publish(cap, at: FlowVaults.TideManagerPublicPath)
+        if signer.storage.type(at: FlowYieldVaults.YieldVaultManagerStoragePath) == nil {
+            signer.storage.save(<-FlowYieldVaults.createYieldVaultManager(betaRef: betaRef), to: FlowYieldVaults.YieldVaultManagerStoragePath)
+            let cap = signer.capabilities.storage.issue<&FlowYieldVaults.YieldVaultManager>(FlowYieldVaults.YieldVaultManagerStoragePath)
+            signer.capabilities.publish(cap, at: FlowYieldVaults.YieldVaultManagerPublicPath)
         }
 
-        let tideManagerCap = signer.capabilities.storage.issue<auth(FungibleToken.Withdraw) &FlowVaults.TideManager>(
-            FlowVaults.TideManagerStoragePath
+        let yieldVaultManagerCap = signer.capabilities.storage.issue<auth(FungibleToken.Withdraw) &FlowYieldVaults.YieldVaultManager>(
+            FlowYieldVaults.YieldVaultManagerStoragePath
         )
 
         let feeProviderCap = signer.capabilities.storage.issue<auth(FungibleToken.Withdraw) &{FungibleToken.Provider}>(
             /storage/flowTokenVault
         )
 
-        let admin = signer.storage.borrow<&FlowVaultsEVM.Admin>(
-            from: FlowVaultsEVM.AdminStoragePath
-        ) ?? panic("Could not borrow FlowVaultsEVM Admin")
+        let admin = signer.storage.borrow<&FlowYieldVaultsEVM.Admin>(
+            from: FlowYieldVaultsEVM.AdminStoragePath
+        ) ?? panic("Could not borrow FlowYieldVaultsEVM Admin")
 
         let worker <- admin.createWorker(
             coaCap: coaCap,
-            tideManagerCap: tideManagerCap,
+            yieldVaultManagerCap: yieldVaultManagerCap,
             betaBadgeCap: betaBadgeCap!,
             feeProviderCap: feeProviderCap
         )
 
-        signer.storage.save(<-worker, to: FlowVaultsEVM.WorkerStoragePath)
+        signer.storage.save(<-worker, to: FlowYieldVaultsEVM.WorkerStoragePath)
     }
 }

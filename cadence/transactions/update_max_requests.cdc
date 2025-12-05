@@ -1,4 +1,4 @@
-import "FlowVaultsEVM"
+import "FlowYieldVaultsEVM"
 
 /// @title Update Max Requests Per Transaction
 /// @notice Updates the maximum number of requests processed per transaction
@@ -8,14 +8,14 @@ import "FlowVaultsEVM"
 ///
 transaction(newMax: Int) {
     prepare(signer: auth(BorrowValue) &Account) {
-        let admin = signer.storage.borrow<&FlowVaultsEVM.Admin>(
-            from: FlowVaultsEVM.AdminStoragePath
-        ) ?? panic("Could not borrow FlowVaultsEVM Admin resource")
+        let admin = signer.storage.borrow<&FlowYieldVaultsEVM.Admin>(
+            from: FlowYieldVaultsEVM.AdminStoragePath
+        ) ?? panic("Could not borrow FlowYieldVaultsEVM Admin resource")
 
         admin.updateMaxRequestsPerTx(newMax)
     }
 
     post {
-        FlowVaultsEVM.maxRequestsPerTx == newMax: "maxRequestsPerTx was not updated correctly"
+        FlowYieldVaultsEVM.maxRequestsPerTx == newMax: "maxRequestsPerTx was not updated correctly"
     }
 }

@@ -1,4 +1,4 @@
-import "FlowVaultsTransactionHandler"
+import "FlowYieldVaultsTransactionHandler"
 
 /// @title Update Threshold To Delay
 /// @notice Updates the mapping of pending request thresholds to execution delays
@@ -9,8 +9,8 @@ import "FlowVaultsTransactionHandler"
 ///
 transaction(newThresholds: {Int: UFix64}) {
     prepare(signer: auth(BorrowValue) &Account) {
-        let admin = signer.storage.borrow<&FlowVaultsTransactionHandler.Admin>(
-            from: FlowVaultsTransactionHandler.AdminStoragePath
+        let admin = signer.storage.borrow<&FlowYieldVaultsTransactionHandler.Admin>(
+            from: FlowYieldVaultsTransactionHandler.AdminStoragePath
         ) ?? panic("Could not borrow Admin from storage")
 
         admin.setThresholdToDelay(newThresholds: newThresholds)

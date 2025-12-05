@@ -1,31 +1,31 @@
 {
 	"contracts": {
-		"FlowVaults": {
-			"source": "./lib/flow-vaults-sc/cadence/contracts/FlowVaults.cdc",
+		"FlowYieldVaults": {
+			"source": "./lib/FlowYieldVaults/cadence/contracts/FlowYieldVaults.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
 				"testnet": "3bda2f90274dbc9b"
 			}
 		},
-		"FlowVaultsClosedBeta": {
-			"source": "./lib/flow-vaults-sc/cadence/contracts/FlowVaultsClosedBeta.cdc",
+		"FlowYieldVaultsClosedBeta": {
+			"source": "./lib/FlowYieldVaults/cadence/contracts/FlowYieldVaultsClosedBeta.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
 				"testnet": "3bda2f90274dbc9b"
 			}
 		},
-		"FlowVaultsEVM": {
-			"source": "./cadence/contracts/FlowVaultsEVM.cdc",
+		"FlowYieldVaultsEVM": {
+			"source": "./cadence/contracts/FlowYieldVaultsEVM.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
 				"testnet": "4135b56ffc55ecef"
 			}
 		},
-		"FlowVaultsTransactionHandler": {
-			"source": "./cadence/contracts/FlowVaultsTransactionHandler.cdc",
+		"FlowYieldVaultsTransactionHandler": {
+			"source": "./cadence/contracts/FlowYieldVaultsTransactionHandler.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
@@ -483,7 +483,7 @@
 			"address": "f8d6e0586b0a20c7",
 			"key": {
 				"type": "file",
-				"location": "lib/flow-vaults-sc/local/emulator-account.pkey"
+				"location": "lib/FlowYieldVaults/local/emulator-account.pkey"
 			}
 		},
 		"testnet-account": {
@@ -499,21 +499,21 @@
 			"address": "045a1763c93006ca",
 			"key": {
 				"type": "file",
-				"location": "lib/flow-vaults-sc/local/emulator-tidal.pkey"
+				"location": "lib/FlowYieldVaults/local/emulator-tidal.pkey"
 			}
 		}
 	},
 	"deployments": {
 		"emulator": {
 			"tidal": [
-				"FlowVaultsTransactionHandler",
-				"FlowVaultsEVM"
+				"FlowYieldVaultsTransactionHandler",
+				"FlowYieldVaultsEVM"
 			]
 		},
 		"testnet": {
 			"testnet-account": [
-				"FlowVaultsTransactionHandler",
-				"FlowVaultsEVM"
+				"FlowYieldVaultsTransactionHandler",
+				"FlowYieldVaultsEVM"
 			]
 		}
 	}

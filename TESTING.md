@@ -1,11 +1,11 @@
-# FlowVaults EVM Integration - Testing Documentation
+# FlowYieldVaults EVM Integration - Testing Documentation
 
 **Status**: ✅ 56/56 tests passing (100%)
 **Last Updated**: November 26, 2025
 
 ## Overview
 
-Comprehensive test suite for the Flow Vaults EVM Integration, covering both Solidity and Cadence components. Tests validate request lifecycle, access control, error handling, allowlist/blocklist functionality, and cross-VM integration.
+Comprehensive test suite for the Flow YieldVaults EVM Integration, covering both Solidity and Cadence components. Tests validate request lifecycle, access control, error handling, allowlist/blocklist functionality, and cross-VM integration.
 
 ## Test Summary
 
@@ -21,7 +21,7 @@ Comprehensive test suite for the Flow Vaults EVM Integration, covering both Soli
 
 ```
 solidity/test/
-└── FlowVaultsRequests.t.sol        # 37 tests - Complete EVM contract testing
+└── FlowYieldVaultsRequests.t.sol        # 37 tests - Complete EVM contract testing
 ```
 
 **Test Categories**:
@@ -60,7 +60,7 @@ cd solidity && forge test
 cd solidity && forge test -vvv
 
 # Run specific test
-cd solidity && forge test --match-test test_CreateTide
+cd solidity && forge test --match-test test_CreateYieldVault
 
 # Run gas report
 cd solidity && forge test --gas-report
@@ -141,7 +141,7 @@ done
 
 #### Solidity Tests (Foundry)
 ```
-Ran 37 tests for test/FlowVaultsRequests.t.sol:FlowVaultsRequestsTest
+Ran 37 tests for test/FlowYieldVaultsRequests.t.sol:FlowYieldVaultsRequestsTest
 [PASS] test_AcceptOwnership_RevertNotPendingOwner()
 [PASS] test_Allowlist()
 [PASS] test_Blocklist()
@@ -149,20 +149,20 @@ Ran 37 tests for test/FlowVaultsRequests.t.sol:FlowVaultsRequestsTest
 [PASS] test_CancelRequest_RefundsFunds()
 [PASS] test_CancelRequest_RevertAlreadyCancelled()
 [PASS] test_CancelRequest_RevertNotOwner()
-[PASS] test_CloseTide()
-[PASS] test_CompleteProcessing_CloseTideRemovesOwnership()
+[PASS] test_CloseYieldVault()
+[PASS] test_CompleteProcessing_CloseYieldVaultRemovesOwnership()
 [PASS] test_CompleteProcessing_FailureRefundsBalance()
 [PASS] test_CompleteProcessing_RevertNotProcessing()
 [PASS] test_CompleteProcessing_Success()
-[PASS] test_CreateTide()
-[PASS] test_CreateTide_RevertBelowMinimum()
-[PASS] test_CreateTide_RevertMsgValueMismatch()
-[PASS] test_CreateTide_RevertZeroAmount()
-[PASS] test_DepositToTide()
-[PASS] test_DepositToTide_RevertInvalidTideId()
-[PASS] test_DepositToTide_RevertNotOwner()
+[PASS] test_CreateYieldVault()
+[PASS] test_CreateYieldVault_RevertBelowMinimum()
+[PASS] test_CreateYieldVault_RevertMsgValueMismatch()
+[PASS] test_CreateYieldVault_RevertZeroAmount()
+[PASS] test_DepositToYieldVault()
+[PASS] test_DepositToYieldVault_RevertInvalidYieldVaultId()
+[PASS] test_DepositToYieldVault_RevertNotOwner()
 [PASS] test_DropRequests()
-[PASS] test_FullCreateTideLifecycle()
+[PASS] test_FullCreateYieldVaultLifecycle()
 [PASS] test_FullWithdrawLifecycle()
 [PASS] test_GetPendingRequestsUnpacked()
 [PASS] test_GetPendingRequestsUnpacked_Pagination()
@@ -178,18 +178,18 @@ Ran 37 tests for test/FlowVaultsRequests.t.sol:FlowVaultsRequestsTest
 [PASS] test_TransferOwnership_RevertNotOwner()
 [PASS] test_TransferOwnership_TwoStepProcess()
 [PASS] test_UserBalancesAreSeparate()
-[PASS] test_WithdrawFromTide()
+[PASS] test_WithdrawFromYieldVault()
 ```
 
 #### Cadence Tests (Flow CLI)
 ```
 evm_bridge_lifecycle_test.cdc: 8 tests PASS
-- testCreateTideFromEVMRequest
-- testDepositToExistingTide
-- testWithdrawFromTide
-- testCloseTideComplete
+- testCreateYieldVaultFromEVMRequest
+- testDepositToExistingYieldVault
+- testWithdrawFromYieldVault
+- testCloseYieldVaultComplete
 - testRequestStatusTransitions
-- testMultipleUsersIndependentTides
+- testMultipleUsersIndependentYieldVaults
 - testProcessResultStructure
 - testVaultAndStrategyIdentifiers
 
@@ -200,7 +200,7 @@ access_control_test.cdc: 7 tests PASS
 - testRequestsAddressCanBeUpdated
 - testWorkerCreationRequiresCOA
 - testWorkerCreationRequiresBetaBadge
-- testTidesByEVMAddressMapping
+- testYieldVaultsByEVMAddressMapping
 
 error_handling_test.cdc: 4 tests PASS
 - testInvalidRequestType

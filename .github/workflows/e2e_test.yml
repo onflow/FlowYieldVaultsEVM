@@ -1,4 +1,4 @@
-name: Tide Operations CI
+name: YieldVault Operations CI
 
 on:
   push:
@@ -10,7 +10,7 @@ on:
 
 jobs:
   setup-and-test:
-    name: Tide Integration Tests
+    name: YieldVault Integration Tests
     runs-on: ubuntu-latest
     steps:
       # === COMMON SETUP ===
@@ -54,18 +54,18 @@ jobs:
         run: |
           DEPLOYMENT_OUTPUT=$(./local/deploy_full_stack.sh)
           echo "$DEPLOYMENT_OUTPUT"
-          FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowVaultsRequests Contract:" | sed 's/.*: //')
+          FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowYieldVaultsRequests Contract:" | sed 's/.*: //')
           echo "CONTRACT_ADDRESS=$FLOW_VAULTS_REQUESTS_CONTRACT" >> $GITHUB_ENV
       
-      # === TEST 1: BASIC TIDE CREATION ===
-      - name: Test 1 - Create Tide (10 FLOW)
+      # === TEST 1: BASIC YIELDVAULT CREATION ===
+      - name: Test 1 - Create YieldVault (10 FLOW)
         run: |
           echo "========================================="
-          echo "TEST 1: BASIC TIDE CREATION"
+          echo "TEST 1: BASIC YIELDVAULT CREATION"
           echo "========================================="
-          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+          forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYieldVaultsYieldVaultOperations \
             --root ./solidity \
-            --sig "createTide(address)" ${{ env.CONTRACT_ADDRESS }} \
+            --sig "createYieldVault(address)" ${{ env.CONTRACT_ADDRESS }} \
             --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
@@ -76,51 +76,51 @@ jobs:
         run: |
           flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
       
-      - name: Verify Tide Creation
+      - name: Verify YieldVault Creation
         run: |
-          echo "=== Verifying Tide Creation ==="
+          echo "=== Verifying YieldVault Creation ==="
           
-          # Check tide details using the account-level script
-          TIDE_CHECK=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 0x045a1763c93006ca)
-          echo "$TIDE_CHECK"
+          # Check yieldvault details using the account-level script
+          YIELDVAULT_CHECK=$(flow scripts execute ./cadence/scripts/check_yieldvault_details.cdc 0x045a1763c93006ca)
+          echo "$YIELDVAULT_CHECK"
           
-          # Verify that we have at least one EVM address with tides
-          if echo "$TIDE_CHECK" | grep -q '"totalEVMAddresses": 1'; then
+          # Verify that we have at least one EVM address with yieldvaults
+          if echo "$YIELDVAULT_CHECK" | grep -q '"totalEVMAddresses": 1'; then
             echo "✅ EVM address registered"
           else
             echo "❌ No EVM addresses found"
             exit 1
           fi
           
-          # Verify that we have at least one tide created
-          if echo "$TIDE_CHECK" | grep -q '"totalMappedTides": 1'; then
-            echo "✅ Tide created successfully"
+          # Verify that we have at least one yieldvault created
+          if echo "$YIELDVAULT_CHECK" | grep -q '"totalMappedYieldVaults": 1'; then
+            echo "✅ YieldVault created successfully"
           else
-            echo "❌ No tides found"
+            echo "❌ No yieldvaults found"
             exit 1
           fi
           
-          # Verify the specific EVM address has the tide
-          if echo "$TIDE_CHECK" | grep -q '6813eb9362372eef6200f3b1dbc3f819671cba69'; then
-            echo "✅ Tide mapped to correct EVM address"
+          # Verify the specific EVM address has the yieldvault
+          if echo "$YIELDVAULT_CHECK" | grep -q '6813eb9362372eef6200f3b1dbc3f819671cba69'; then
+            echo "✅ YieldVault mapped to correct EVM address"
           else
             echo "❌ EVM address mapping not found"
             exit 1
           fi
           
-          echo "✅ Test 1 Passed: Basic tide creation verified"
+          echo "✅ Test 1 Passed: Basic yieldvault creation verified"
       
-      # === TEST 2: FULL TIDE LIFECYCLE ===
+      # === TEST 2: FULL YIELDVAULT LIFECYCLE ===
       - name: Test 2 - Deposit Additional Funds (20 FLOW)
         run: |
           echo "========================================="
-          echo "TEST 2: FULL TIDE LIFECYCLE"
+          echo "TEST 2: FULL YIELDVAULT LIFECYCLE"
           echo "========================================="
           echo "Step 1: Depositing additional 20 FLOW..."
-          # Note: Using tide ID 0 based on the event logs from your output
-          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+          # Note: Using yieldvault ID 0 based on the event logs from your output
+          forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYieldVaultsYieldVaultOperations \
             --root ./solidity \
-            --sig "depositToTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
+            --sig "depositToYieldVault(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
             --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
@@ -133,25 +133,25 @@ jobs:
       
       - name: Verify Deposit
         run: |
-          echo "Verifying deposit (should still have 1 tide with more balance)..."
+          echo "Verifying deposit (should still have 1 yieldvault with more balance)..."
           
-          TIDE_CHECK=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 0x045a1763c93006ca)
-          echo "$TIDE_CHECK"
+          YIELDVAULT_CHECK=$(flow scripts execute ./cadence/scripts/check_yieldvault_details.cdc 0x045a1763c93006ca)
+          echo "$YIELDVAULT_CHECK"
           
-          # Should still have 1 tide
-          if echo "$TIDE_CHECK" | grep -q '"totalMappedTides": 1'; then
-            echo "✅ Still has 1 tide after deposit"
+          # Should still have 1 yieldvault
+          if echo "$YIELDVAULT_CHECK" | grep -q '"totalMappedYieldVaults": 1'; then
+            echo "✅ Still has 1 yieldvault after deposit"
           else
-            echo "❌ Tide count changed unexpectedly"
+            echo "❌ YieldVault count changed unexpectedly"
             exit 1
           fi
       
       - name: Test 2 - Withdraw Half (15 FLOW)
         run: |
           echo "Step 2: Withdrawing 15 FLOW..."
-          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+          forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYieldVaultsYieldVaultOperations \
             --root ./solidity \
-            --sig "withdrawFromTide(address,uint64,uint256)" ${{ env.CONTRACT_ADDRESS }} 0 15000000000000000000 \
+            --sig "withdrawFromYieldVault(address,uint64,uint256)" ${{ env.CONTRACT_ADDRESS }} 0 15000000000000000000 \
             --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
@@ -162,25 +162,25 @@ jobs:
       
       - name: Verify Withdrawal
         run: |
-          echo "Verifying withdrawal (should still have 1 tide with less balance)..."
+          echo "Verifying withdrawal (should still have 1 yieldvault with less balance)..."
           
-          TIDE_CHECK=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 0x045a1763c93006ca)
-          echo "$TIDE_CHECK"
+          YIELDVAULT_CHECK=$(flow scripts execute ./cadence/scripts/check_yieldvault_details.cdc 0x045a1763c93006ca)
+          echo "$YIELDVAULT_CHECK"
           
-          # Should still have 1 tide
-          if echo "$TIDE_CHECK" | grep -q '"totalMappedTides": 1'; then
-            echo "✅ Still has 1 tide after withdrawal"
+          # Should still have 1 yieldvault
+          if echo "$YIELDVAULT_CHECK" | grep -q '"totalMappedYieldVaults": 1'; then
+            echo "✅ Still has 1 yieldvault after withdrawal"
           else
-            echo "❌ Tide count changed unexpectedly"
+            echo "❌ YieldVault count changed unexpectedly"
             exit 1
           fi
       
-      - name: Test 2 - Close Tide
+      - name: Test 2 - Close YieldVault
         run: |
-          echo "Step 3: Closing tide (withdrawing remaining funds)..."
-          forge script ./solidity/script/FlowVaultsTideOperations.s.sol:FlowVaultsTideOperations \
+          echo "Step 3: Closing yieldvault (withdrawing remaining funds)..."
+          forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYieldVaultsYieldVaultOperations \
             --root ./solidity \
-            --sig "closeTide(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
+            --sig "closeYieldVault(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
             --rpc-url http://localhost:8545 \
             --broadcast \
             --legacy
@@ -189,24 +189,24 @@ jobs:
         run: |
           flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
       
-      - name: Verify Tide Closed
+      - name: Verify YieldVault Closed
         run: |
-          echo "Verifying tide was closed..."
+          echo "Verifying yieldvault was closed..."
           
-          TIDE_CHECK=$(flow scripts execute ./cadence/scripts/check_tide_details.cdc 0x045a1763c93006ca)
-          echo "$TIDE_CHECK"
+          YIELDVAULT_CHECK=$(flow scripts execute ./cadence/scripts/check_yieldvault_details.cdc 0x045a1763c93006ca)
+          echo "$YIELDVAULT_CHECK"
           
-          # After closing, should have 0 tides or the tide should be marked as closed
-          if echo "$TIDE_CHECK" | grep -q '"totalMappedTides": 0'; then
-            echo "✅ Tide successfully closed and removed"
-          elif echo "$TIDE_CHECK" | grep -q '"totalEVMAddresses": 0'; then
-            echo "✅ No more active tides for EVM addresses"
+          # After closing, should have 0 yieldvaults or the yieldvault should be marked as closed
+          if echo "$YIELDVAULT_CHECK" | grep -q '"totalMappedYieldVaults": 0'; then
+            echo "✅ YieldVault successfully closed and removed"
+          elif echo "$YIELDVAULT_CHECK" | grep -q '"totalEVMAddresses": 0'; then
+            echo "✅ No more active yieldvaults for EVM addresses"
           else
-            echo "⚠️ Tide may still exist but should be in closed state"
+            echo "⚠️ YieldVault may still exist but should be in closed state"
             # Don't fail here as the close transaction succeeded
           fi
           
-          echo "✅ Test 2 Passed: Full tide lifecycle completed"
+          echo "✅ Test 2 Passed: Full yieldvault lifecycle completed"
       
       # === FINAL SUMMARY ===
       - name: Test Summary
@@ -214,6 +214,6 @@ jobs:
           echo "========================================="
           echo "ALL INTEGRATION TESTS PASSED"
           echo "========================================="
-          echo "✅ Test 1: Basic Tide Creation - PASSED"
-          echo "✅ Test 2: Full Tide Lifecycle - PASSED"
+          echo "✅ Test 1: Basic YieldVault Creation - PASSED"
+          echo "✅ Test 2: Full YieldVault Lifecycle - PASSED"
           echo "========================================="

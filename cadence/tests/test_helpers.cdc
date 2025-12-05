@@ -2,9 +2,9 @@ import Test
 
 import "EVM"
 import "FlowToken"
-import "FlowVaults"
-import "FlowVaultsEVM"
-import "FlowVaultsClosedBeta"
+import "FlowYieldVaults"
+import "FlowYieldVaultsEVM"
+import "FlowYieldVaultsClosedBeta"
 
 /* --- Test Accounts --- */
 
@@ -18,11 +18,11 @@ access(all) let nativeFlowAddr = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFF
 /* --- Mock Vault and Strategy Identifiers --- */
 
 access(all) let mockVaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
-access(all) let mockStrategyIdentifier = "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy"
+access(all) let mockStrategyIdentifier = "A.045a1763c93006ca.FlowYieldVaultsStrategies.TracerStrategy"
 
 /* --- Setup helpers --- */
 
-// Deploys all required contracts for FlowVaultsEVM
+// Deploys all required contracts for FlowYieldVaultsEVM
 access(all) fun deployContracts() {
     // Deploy standard libraries first
     var err = Test.deployContract(
@@ -61,17 +61,17 @@ access(all) fun deployContracts() {
     )
     Test.expect(err, Test.beNil())
     
-    // Deploy FlowVaults dependencies
+    // Deploy FlowYieldVaults dependencies
     err = Test.deployContract(
-        name: "FlowVaultsClosedBeta",
-        path: "../../lib/flow-vaults-sc/cadence/contracts/FlowVaultsClosedBeta.cdc",
+        name: "FlowYieldVaultsClosedBeta",
+        path: "../../lib/FlowYieldVaults/cadence/contracts/FlowYieldVaultsClosedBeta.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
     
     err = Test.deployContract(
-        name: "FlowVaults",
-        path: "../../lib/flow-vaults-sc/cadence/contracts/FlowVaults.cdc",
+        name: "FlowYieldVaults",
+        path: "../../lib/FlowYieldVaults/cadence/contracts/FlowYieldVaults.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
@@ -158,7 +158,7 @@ access(all) fun deployContracts() {
     )
     Test.expect(err, Test.beNil())
     
-    // Deploy FlowEVMBridgeUtils (required by FlowVaultsEVM)
+    // Deploy FlowEVMBridgeUtils (required by FlowYieldVaultsEVM)
     err = Test.deployContract(
         name: "FlowEVMBridgeUtils",
         path: "../../imports/1e4aa0b87d10b141/FlowEVMBridgeUtils.cdc",
@@ -205,12 +205,12 @@ access(all) fun deployContracts() {
     
     // Note: We skip deploying FlowEVMBridge, FlowEVMBridgeNFTEscrow, FlowEVMBridgeTokenEscrow,
     // and FlowEVMBridgeTemplates as they have access control issues and are not needed.
-    // FlowVaultsEVM only requires FlowEVMBridgeUtils and FlowEVMBridgeConfig which are already deployed.
+    // FlowYieldVaultsEVM only requires FlowEVMBridgeUtils and FlowEVMBridgeConfig which are already deployed.
     
-    // Deploy FlowVaultsEVM
+    // Deploy FlowYieldVaultsEVM
     err = Test.deployContract(
-        name: "FlowVaultsEVM",
-        path: "../contracts/FlowVaultsEVM.cdc",
+        name: "FlowYieldVaultsEVM",
+        path: "../contracts/FlowYieldVaultsEVM.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
@@ -234,7 +234,7 @@ fun _executeScript(_ path: String, _ args: [AnyStruct]): Test.ScriptResult {
     return Test.executeScript(Test.readFile(path), args)
 }
 
-/* --- FlowVaultsEVM specific transaction helpers --- */
+/* --- FlowYieldVaultsEVM specific transaction helpers --- */
 
 access(all)
 fun updateRequestsAddress(_ signer: Test.TestAccount, _ address: String): Test.TransactionResult {
@@ -272,11 +272,11 @@ fun setupCOA(_ signer: Test.TestAccount): Test.TransactionResult {
     )
 }
 
-/* --- FlowVaultsEVM specific script helpers --- */
+/* --- FlowYieldVaultsEVM specific script helpers --- */
 
 access(all)
-fun getTideIDsForEVMAddress(_ evmAddress: String): [UInt64]? {
-    let res = _executeScript("../scripts/check_user_tides.cdc", [evmAddress])
+fun getYieldVaultIDsForEVMAddress(_ evmAddress: String): [UInt64]? {
+    let res = _executeScript("../scripts/check_user_yieldvaults.cdc", [evmAddress])
     if res.status == Test.ResultStatus.succeeded {
         return res.returnValue as! [UInt64]?
     }
@@ -288,7 +288,7 @@ fun getRequestsAddress(): String? {
     let res = _executeScript("../scripts/get_contract_state.cdc", [admin.address])
     if res.status == Test.ResultStatus.succeeded {
         if let state = res.returnValue as? {String: AnyStruct} {
-            let address = state["flowVaultsRequestsAddress"] as! String?
+            let address = state["flowYieldVaultsRequestsAddress"] as! String?
             // Return nil if the address is "Not set"
             if address == "Not set" {
                 return nil
@@ -326,7 +326,7 @@ fun grantBeta(_ admin: Test.TestAccount, _ grantee: Test.TestAccount): Test.Tran
     // The grant_beta transaction always requires 2 authorizers: admin and user
     // Even when admin grants to themselves, we need both authorizers
     let betaTxn = Test.Transaction(
-        code: Test.readFile("../../lib/flow-vaults-sc/cadence/transactions/flow-vaults/admin/grant_beta.cdc"),
+        code: Test.readFile("../../lib/FlowYieldVaults/cadence/transactions/FlowYieldVaults/admin/grant_beta.cdc"),
         authorizers: [admin.address, grantee.address],
         signers: [admin, grantee],
         arguments: []
@@ -344,20 +344,20 @@ fun createEVMRequest(
     status: UInt8,
     tokenAddress: EVM.EVMAddress,
     amount: UInt256,
-    tideId: UInt64,
+    yieldVaultId: UInt64,
     timestamp: UInt256,
     message: String,
     vaultIdentifier: String,
     strategyIdentifier: String
-): FlowVaultsEVM.EVMRequest {
-    return FlowVaultsEVM.EVMRequest(
+): FlowYieldVaultsEVM.EVMRequest {
+    return FlowYieldVaultsEVM.EVMRequest(
         id: id,
         user: user,
         requestType: requestType,
         status: status,
         tokenAddress: tokenAddress,
         amount: amount,
-        tideId: tideId,
+        yieldVaultId: yieldVaultId,
         timestamp: timestamp,
         message: message,
         vaultIdentifier: vaultIdentifier,
@@ -370,12 +370,12 @@ fun createEVMRequest(
 access(all)
 fun createProcessResult(
     success: Bool,
-    tideId: UInt64,
+    yieldVaultId: UInt64,
     message: String
-): FlowVaultsEVM.ProcessResult {
-    return FlowVaultsEVM.ProcessResult(
+): FlowYieldVaultsEVM.ProcessResult {
+    return FlowYieldVaultsEVM.ProcessResult(
         success: success,
-        tideId: tideId,
+        yieldVaultId: yieldVaultId,
         message: message
     )
 }

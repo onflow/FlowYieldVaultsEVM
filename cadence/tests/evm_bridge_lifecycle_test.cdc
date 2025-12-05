@@ -1,9 +1,9 @@
 import Test
 import "EVM"
 import "FlowToken"
-import "FlowVaults"
-import "FlowVaultsEVM"
-import "FlowVaultsClosedBeta"
+import "FlowYieldVaults"
+import "FlowYieldVaultsEVM"
+import "FlowYieldVaultsClosedBeta"
 import "test_helpers.cdc"
 
 // -----------------------------------------------------------------------------
@@ -31,7 +31,7 @@ fun setup() {
     let workerResult = setupWorkerWithBadge(admin)
     Test.expect(workerResult, Test.beSucceeded())
     
-    // Set mock FlowVaultsRequests address
+    // Set mock FlowYieldVaultsRequests address
     let setAddrResult = updateRequestsAddress(admin, mockRequestsAddr.toString())
     Test.expect(setAddrResult, Test.beSucceeded())
 }
@@ -41,25 +41,25 @@ fun setup() {
 // -----------------------------------------------------------------------------
 
 access(all)
-fun testCreateTideFromEVMRequest() {
+fun testCreateYieldVaultFromEVMRequest() {
     // --- arrange -----------------------------------------------------------
-    let createRequest = FlowVaultsEVM.EVMRequest(
+    let createRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 1,
         user: userEVMAddr1,
-        requestType: FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.PENDING.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000, // 1 FLOW in wei (10^18)
-        tideId: 0, // Not used for CREATE
+        yieldVaultId: 0, // Not used for CREATE
         timestamp: 0,
         message: "",
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
     
-    // Verify no tides exist for this user initially
-    let tidesBefore = FlowVaultsEVM.getTideIDsForEVMAddress(userEVMAddr1.toString())
-    Test.assertEqual(0, tidesBefore.length)
+    // Verify no yieldvaults exist for this user initially
+    let yieldVaultsBefore = FlowYieldVaultsEVM.getYieldVaultIDsForEVMAddress(userEVMAddr1.toString())
+    Test.assertEqual(0, yieldVaultsBefore.length)
     
     // --- act ---------------------------------------------------------------
     // In real scenario, processRequests() would read from EVM contract
@@ -67,8 +67,8 @@ fun testCreateTideFromEVMRequest() {
     
     // Verify request created correctly
     Test.assertEqual(1 as UInt256, createRequest.id)
-    Test.assertEqual(FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue, createRequest.requestType)
-    Test.assertEqual(FlowVaultsEVM.RequestStatus.PENDING.rawValue, createRequest.status)
+    Test.assertEqual(FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue, createRequest.requestType)
+    Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue, createRequest.status)
     
     // --- assert ------------------------------------------------------------
     // Verify the request structure is valid for processing
@@ -78,17 +78,17 @@ fun testCreateTideFromEVMRequest() {
 }
 
 access(all)
-fun testDepositToExistingTide() {
+fun testDepositToExistingYieldVault() {
     // --- arrange -----------------------------------------------------------
-    // Assume Tide ID 1 exists for userEVMAddr1 (created in previous operation)
-    let depositRequest = FlowVaultsEVM.EVMRequest(
+    // Assume YieldVault ID 1 exists for userEVMAddr1 (created in previous operation)
+    let depositRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 2,
         user: userEVMAddr1,
-        requestType: FlowVaultsEVM.RequestType.DEPOSIT_TO_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.PENDING.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 500000000000000000, // 0.5 FLOW
-        tideId: 1,
+        yieldVaultId: 1,
         timestamp: 0,
         message: "",
         vaultIdentifier: "", // Not needed for DEPOSIT
@@ -97,22 +97,22 @@ fun testDepositToExistingTide() {
     
     // --- assert ------------------------------------------------------------
     Test.assertEqual(2 as UInt256, depositRequest.id)
-    Test.assertEqual(FlowVaultsEVM.RequestType.DEPOSIT_TO_TIDE.rawValue, depositRequest.requestType)
-    Test.assertEqual(1 as UInt64, depositRequest.tideId)
+    Test.assertEqual(FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue, depositRequest.requestType)
+    Test.assertEqual(1 as UInt64, depositRequest.yieldVaultId)
     Test.assert(depositRequest.amount > 0, message: "Deposit amount must be positive")
 }
 
 access(all)
-fun testWithdrawFromTide() {
+fun testWithdrawFromYieldVault() {
     // --- arrange -----------------------------------------------------------
-    let withdrawRequest = FlowVaultsEVM.EVMRequest(
+    let withdrawRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 3,
         user: userEVMAddr1,
-        requestType: FlowVaultsEVM.RequestType.WITHDRAW_FROM_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.PENDING.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 300000000000000000, // 0.3 FLOW
-        tideId: 1,
+        yieldVaultId: 1,
         timestamp: 0,
         message: "",
         vaultIdentifier: "",
@@ -121,22 +121,22 @@ fun testWithdrawFromTide() {
     
     // --- assert ------------------------------------------------------------
     Test.assertEqual(3 as UInt256, withdrawRequest.id)
-    Test.assertEqual(FlowVaultsEVM.RequestType.WITHDRAW_FROM_TIDE.rawValue, withdrawRequest.requestType)
-    Test.assertEqual(1 as UInt64, withdrawRequest.tideId)
+    Test.assertEqual(FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue, withdrawRequest.requestType)
+    Test.assertEqual(1 as UInt64, withdrawRequest.yieldVaultId)
     Test.assert(withdrawRequest.amount > 0, message: "Withdraw amount must be positive")
 }
 
 access(all)
-fun testCloseTideComplete() {
+fun testCloseYieldVaultComplete() {
     // --- arrange -----------------------------------------------------------
-    let closeRequest = FlowVaultsEVM.EVMRequest(
+    let closeRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 4,
         user: userEVMAddr1,
-        requestType: FlowVaultsEVM.RequestType.CLOSE_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.PENDING.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 0, // Amount not used for CLOSE
-        tideId: 1,
+        yieldVaultId: 1,
         timestamp: 0,
         message: "",
         vaultIdentifier: "",
@@ -145,8 +145,8 @@ fun testCloseTideComplete() {
     
     // --- assert ------------------------------------------------------------
     Test.assertEqual(4 as UInt256, closeRequest.id)
-    Test.assertEqual(FlowVaultsEVM.RequestType.CLOSE_TIDE.rawValue, closeRequest.requestType)
-    Test.assertEqual(1 as UInt64, closeRequest.tideId)
+    Test.assertEqual(FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue, closeRequest.requestType)
+    Test.assertEqual(1 as UInt64, closeRequest.yieldVaultId)
 }
 
 access(all)
@@ -154,64 +154,64 @@ fun testRequestStatusTransitions() {
     // --- Test valid status transitions ---
     
     // PENDING → COMPLETED
-    let completedRequest = FlowVaultsEVM.EVMRequest(
+    let completedRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 5,
         user: userEVMAddr1,
-        requestType: FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.COMPLETED.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.COMPLETED.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000,
-        tideId: 0,
+        yieldVaultId: 0,
         timestamp: 0,
         message: "",
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
-    Test.assertEqual(FlowVaultsEVM.RequestStatus.COMPLETED.rawValue, completedRequest.status)
+    Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.COMPLETED.rawValue, completedRequest.status)
     
     // PENDING → FAILED
-    let failedRequest = FlowVaultsEVM.EVMRequest(
+    let failedRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 6,
         user: userEVMAddr1,
-        requestType: FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.FAILED.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000,
-        tideId: 0,
+        yieldVaultId: 0,
         timestamp: 0,
         message: "Insufficient balance",
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
-    Test.assertEqual(FlowVaultsEVM.RequestStatus.FAILED.rawValue, failedRequest.status)
+    Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue, failedRequest.status)
     Test.assertEqual("Insufficient balance", failedRequest.message)
 }
 
 access(all)
-fun testMultipleUsersIndependentTides() {
+fun testMultipleUsersIndependentYieldVaults() {
     // --- arrange -----------------------------------------------------------
-    let user1Request = FlowVaultsEVM.EVMRequest(
+    let user1Request = FlowYieldVaultsEVM.EVMRequest(
         id: 7,
         user: userEVMAddr1,
-        requestType: FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.PENDING.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000,
-        tideId: 0,
+        yieldVaultId: 0,
         timestamp: 0,
         message: "",
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
     
-    let user2Request = FlowVaultsEVM.EVMRequest(
+    let user2Request = FlowYieldVaultsEVM.EVMRequest(
         id: 8,
         user: userEVMAddr2,
-        requestType: FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.PENDING.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 2000000000000000000,
-        tideId: 0,
+        yieldVaultId: 0,
         timestamp: 0,
         message: "",
         vaultIdentifier: mockVaultIdentifier,
@@ -233,25 +233,25 @@ fun testMultipleUsersIndependentTides() {
 access(all)
 fun testProcessResultStructure() {
     // Test successful result
-    let successResult = FlowVaultsEVM.ProcessResult(
+    let successResult = FlowYieldVaultsEVM.ProcessResult(
         success: true,
-        tideId: 42,
-        message: "Tide created successfully"
+        yieldVaultId: 42,
+        message: "YieldVault created successfully"
     )
 
     Test.assert(successResult.success)
-    Test.assertEqual(42 as UInt64, successResult.tideId)
-    Test.assertEqual("Tide created successfully", successResult.message)
+    Test.assertEqual(42 as UInt64, successResult.yieldVaultId)
+    Test.assertEqual("YieldVault created successfully", successResult.message)
 
-    // Test failure result (NO_TIDE_ID sentinel for "no tide")
-    let failureResult = FlowVaultsEVM.ProcessResult(
+    // Test failure result (NO_YIELDVAULT_ID sentinel for "no yieldvault")
+    let failureResult = FlowYieldVaultsEVM.ProcessResult(
         success: false,
-        tideId: FlowVaultsEVM.noTideId,
+        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
         message: "Insufficient COA balance"
     )
 
     Test.assert(!failureResult.success)
-    Test.assertEqual(FlowVaultsEVM.noTideId, failureResult.tideId)
+    Test.assertEqual(FlowYieldVaultsEVM.noYieldVaultId, failureResult.yieldVaultId)
     Test.assertEqual("Insufficient COA balance", failureResult.message)
 }
 
@@ -261,14 +261,14 @@ fun testVaultAndStrategyIdentifiers() {
     let customVaultId = "A.1234567890abcdef.CustomToken.Vault"
     let customStrategyId = "A.fedcba0987654321.CustomStrategy.Strategy"
     
-    let request = FlowVaultsEVM.EVMRequest(
+    let request = FlowYieldVaultsEVM.EVMRequest(
         id: 9,
         user: userEVMAddr1,
-        requestType: FlowVaultsEVM.RequestType.CREATE_TIDE.rawValue,
-        status: FlowVaultsEVM.RequestStatus.PENDING.rawValue,
+        requestType: FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
+        status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000,
-        tideId: 0,
+        yieldVaultId: 0,
         timestamp: 0,
         message: "",
         vaultIdentifier: customVaultId,

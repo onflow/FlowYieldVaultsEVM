@@ -1,9 +1,9 @@
 import Test
 import "EVM"
 import "FlowToken"
-import "FlowVaults"
-import "FlowVaultsEVM"
-import "FlowVaultsClosedBeta"
+import "FlowYieldVaults"
+import "FlowYieldVaultsEVM"
+import "FlowYieldVaultsClosedBeta"
 import "test_helpers.cdc"
 
 // -----------------------------------------------------------------------------
@@ -35,16 +35,16 @@ fun testContractInitialState() {
     let maxRequests = getMaxRequestsConfig()
     Test.assert(maxRequests == 1, message: "maxRequestsPerTx should be 1")
     
-    // FlowVaultsRequests address should be nil initially
+    // FlowYieldVaultsRequests address should be nil initially
     let requestsAddress = getRequestsAddress()
-    Test.assert(requestsAddress == nil, message: "FlowVaultsRequests address should be nil initially")
+    Test.assert(requestsAddress == nil, message: "FlowYieldVaultsRequests address should be nil initially")
 }
 
 access(all)
 fun testOnlyAdminCanupdateRequestsAddress() {
     // --- arrange -----------------------------------------------------------
     let testAddress = EVM.addressFromString("0x1111111111111111111111111111111111111111")
-    let actualAddress = FlowVaultsEVM.getFlowVaultsRequestsAddress()
+    let actualAddress = FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()
     Test.expect(actualAddress == nil, Test.equal(true))
     
     // --- act & assert ------------------------------------------------------
@@ -83,9 +83,9 @@ fun testRequestsAddressCanBeUpdated() {
     // Both transactions succeeded, which verifies:
     // 1. Admin has proper authorization to update the address
     // 2. The address can be updated multiple times
-    // 3. The updateFlowVaultsRequestsAddress function works correctly
+    // 3. The updateFlowYieldVaultsRequestsAddress function works correctly
     // Note: State persistence verification is limited in the test environment
-    // In production, the address persists and can be queried via getFlowVaultsRequestsAddress()
+    // In production, the address persists and can be queried via getFlowYieldVaultsRequestsAddress()
 }
 
 access(all)
@@ -106,7 +106,7 @@ fun testWorkerCreationRequiresCOA() {
 access(all)
 fun testWorkerCreationRequiresBetaBadge() {
     // Test that worker creation requires a valid beta badge capability
-    // This is enforced when creating the TideManager
+    // This is enforced when creating the YieldVaultManager
     
     // Setup COA first
     let coaResult = setupCOA(admin)
@@ -118,11 +118,11 @@ fun testWorkerCreationRequiresBetaBadge() {
 }
 
 access(all)
-fun testTidesByEVMAddressMapping() {
-    // Verify the tidesByEVMAddress mapping is accessible
+fun testYieldVaultsByEVMAddressMapping() {
+    // Verify the yieldVaultsByEVMAddress mapping is accessible
     let testAddress = "0x6666666666666666666666666666666666666666"
-    let tideIds = FlowVaultsEVM.getTideIDsForEVMAddress(testAddress)
+    let yieldVaultIds = FlowYieldVaultsEVM.getYieldVaultIDsForEVMAddress(testAddress)
     
-    // Should return empty array for address with no tides
-    Test.assertEqual(0, tideIds.length)
+    // Should return empty array for address with no yieldvaults
+    Test.assertEqual(0, yieldVaultIds.length)
 }

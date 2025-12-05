@@ -1,9 +1,9 @@
-import "FlowVaultsEVM"
-import "FlowVaults"
+import "FlowYieldVaultsEVM"
+import "FlowYieldVaults"
 import "EVM"
 
 /// @title Check Worker Status
-/// @notice Returns comprehensive status of the FlowVaultsEVM Worker initialization
+/// @notice Returns comprehensive status of the FlowYieldVaultsEVM Worker initialization
 /// @param accountAddress The account address where Worker should be stored
 /// @return Dictionary with worker status and capability health checks
 ///
@@ -16,7 +16,7 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     var workerType: String = ""
 
     account.storage.forEachStored(fun (path: StoragePath, type: Type): Bool {
-        if path == FlowVaultsEVM.WorkerStoragePath {
+        if path == FlowYieldVaultsEVM.WorkerStoragePath {
             workerExists = true
             workerType = type.identifier
         }
@@ -24,24 +24,24 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     })
 
     result["accountAddress"] = accountAddress.toString()
-    result["workerStoragePath"] = FlowVaultsEVM.WorkerStoragePath.toString()
+    result["workerStoragePath"] = FlowYieldVaultsEVM.WorkerStoragePath.toString()
     result["workerExists"] = workerExists
     result["workerType"] = workerType
 
-    // Check FlowVaultsRequests address configuration
-    let flowVaultsRequestsAddress = FlowVaultsEVM.getFlowVaultsRequestsAddress()
-    result["flowVaultsRequestsAddress"] = flowVaultsRequestsAddress?.toString() ?? "NOT SET"
-    result["flowVaultsRequestsConfigured"] = flowVaultsRequestsAddress != nil
+    // Check FlowYieldVaultsRequests address configuration
+    let flowYieldVaultsRequestsAddress = FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()
+    result["flowYieldVaultsRequestsAddress"] = flowYieldVaultsRequestsAddress?.toString() ?? "NOT SET"
+    result["flowYieldVaultsRequestsConfigured"] = flowYieldVaultsRequestsAddress != nil
 
-    // Check TideManager exists
-    var tideManagerExists = false
+    // Check YieldVaultManager exists
+    var yieldVaultManagerExists = false
     account.storage.forEachStored(fun (path: StoragePath, type: Type): Bool {
-        if path == FlowVaults.TideManagerStoragePath {
-            tideManagerExists = true
+        if path == FlowYieldVaults.YieldVaultManagerStoragePath {
+            yieldVaultManagerExists = true
         }
         return true
     })
-    result["tideManagerExists"] = tideManagerExists
+    result["yieldVaultManagerExists"] = yieldVaultManagerExists
 
     // Check COA exists
     var coaExists = false
@@ -56,13 +56,13 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     // Build health checks summary
     let healthChecks: {String: String} = {}
     healthChecks["worker"] = workerExists ? "OK" : "MISSING"
-    healthChecks["flowVaultsRequestsAddress"] = flowVaultsRequestsAddress != nil ? "OK" : "NOT CONFIGURED"
-    healthChecks["tideManager"] = tideManagerExists ? "OK" : "MISSING"
+    healthChecks["flowYieldVaultsRequestsAddress"] = flowYieldVaultsRequestsAddress != nil ? "OK" : "NOT CONFIGURED"
+    healthChecks["yieldVaultManager"] = yieldVaultManagerExists ? "OK" : "MISSING"
     healthChecks["coa"] = coaExists ? "OK" : "MISSING"
     result["healthChecks"] = healthChecks
 
     // Determine overall status
-    let allChecksPass = workerExists && flowVaultsRequestsAddress != nil && tideManagerExists && coaExists
+    let allChecksPass = workerExists && flowYieldVaultsRequestsAddress != nil && yieldVaultManagerExists && coaExists
 
     if allChecksPass {
         result["status"] = "INITIALIZED"
@@ -71,13 +71,13 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
         result["status"] = "NOT INITIALIZED"
         var issues: [String] = []
         if !workerExists {
-            issues.append("Worker resource not found at ".concat(FlowVaultsEVM.WorkerStoragePath.toString()))
+            issues.append("Worker resource not found at ".concat(FlowYieldVaultsEVM.WorkerStoragePath.toString()))
         }
-        if flowVaultsRequestsAddress == nil {
-            issues.append("FlowVaultsRequests EVM address not configured")
+        if flowYieldVaultsRequestsAddress == nil {
+            issues.append("FlowYieldVaultsRequests EVM address not configured")
         }
-        if !tideManagerExists {
-            issues.append("TideManager not found")
+        if !yieldVaultManagerExists {
+            issues.append("YieldVaultManager not found")
         }
         if !coaExists {
             issues.append("COA (Cadence Owned Account) not found")

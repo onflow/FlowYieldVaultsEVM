@@ -139,9 +139,9 @@ fi
 
 echo "✓ EVM Gateway confirmed ready for deployment"
 
-# Deploy FlowVaultsRequests Solidity contract
-echo "Deploying FlowVaultsRequests contract to $RPC_URL..."
-DEPLOYMENT_OUTPUT=$(forge script ./solidity/script/DeployFlowVaultsRequests.s.sol \
+# Deploy FlowYieldVaultsRequests Solidity contract
+echo "Deploying FlowYieldVaultsRequests contract to $RPC_URL..."
+DEPLOYMENT_OUTPUT=$(forge script ./solidity/script/DeployFlowYieldVaultsRequests.s.sol \
   --root ./solidity \
   --rpc-url "http://$RPC_URL" \
   --broadcast \
@@ -150,14 +150,14 @@ DEPLOYMENT_OUTPUT=$(forge script ./solidity/script/DeployFlowVaultsRequests.s.so
 echo "$DEPLOYMENT_OUTPUT"
 
 # Extract the deployed contract address from the output
-FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowVaultsRequests deployed at:" | sed 's/.*: //')
+FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowYieldVaultsRequests deployed at:" | sed 's/.*: //')
 
 if [ -z "$FLOW_VAULTS_REQUESTS_CONTRACT" ]; then
-  echo "❌ Failed to extract FlowVaultsRequests contract address from deployment"
+  echo "❌ Failed to extract FlowYieldVaultsRequests contract address from deployment"
   exit 1
 fi
 
-echo "✓ FlowVaultsRequests contract deployed at: $FLOW_VAULTS_REQUESTS_CONTRACT"
+echo "✓ FlowYieldVaultsRequests contract deployed at: $FLOW_VAULTS_REQUESTS_CONTRACT"
 echo ""
 
 # ============================================
@@ -182,7 +182,7 @@ echo "========================================="
 echo "✓ Full stack deployment complete!"
 echo "========================================="
 echo ""
-echo "FlowVaultsRequests Contract: $FLOW_VAULTS_REQUESTS_CONTRACT"
+echo "FlowYieldVaultsRequests Contract: $FLOW_VAULTS_REQUESTS_CONTRACT"
 echo ""
 echo "Export this for use in other scripts:"
 echo "export FLOW_VAULTS_REQUESTS_CONTRACT=$FLOW_VAULTS_REQUESTS_CONTRACT"

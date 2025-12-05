@@ -1,4 +1,4 @@
-import "FlowVaultsTransactionHandler"
+import "FlowYieldVaultsTransactionHandler"
 
 /// @title Update Max Parallel Transactions
 /// @notice Updates the maximum number of parallel transactions to schedule
@@ -8,14 +8,14 @@ import "FlowVaultsTransactionHandler"
 ///
 transaction(newMax: Int) {
     prepare(signer: auth(BorrowValue) &Account) {
-        let admin = signer.storage.borrow<&FlowVaultsTransactionHandler.Admin>(
-            from: FlowVaultsTransactionHandler.AdminStoragePath
+        let admin = signer.storage.borrow<&FlowYieldVaultsTransactionHandler.Admin>(
+            from: FlowYieldVaultsTransactionHandler.AdminStoragePath
         ) ?? panic("Could not borrow Admin from storage")
 
         admin.setMaxParallelTransactions(count: newMax)
     }
 
     post {
-        FlowVaultsTransactionHandler.maxParallelTransactions == newMax: "Max parallel transactions was not updated correctly"
+        FlowYieldVaultsTransactionHandler.maxParallelTransactions == newMax: "Max parallel transactions was not updated correctly"
     }
 }

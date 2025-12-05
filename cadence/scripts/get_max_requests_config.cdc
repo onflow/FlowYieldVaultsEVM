@@ -1,11 +1,11 @@
-import "FlowVaultsEVM"
+import "FlowYieldVaultsEVM"
 
 /// @title Get Max Requests Config
 /// @notice Returns the current maxRequestsPerTx value and throughput estimates
 /// @return Dictionary with current config and throughput calculations
 ///
 access(all) fun main(): {String: AnyStruct} {
-    let maxRequestsPerTx = FlowVaultsEVM.maxRequestsPerTx
+    let maxRequestsPerTx = FlowYieldVaultsEVM.maxRequestsPerTx
 
     let executionsPerHourAt5s = 720
     let executionsPerHourAt60s = 60

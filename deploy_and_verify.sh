@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Deploy and verify FlowVaultsRequests (Solidity) and Cadence contracts
+# Deploy and verify FlowYieldVaultsRequests (Solidity) and Cadence contracts
 # Run this script from the project root directory
 
 set -e  # Exit on any error
@@ -14,23 +14,23 @@ source "$SCRIPT_DIR/.env"
 set +a
 
 echo "=========================================="
-echo "🚀 Deploying Flow Vaults Contracts"
+echo "🚀 Deploying Flow YieldVaults Contracts"
 echo "=========================================="
 echo ""
 
 # ==========================================
 # Step 1: Deploy Solidity Contract
 # ==========================================
-echo "📦 Step 1: Deploying Solidity contract (FlowVaultsRequests)..."
+echo "📦 Step 1: Deploying Solidity contract (FlowYieldVaultsRequests)..."
 
-forge script "$SCRIPT_DIR/solidity/script/DeployFlowVaultsRequests.s.sol:DeployFlowVaultsRequests" \
+forge script "$SCRIPT_DIR/solidity/script/DeployFlowYieldVaultsRequests.s.sol:DeployFlowYieldVaultsRequests" \
     --root "$SCRIPT_DIR/solidity" \
     --rpc-url "$TESTNET_RPC_URL" \
     --broadcast \
     -vvvv
 
 # Extract the deployed contract address from the broadcast file
-DEPLOYED_ADDRESS=$(jq -r '.transactions[0].contractAddress' "$SCRIPT_DIR/solidity/broadcast/DeployFlowVaultsRequests.s.sol/545/run-latest.json")
+DEPLOYED_ADDRESS=$(jq -r '.transactions[0].contractAddress' "$SCRIPT_DIR/solidity/broadcast/DeployFlowYieldVaultsRequests.s.sol/545/run-latest.json")
 
 if [ -z "$DEPLOYED_ADDRESS" ] || [ "$DEPLOYED_ADDRESS" == "null" ]; then
     echo "❌ Error: Could not find deployed contract address"
@@ -53,10 +53,10 @@ echo "✅ Cadence contracts deployed"
 echo ""
 
 # ==========================================
-# Step 3: Setup FlowVaultsEVM Worker
+# Step 3: Setup FlowYieldVaultsEVM Worker
 # ==========================================
-echo "🔧 Step 3: Setting up FlowVaultsEVM Worker with Badge..."
-echo "   FlowVaultsRequests address: $DEPLOYED_ADDRESS"
+echo "🔧 Step 3: Setting up FlowYieldVaultsEVM Worker with Badge..."
+echo "   FlowYieldVaultsRequests address: $DEPLOYED_ADDRESS"
 
 flow transactions send "$SCRIPT_DIR/cadence/transactions/setup_worker_with_badge.cdc" \
     "$DEPLOYED_ADDRESS" \
@@ -65,13 +65,13 @@ flow transactions send "$SCRIPT_DIR/cadence/transactions/setup_worker_with_badge
     --compute-limit 9999
 
 echo ""
-echo "✅ Worker initialized and FlowVaultsRequests address set"
+echo "✅ Worker initialized and FlowYieldVaultsRequests address set"
 echo ""
 
 # ==========================================
 # Step 4: Initialize Transaction Handler & Schedule
 # ==========================================
-echo "🔧 Step 4: Initializing FlowVaultsTransactionHandler and scheduling initial execution..."
+echo "🔧 Step 4: Initializing FlowYieldVaultsTransactionHandler and scheduling initial execution..."
 echo "   - Delay: 10 seconds"
 echo "   - Priority: High (0)"
 echo "   - Execution Effort: 9999"
@@ -104,7 +104,7 @@ forge verify-contract \
   --constructor-args $(cast abi-encode "constructor(address)" "$COA_ADDRESS") \
   --compiler-version 0.8.20 \
   "$DEPLOYED_ADDRESS" \
-  src/FlowVaultsRequests.sol:FlowVaultsRequests
+  src/FlowYieldVaultsRequests.sol:FlowYieldVaultsRequests
 
 echo ""
 echo "=========================================="
@@ -126,5 +126,5 @@ echo "   - Check pending requests:"
 echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc 0x4135b56ffc55ecef --network testnet"
 echo ""
 echo "   - Check handler status:"
-echo "     flow scripts execute cadence/scripts/check_tidemanager_status.cdc 0x4135b56ffc55ecef --network testnet"
+echo "     flow scripts execute cadence/scripts/check_yieldvaultmanager_status.cdc 0x4135b56ffc55ecef --network testnet"
 echo ""

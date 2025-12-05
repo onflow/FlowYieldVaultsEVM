@@ -14,36 +14,36 @@ import {
 } from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /**
- * @title FlowVaultsRequests
- * @author Flow Vaults Team
- * @notice Request queue and fund escrow for EVM users to interact with Flow Vaults Cadence protocol
+ * @title FlowYieldVaultsRequests
+ * @author Flow YieldVaults Team
+ * @notice Request queue and fund escrow for EVM users to interact with Flow YieldVaults Cadence protocol
  * @dev This contract serves as an escrow and request queue for cross-VM operations between
  *      EVM and Cadence. Users deposit funds here, and the authorized COA (Cadence Owned Account)
- *      processes requests by bridging funds to Cadence and executing Flow Vaults operations.
+ *      processes requests by bridging funds to Cadence and executing Flow YieldVaults operations.
  *
  *      Key flows:
- *      1. CREATE_TIDE: User deposits funds → COA bridges to Cadence → Tide created
- *      2. DEPOSIT_TO_TIDE: User deposits funds → COA bridges to existing Tide
- *      3. WITHDRAW_FROM_TIDE: User requests withdrawal → COA bridges funds back
- *      4. CLOSE_TIDE: User requests closure → COA closes Tide and bridges all funds back
+ *      1. CREATE_YIELDVAULT: User deposits funds → COA bridges to Cadence → YieldVault created
+ *      2. DEPOSIT_TO_YIELDVAULT: User deposits funds → COA bridges to existing YieldVault
+ *      3. WITHDRAW_FROM_YIELDVAULT: User requests withdrawal → COA bridges funds back
+ *      4. CLOSE_YIELDVAULT: User requests closure → COA closes YieldVault and bridges all funds back
  *
  *      Processing uses atomic two-phase commit:
  *      - startProcessing(): Marks request as PROCESSING, deducts user balance
  *      - completeProcessing(): Marks as COMPLETED/FAILED, refunds on failure
  */
-contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
+contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
 
     // ============================================
     // Type Declarations
     // ============================================
 
-    /// @notice Types of requests that can be made to the Flow Vaults protocol
+    /// @notice Types of requests that can be made to the Flow YieldVaults protocol
     enum RequestType {
-        CREATE_TIDE,
-        DEPOSIT_TO_TIDE,
-        WITHDRAW_FROM_TIDE,
-        CLOSE_TIDE
+        CREATE_YIELDVAULT,
+        DEPOSIT_TO_YIELDVAULT,
+        WITHDRAW_FROM_YIELDVAULT,
+        CLOSE_YIELDVAULT
     }
 
     /// @notice Status of a request in the processing lifecycle
@@ -61,11 +61,11 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param status Current status of the request
     /// @param tokenAddress Token being deposited/withdrawn (NATIVE_FLOW for native $FLOW)
     /// @param amount Amount of tokens involved
-    /// @param tideId Associated Tide ID (NO_TIDE_ID for CREATE_TIDE until completed)
+    /// @param yieldVaultId Associated YieldVault ID (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed)
     /// @param timestamp Block timestamp when request was created
     /// @param message Status message or error reason
-    /// @param vaultIdentifier Cadence vault type identifier for CREATE_TIDE
-    /// @param strategyIdentifier Cadence strategy type identifier for CREATE_TIDE
+    /// @param vaultIdentifier Cadence vault type identifier for CREATE_YIELDVAULT
+    /// @param strategyIdentifier Cadence strategy type identifier for CREATE_YIELDVAULT
     struct Request {
         uint256 id;
         address user;
@@ -73,7 +73,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         RequestStatus status;
         address tokenAddress;
         uint256 amount;
-        uint64 tideId;
+        uint64 yieldVaultId;
         uint256 timestamp;
         string message;
         string vaultIdentifier;
@@ -99,9 +99,9 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     address public constant NATIVE_FLOW =
         0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
-    /// @notice Sentinel value for "no tide" (used when CREATE_TIDE fails before tide is created)
-    /// @dev Uses type(uint64).max since valid tideIds can be 0. Matches FlowVaultsEVM.noTideId
-    uint64 public constant NO_TIDE_ID = type(uint64).max;
+    /// @notice Sentinel value for "no yieldvault" (used when CREATE_YIELDVAULT fails before yieldvault is created)
+    /// @dev Uses type(uint64).max since valid yieldVaultIds can be 0. Matches FlowYieldVaultsEVM.noYieldVaultId
+    uint64 public constant NO_YIELDVAULT_ID = type(uint64).max;
 
     /// @dev Auto-incrementing counter for request IDs, starts at 1
     uint256 private _requestIdCounter;
@@ -130,17 +130,17 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Count of pending requests per user
     mapping(address => uint256) public userPendingRequestCount;
 
-    /// @notice Registry of valid Tide IDs created through this contract
-    mapping(uint64 => bool) public validTideIds;
+    /// @notice Registry of valid YieldVault IDs created through this contract
+    mapping(uint64 => bool) public validYieldVaultIds;
 
-    /// @notice Owner address for each Tide ID
-    mapping(uint64 => address) public tideOwners;
+    /// @notice Owner address for each YieldVault ID
+    mapping(uint64 => address) public yieldVaultOwners;
 
-    /// @notice Array of Tide IDs owned by each user
-    mapping(address => uint64[]) public tidesByUser;
+    /// @notice Array of YieldVault IDs owned by each user
+    mapping(address => uint64[]) public yieldVaultsByUser;
 
-    /// @notice O(1) lookup for tide ownership verification
-    mapping(address => mapping(uint64 => bool)) public userOwnsTide;
+    /// @notice O(1) lookup for yieldvault ownership verification
+    mapping(address => mapping(uint64 => bool)) public userOwnsYieldVault;
 
     /// @notice Escrowed balances: user => token => amount
     mapping(address => mapping(address => uint256)) public pendingUserBalances;
@@ -213,8 +213,8 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice User has too many pending requests
     error TooManyPendingRequests();
 
-    /// @notice Tide ID is invalid or not owned by user
-    error InvalidTideId(uint64 tideId, address user);
+    /// @notice YieldVault ID is invalid or not owned by user
+    error InvalidYieldVaultId(uint64 yieldVaultId, address user);
 
     // ============================================
     // Events
@@ -226,25 +226,25 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestType Type of operation requested
     /// @param tokenAddress Token involved in the request
     /// @param amount Amount of tokens
-    /// @param tideId Associated Tide ID (0 for new tides)
+    /// @param yieldVaultId Associated YieldVault ID (0 for new yieldvaults)
     event RequestCreated(
         uint256 indexed requestId,
         address indexed user,
         RequestType requestType,
         address indexed tokenAddress,
         uint256 amount,
-        uint64 tideId
+        uint64 yieldVaultId
     );
 
     /// @notice Emitted when a request status changes
     /// @param requestId Request being updated
     /// @param status New status
-    /// @param tideId Associated Tide ID
+    /// @param yieldVaultId Associated YieldVault ID
     /// @param message Status message or error reason
     event RequestProcessed(
         uint256 indexed requestId,
         RequestStatus status,
-        uint64 tideId,
+        uint64 yieldVaultId,
         string message
     );
 
@@ -324,9 +324,9 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param newMax New limit
     event MaxPendingRequestsPerUserUpdated(uint256 oldMax, uint256 newMax);
 
-    /// @notice Emitted when a new Tide is registered
-    /// @param tideId Newly registered Tide ID
-    event TideIdRegistered(uint64 indexed tideId);
+    /// @notice Emitted when a new YieldVault is registered
+    /// @param yieldVaultId Newly registered YieldVault ID
+    event YieldVaultIdRegistered(uint64 indexed yieldVaultId);
 
     /// @notice Emitted when requests are dropped by admin
     /// @param requestIds Dropped request IDs
@@ -535,8 +535,8 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
                 request.message = "Dropped by admin";
 
                 if (
-                    (request.requestType == RequestType.CREATE_TIDE ||
-                        request.requestType == RequestType.DEPOSIT_TO_TIDE) &&
+                    (request.requestType == RequestType.CREATE_YIELDVAULT ||
+                        request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
                     request.amount > 0
                 ) {
                     pendingUserBalances[request.user][
@@ -570,7 +570,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
                 emit RequestProcessed(
                     requestId,
                     RequestStatus.FAILED,
-                    request.tideId,
+                    request.yieldVaultId,
                     "Dropped by admin"
                 );
             }
@@ -587,13 +587,13 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     // External Functions - User
     // ============================================
 
-    /// @notice Creates a new Tide by depositing funds
+    /// @notice Creates a new YieldVault by depositing funds
     /// @param tokenAddress Token to deposit (use NATIVE_FLOW for native $FLOW)
     /// @param amount Amount to deposit
     /// @param vaultIdentifier Cadence vault type identifier
     /// @param strategyIdentifier Cadence strategy type identifier
     /// @return requestId The created request ID
-    function createTide(
+    function createYieldVault(
         address tokenAddress,
         uint256 amount,
         string calldata vaultIdentifier,
@@ -611,7 +611,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
 
         return
             _createRequest(
-                RequestType.CREATE_TIDE,
+                RequestType.CREATE_YIELDVAULT,
                 tokenAddress,
                 amount,
                 0,
@@ -620,13 +620,13 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             );
     }
 
-    /// @notice Deposits additional funds to an existing Tide
-    /// @param tideId Tide ID to deposit to
+    /// @notice Deposits additional funds to an existing YieldVault
+    /// @param yieldVaultId YieldVault ID to deposit to
     /// @param tokenAddress Token to deposit
     /// @param amount Amount to deposit
     /// @return requestId The created request ID
-    function depositToTide(
-        uint64 tideId,
+    function depositToYieldVault(
+        uint64 yieldVaultId,
         address tokenAddress,
         uint256 amount
     )
@@ -638,58 +638,58 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         returns (uint256)
     {
         _validateDeposit(tokenAddress, amount);
-        if (!validTideIds[tideId]) revert InvalidTideId(tideId, msg.sender);
+        if (!validYieldVaultIds[yieldVaultId]) revert InvalidYieldVaultId(yieldVaultId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
 
         return
             _createRequest(
-                RequestType.DEPOSIT_TO_TIDE,
+                RequestType.DEPOSIT_TO_YIELDVAULT,
                 tokenAddress,
                 amount,
-                tideId,
+                yieldVaultId,
                 "",
                 ""
             );
     }
 
-    /// @notice Requests a withdrawal from an existing Tide
-    /// @param tideId Tide ID to withdraw from
+    /// @notice Requests a withdrawal from an existing YieldVault
+    /// @param yieldVaultId YieldVault ID to withdraw from
     /// @param amount Amount to withdraw
     /// @return requestId The created request ID
-    function withdrawFromTide(
-        uint64 tideId,
+    function withdrawFromYieldVault(
+        uint64 yieldVaultId,
         uint256 amount
     ) external onlyAllowlisted notBlocklisted returns (uint256) {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
-        _validateTideOwnership(tideId, msg.sender);
+        _validateYieldVaultOwnership(yieldVaultId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
 
         return
             _createRequest(
-                RequestType.WITHDRAW_FROM_TIDE,
+                RequestType.WITHDRAW_FROM_YIELDVAULT,
                 NATIVE_FLOW,
                 amount,
-                tideId,
+                yieldVaultId,
                 "",
                 ""
             );
     }
 
-    /// @notice Requests closure of a Tide and withdrawal of all funds
-    /// @param tideId Tide ID to close
+    /// @notice Requests closure of a YieldVault and withdrawal of all funds
+    /// @param yieldVaultId YieldVault ID to close
     /// @return requestId The created request ID
-    function closeTide(
-        uint64 tideId
+    function closeYieldVault(
+        uint64 yieldVaultId
     ) external onlyAllowlisted notBlocklisted returns (uint256) {
-        _validateTideOwnership(tideId, msg.sender);
+        _validateYieldVaultOwnership(yieldVaultId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
 
         return
             _createRequest(
-                RequestType.CLOSE_TIDE,
+                RequestType.CLOSE_YIELDVAULT,
                 NATIVE_FLOW,
                 0,
-                tideId,
+                yieldVaultId,
                 "",
                 ""
             );
@@ -720,8 +720,8 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
 
         uint256 refundAmount = 0;
         if (
-            (request.requestType == RequestType.CREATE_TIDE ||
-                request.requestType == RequestType.DEPOSIT_TO_TIDE) &&
+            (request.requestType == RequestType.CREATE_YIELDVAULT ||
+                request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
             request.amount > 0
         ) {
             refundAmount = request.amount;
@@ -746,7 +746,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         emit RequestProcessed(
             requestId,
             RequestStatus.FAILED,
-            request.tideId,
+            request.yieldVaultId,
             cancelMessage
         );
     }
@@ -767,8 +767,8 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         request.status = RequestStatus.PROCESSING;
 
         if (
-            request.requestType == RequestType.CREATE_TIDE ||
-            request.requestType == RequestType.DEPOSIT_TO_TIDE
+            request.requestType == RequestType.CREATE_YIELDVAULT ||
+            request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT
         ) {
             uint256 currentBalance = pendingUserBalances[request.user][
                 request.tokenAddress
@@ -788,7 +788,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         emit RequestProcessed(
             requestId,
             RequestStatus.PROCESSING,
-            request.tideId,
+            request.yieldVaultId,
             "Processing started"
         );
     }
@@ -797,12 +797,12 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @dev Called after Cadence-side operations complete. Refunds user balance on failure.
     /// @param requestId Request ID to complete
     /// @param success Whether the Cadence operation succeeded
-    /// @param tideId Tide ID associated with the request
+    /// @param yieldVaultId YieldVault ID associated with the request
     /// @param message Status message or error description
     function completeProcessing(
         uint256 requestId,
         bool success,
-        uint64 tideId,
+        uint64 yieldVaultId,
         string calldata message
     ) external onlyAuthorizedCOA {
         Request storage request = requests[requestId];
@@ -815,23 +815,23 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             : RequestStatus.FAILED;
         request.status = newStatus;
         request.message = message;
-        request.tideId = tideId;
+        request.yieldVaultId = yieldVaultId;
 
         if (
             !success &&
-            (request.requestType == RequestType.CREATE_TIDE ||
-                request.requestType == RequestType.DEPOSIT_TO_TIDE)
+            (request.requestType == RequestType.CREATE_YIELDVAULT ||
+                request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT)
         ) {
             pendingUserBalances[request.user][request.tokenAddress] += request
                 .amount;
         }
 
-        if (success && request.requestType == RequestType.CREATE_TIDE) {
-            _registerTide(tideId, request.user);
+        if (success && request.requestType == RequestType.CREATE_YIELDVAULT) {
+            _registerYieldVault(yieldVaultId, request.user);
         }
 
-        if (success && request.requestType == RequestType.CLOSE_TIDE) {
-            _unregisterTide(tideId, request.user);
+        if (success && request.requestType == RequestType.CLOSE_YIELDVAULT) {
+            _unregisterYieldVault(yieldVaultId, request.user);
         }
 
         if (userPendingRequestCount[request.user] > 0) {
@@ -839,7 +839,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
         _removePendingRequest(requestId);
 
-        emit RequestProcessed(requestId, newStatus, tideId, message);
+        emit RequestProcessed(requestId, newStatus, yieldVaultId, message);
     }
 
     // ============================================
@@ -886,7 +886,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return statuses Request statuses
     /// @return tokenAddresses Token addresses
     /// @return amounts Amounts
-    /// @return tideIds Tide IDs
+    /// @return yieldVaultIds YieldVault IDs
     /// @return timestamps Timestamps
     /// @return messages Messages
     /// @return vaultIdentifiers Vault identifiers
@@ -904,7 +904,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             uint8[] memory statuses,
             address[] memory tokenAddresses,
             uint256[] memory amounts,
-            uint64[] memory tideIds,
+            uint64[] memory yieldVaultIds,
             uint256[] memory timestamps,
             string[] memory messages,
             string[] memory vaultIdentifiers,
@@ -938,7 +938,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         statuses = new uint8[](size);
         tokenAddresses = new address[](size);
         amounts = new uint256[](size);
-        tideIds = new uint64[](size);
+        yieldVaultIds = new uint64[](size);
         timestamps = new uint256[](size);
         messages = new string[](size);
         vaultIdentifiers = new string[](size);
@@ -952,7 +952,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             statuses[i] = uint8(req.status);
             tokenAddresses[i] = req.tokenAddress;
             amounts[i] = req.amount;
-            tideIds[i] = req.tideId;
+            yieldVaultIds[i] = req.yieldVaultId;
             timestamps[i] = req.timestamp;
             messages[i] = req.message;
             vaultIdentifiers[i] = req.vaultIdentifier;
@@ -972,11 +972,11 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         return requests[requestId];
     }
 
-    /// @notice Checks if a Tide ID is valid
-    /// @param tideId Tide ID to check
+    /// @notice Checks if a YieldVault ID is valid
+    /// @param yieldVaultId YieldVault ID to check
     /// @return True if valid
-    function isTideIdValid(uint64 tideId) external view returns (bool) {
-        return validTideIds[tideId];
+    function isYieldVaultIdValid(uint64 yieldVaultId) external view returns (bool) {
+        return validYieldVaultIds[yieldVaultId];
     }
 
     /// @notice Gets a user's pending request count
@@ -988,24 +988,24 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         return userPendingRequestCount[user];
     }
 
-    /// @notice Gets all Tide IDs owned by a user
+    /// @notice Gets all YieldVault IDs owned by a user
     /// @param user User address
-    /// @return Array of Tide IDs
-    function getTideIDsForUser(
+    /// @return Array of YieldVault IDs
+    function getYieldVaultIDsForUser(
         address user
     ) external view returns (uint64[] memory) {
-        return tidesByUser[user];
+        return yieldVaultsByUser[user];
     }
 
-    /// @notice Checks if a user owns a specific Tide (O(1) lookup)
+    /// @notice Checks if a user owns a specific YieldVault (O(1) lookup)
     /// @param user User address
-    /// @param tideId Tide ID
-    /// @return True if user owns the Tide
-    function doesUserOwnTide(
+    /// @param yieldVaultId YieldVault ID
+    /// @return True if user owns the YieldVault
+    function doesUserOwnYieldVault(
         address user,
-        uint64 tideId
+        uint64 yieldVaultId
     ) external view returns (bool) {
-        return userOwnsTide[user][tideId];
+        return userOwnsYieldVault[user][yieldVaultId];
     }
 
     // ============================================
@@ -1039,10 +1039,10 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
     }
 
-    /// @dev Validates that user owns the specified Tide
-    function _validateTideOwnership(uint64 tideId, address user) internal view {
-        if (!validTideIds[tideId] || tideOwners[tideId] != user) {
-            revert InvalidTideId(tideId, user);
+    /// @dev Validates that user owns the specified YieldVault
+    function _validateYieldVaultOwnership(uint64 yieldVaultId, address user) internal view {
+        if (!validYieldVaultIds[yieldVaultId] || yieldVaultOwners[yieldVaultId] != user) {
+            revert InvalidYieldVaultId(yieldVaultId, user);
         }
     }
 
@@ -1075,22 +1075,22 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
     }
 
-    /// @dev Registers a new Tide with ownership tracking
-    function _registerTide(uint64 tideId, address user) internal {
-        validTideIds[tideId] = true;
-        tideOwners[tideId] = user;
-        tidesByUser[user].push(tideId);
-        userOwnsTide[user][tideId] = true;
-        emit TideIdRegistered(tideId);
+    /// @dev Registers a new YieldVault with ownership tracking
+    function _registerYieldVault(uint64 yieldVaultId, address user) internal {
+        validYieldVaultIds[yieldVaultId] = true;
+        yieldVaultOwners[yieldVaultId] = user;
+        yieldVaultsByUser[user].push(yieldVaultId);
+        userOwnsYieldVault[user][yieldVaultId] = true;
+        emit YieldVaultIdRegistered(yieldVaultId);
     }
 
-    /// @dev Unregisters a Tide and removes ownership tracking
-    function _unregisterTide(uint64 tideId, address user) internal {
-        uint64[] storage userTides = tidesByUser[user];
-        for (uint256 i = 0; i < userTides.length; ) {
-            if (userTides[i] == tideId) {
-                userTides[i] = userTides[userTides.length - 1];
-                userTides.pop();
+    /// @dev Unregisters a YieldVault and removes ownership tracking
+    function _unregisterYieldVault(uint64 yieldVaultId, address user) internal {
+        uint64[] storage userYieldVaults = yieldVaultsByUser[user];
+        for (uint256 i = 0; i < userYieldVaults.length; ) {
+            if (userYieldVaults[i] == yieldVaultId) {
+                userYieldVaults[i] = userYieldVaults[userYieldVaults.length - 1];
+                userYieldVaults.pop();
                 break;
             }
             unchecked {
@@ -1098,9 +1098,9 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        userOwnsTide[user][tideId] = false;
-        validTideIds[tideId] = false;
-        delete tideOwners[tideId];
+        userOwnsYieldVault[user][yieldVaultId] = false;
+        validYieldVaultIds[yieldVaultId] = false;
+        delete yieldVaultOwners[yieldVaultId];
     }
 
     /// @dev Creates a new request and updates state
@@ -1108,7 +1108,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         RequestType requestType,
         address tokenAddress,
         uint256 amount,
-        uint64 tideId,
+        uint64 yieldVaultId,
         string memory vaultIdentifier,
         string memory strategyIdentifier
     ) internal returns (uint256) {
@@ -1121,7 +1121,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             status: RequestStatus.PENDING,
             tokenAddress: tokenAddress,
             amount: amount,
-            tideId: tideId,
+            yieldVaultId: yieldVaultId,
             timestamp: block.timestamp,
             message: "",
             vaultIdentifier: vaultIdentifier,
@@ -1132,8 +1132,8 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
         userPendingRequestCount[msg.sender]++;
 
         if (
-            requestType == RequestType.CREATE_TIDE ||
-            requestType == RequestType.DEPOSIT_TO_TIDE
+            requestType == RequestType.CREATE_YIELDVAULT ||
+            requestType == RequestType.DEPOSIT_TO_YIELDVAULT
         ) {
             pendingUserBalances[msg.sender][tokenAddress] += amount;
             emit BalanceUpdated(
@@ -1149,7 +1149,7 @@ contract FlowVaultsRequests is ReentrancyGuard, Ownable2Step {
             requestType,
             tokenAddress,
             amount,
-            tideId
+            yieldVaultId
         );
 
         return requestId;

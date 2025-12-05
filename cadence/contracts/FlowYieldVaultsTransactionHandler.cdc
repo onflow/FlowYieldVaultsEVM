@@ -1,12 +1,12 @@
 import "FlowTransactionScheduler"
 import "FlowTransactionSchedulerUtils"
-import "FlowVaultsEVM"
+import "FlowYieldVaultsEVM"
 import "FlowToken"
 import "FungibleToken"
 
-/// @title FlowVaultsTransactionHandler
-/// @author Flow Vaults Team
-/// @notice Handler contract for scheduled FlowVaultsEVM request processing with auto-scheduling.
+/// @title FlowYieldVaultsTransactionHandler
+/// @author Flow YieldVaults Team
+/// @notice Handler contract for scheduled FlowYieldVaultsEVM request processing with auto-scheduling.
 /// @dev This contract manages the automated execution of EVM request processing through the
 ///      FlowTransactionScheduler. After each execution, it automatically schedules the next
 ///      execution based on the current workload.
@@ -22,7 +22,7 @@ import "FungibleToken"
 ///      - >= 10 pending: 30s delay (medium load)
 ///      - >= 5 pending: 45s delay (low load)
 ///      - >= 0 pending: 60s delay (idle)
-access(all) contract FlowVaultsTransactionHandler {
+access(all) contract FlowYieldVaultsTransactionHandler {
 
     // ============================================
     // State Variables
@@ -48,7 +48,7 @@ access(all) contract FlowVaultsTransactionHandler {
     access(all) var isPaused: Bool
 
     /// @notice Maximum parallel transactions to schedule at once
-    /// @dev Each transaction processes up to FlowVaultsEVM.maxRequestsPerTx requests
+    /// @dev Each transaction processes up to FlowYieldVaultsEVM.maxRequestsPerTx requests
     access(all) var maxParallelTransactions: Int
 
     // ============================================
@@ -134,13 +134,13 @@ access(all) contract FlowVaultsTransactionHandler {
 
         /// @notice Pauses the handler, stopping all scheduled executions
         access(all) fun pause() {
-            FlowVaultsTransactionHandler.isPaused = true
+            FlowYieldVaultsTransactionHandler.isPaused = true
             emit HandlerPaused()
         }
 
         /// @notice Unpauses the handler, resuming scheduled executions
         access(all) fun unpause() {
-            FlowVaultsTransactionHandler.isPaused = false
+            FlowYieldVaultsTransactionHandler.isPaused = false
             emit HandlerUnpaused()
         }
 
@@ -150,8 +150,8 @@ access(all) contract FlowVaultsTransactionHandler {
             pre {
                 count > 0: "Max parallel transactions must be greater than 0"
             }
-            let oldValue = FlowVaultsTransactionHandler.maxParallelTransactions
-            FlowVaultsTransactionHandler.maxParallelTransactions = count
+            let oldValue = FlowYieldVaultsTransactionHandler.maxParallelTransactions
+            FlowYieldVaultsTransactionHandler.maxParallelTransactions = count
             emit MaxParallelTransactionsUpdated(oldValue: oldValue, newValue: count)
         }
 
@@ -161,7 +161,7 @@ access(all) contract FlowVaultsTransactionHandler {
             pre {
                 newThresholds.length > 0: "Thresholds mapping cannot be empty"
             }
-            FlowVaultsTransactionHandler.thresholdToDelay = newThresholds
+            FlowYieldVaultsTransactionHandler.thresholdToDelay = newThresholds
             emit ThresholdToDelayUpdated(newThresholds: newThresholds)
         }
 
@@ -170,11 +170,11 @@ access(all) contract FlowVaultsTransactionHandler {
         /// @return Dictionary with cancelledIds array and totalRefunded amount
         access(all) fun stopAll(): {String: AnyStruct} {
             // First pause to prevent any new scheduling
-            FlowVaultsTransactionHandler.isPaused = true
+            FlowYieldVaultsTransactionHandler.isPaused = true
             emit HandlerPaused()
 
             // Borrow the manager to cancel scheduled transactions
-            let manager = FlowVaultsTransactionHandler.account.storage
+            let manager = FlowYieldVaultsTransactionHandler.account.storage
                 .borrow<auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}>(
                     from: FlowTransactionSchedulerUtils.managerStoragePath
                 )
@@ -194,7 +194,7 @@ access(all) contract FlowVaultsTransactionHandler {
             var totalRefunded: UFix64 = 0.0
 
             // Get vault to deposit refunds
-            let vaultRef = FlowVaultsTransactionHandler.account.storage
+            let vaultRef = FlowYieldVaultsTransactionHandler.account.storage
                 .borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
                 ?? panic("Could not borrow FlowToken vault")
 
@@ -219,11 +219,11 @@ access(all) contract FlowVaultsTransactionHandler {
     /// @dev Processes EVM requests and auto-schedules next execution based on workload
     access(all) resource Handler: FlowTransactionScheduler.TransactionHandler {
 
-        access(self) let workerCap: Capability<&FlowVaultsEVM.Worker>
+        access(self) let workerCap: Capability<&FlowYieldVaultsEVM.Worker>
         access(self) var executionCount: UInt64
         access(self) var lastExecutionTime: UFix64?
 
-        init(workerCap: Capability<&FlowVaultsEVM.Worker>) {
+        init(workerCap: Capability<&FlowYieldVaultsEVM.Worker>) {
             self.workerCap = workerCap
             self.executionCount = 0
             self.lastExecutionTime = nil
@@ -235,7 +235,7 @@ access(all) contract FlowVaultsTransactionHandler {
         /// @param id The transaction ID being executed
         /// @param data Array [UInt8 priority, UInt64 executionEffort] - priority (0=High, 1=Medium, 2=Low)
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
-            if FlowVaultsTransactionHandler.isPaused {
+            if FlowYieldVaultsTransactionHandler.isPaused {
                 emit ExecutionSkipped(transactionId: id, reason: "Handler is paused")
                 return
             }
@@ -266,7 +266,7 @@ access(all) contract FlowVaultsTransactionHandler {
                     : FlowTransactionScheduler.Priority.Low
 
             // Process requests
-            let maxRequestsPerTx = FlowVaultsEVM.maxRequestsPerTx
+            let maxRequestsPerTx = FlowYieldVaultsEVM.maxRequestsPerTx
             worker!.processRequests(startIndex: 0, count: maxRequestsPerTx)
 
             self.executionCount = self.executionCount + 1
@@ -274,7 +274,7 @@ access(all) contract FlowVaultsTransactionHandler {
 
             // Get pending count and schedule next execution
             let pendingRequests = self.getPendingRequestCount(worker!)
-            let nextDelay = FlowVaultsTransactionHandler.getDelayForPendingCount(pendingRequests)
+            let nextDelay = FlowYieldVaultsTransactionHandler.getDelayForPendingCount(pendingRequests)
 
             emit ScheduledExecutionTriggered(
                 transactionId: id,
@@ -288,7 +288,7 @@ access(all) contract FlowVaultsTransactionHandler {
         access(self) fun scheduleNextExecution(nextDelay: UFix64, priority: FlowTransactionScheduler.Priority, executionEffort: UInt64) {
             let future = getCurrentBlock().timestamp + nextDelay
 
-            let manager = FlowVaultsTransactionHandler.account.storage
+            let manager = FlowYieldVaultsTransactionHandler.account.storage
                 .borrow<auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}>(
                     from: FlowTransactionSchedulerUtils.managerStoragePath
                 )
@@ -298,7 +298,7 @@ access(all) contract FlowVaultsTransactionHandler {
             assert(handlerTypeIdentifiers.keys.length > 0, message: "No handler types found in manager")
             let handlerTypeIdentifier = handlerTypeIdentifiers.keys[0]
 
-            let vaultRef = FlowVaultsTransactionHandler.account.storage
+            let vaultRef = FlowYieldVaultsTransactionHandler.account.storage
                 .borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
                 ?? panic("missing FlowToken vault on contract account")
 
@@ -344,15 +344,15 @@ access(all) contract FlowVaultsTransactionHandler {
         access(all) fun resolveView(_ view: Type): AnyStruct? {
             switch view {
                 case Type<StoragePath>():
-                    return FlowVaultsTransactionHandler.HandlerStoragePath
+                    return FlowYieldVaultsTransactionHandler.HandlerStoragePath
                 case Type<PublicPath>():
-                    return FlowVaultsTransactionHandler.HandlerPublicPath
+                    return FlowYieldVaultsTransactionHandler.HandlerPublicPath
                 default:
                     return nil
             }
         }
 
-        access(self) fun getPendingRequestCount(_ worker: &FlowVaultsEVM.Worker): Int {
+        access(self) fun getPendingRequestCount(_ worker: &FlowYieldVaultsEVM.Worker): Int {
             return worker.getPendingRequestCountFromEVM()
         }
 
@@ -371,9 +371,9 @@ access(all) contract FlowVaultsTransactionHandler {
     // ============================================
 
     /// @notice Creates a new Handler resource
-    /// @param workerCap Capability to the FlowVaultsEVM.Worker
+    /// @param workerCap Capability to the FlowYieldVaultsEVM.Worker
     /// @return The newly created Handler resource
-    access(all) fun createHandler(workerCap: Capability<&FlowVaultsEVM.Worker>): @Handler {
+    access(all) fun createHandler(workerCap: Capability<&FlowYieldVaultsEVM.Worker>): @Handler {
         return <- create Handler(workerCap: workerCap)
     }
 
@@ -404,9 +404,9 @@ access(all) contract FlowVaultsTransactionHandler {
     // ============================================
 
     init() {
-        self.HandlerStoragePath = /storage/FlowVaultsTransactionHandler
-        self.HandlerPublicPath = /public/FlowVaultsTransactionHandler
-        self.AdminStoragePath = /storage/FlowVaultsTransactionHandlerAdmin
+        self.HandlerStoragePath = /storage/FlowYieldVaultsTransactionHandler
+        self.HandlerPublicPath = /public/FlowYieldVaultsTransactionHandler
+        self.AdminStoragePath = /storage/FlowYieldVaultsTransactionHandlerAdmin
         self.isPaused = false
         self.maxParallelTransactions = 1
         self.defaultDelay = 60.0

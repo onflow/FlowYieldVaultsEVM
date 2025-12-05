@@ -2,7 +2,7 @@
 
 set -e  # Exit on any error
 
-# install Flow Vaults submodule as dependency
+# install Flow YieldVaults submodule as dependency
 git submodule update --init --recursive
 
 # ============================================
@@ -50,10 +50,10 @@ echo "Installing Flow dependencies..."
 flow deps install --skip-alias --skip-deployments
 
 # ============================================
-# FLOW-VAULTS-SC SETUP (using univ3_test pattern)
+# FLOW-YIELD-VAULTS SETUP (using univ3_test pattern)
 # ============================================
-echo "Setting up flow-vaults-sc environment..."
-cd ./lib/flow-vaults-sc
+echo "Setting up FlowYieldVaults environment..."
+cd ./lib/FlowYieldVaults
 
 # Start Flow Emulator (runs in background)
 ./local/run_emulator.sh
@@ -79,6 +79,6 @@ cd ../..
 echo ""
 echo "========================================="
 echo "✓ Flow Emulator & EVM Gateway are running"
-echo "✓ FlowVaults with TracerStrategy configured"
-echo "✓ Ready for FlowVaultsEVM deployment"
+echo "✓ FlowYieldVaults with TracerStrategy configured"
+echo "✓ Ready for FlowYieldVaultsEVM deployment"
 echo "========================================="

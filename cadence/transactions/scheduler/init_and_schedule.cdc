@@ -2,8 +2,8 @@ import "FlowTransactionScheduler"
 import "FlowTransactionSchedulerUtils"
 import "FlowToken"
 import "FungibleToken"
-import "FlowVaultsTransactionHandler"
-import "FlowVaultsEVM"
+import "FlowYieldVaultsTransactionHandler"
+import "FlowYieldVaultsEVM"
 
 /// @title Initialize Handler and Schedule First Execution
 /// @notice Creates the transaction handler and schedules the first automated execution
@@ -20,20 +20,20 @@ transaction(
     executionEffort: UInt64
 ) {
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
-        if signer.storage.borrow<&FlowVaultsEVM.Worker>(from: FlowVaultsEVM.WorkerStoragePath) == nil {
-            panic("FlowVaultsEVM Worker not found. Please initialize Worker first.")
+        if signer.storage.borrow<&FlowYieldVaultsEVM.Worker>(from: FlowYieldVaultsEVM.WorkerStoragePath) == nil {
+            panic("FlowYieldVaultsEVM Worker not found. Please initialize Worker first.")
         }
 
-        if signer.storage.borrow<&AnyResource>(from: FlowVaultsTransactionHandler.HandlerStoragePath) == nil {
+        if signer.storage.borrow<&AnyResource>(from: FlowYieldVaultsTransactionHandler.HandlerStoragePath) == nil {
             let workerCap = signer.capabilities.storage
-                .issue<&FlowVaultsEVM.Worker>(FlowVaultsEVM.WorkerStoragePath)
-            let handler <- FlowVaultsTransactionHandler.createHandler(workerCap: workerCap)
-            signer.storage.save(<-handler, to: FlowVaultsTransactionHandler.HandlerStoragePath)
+                .issue<&FlowYieldVaultsEVM.Worker>(FlowYieldVaultsEVM.WorkerStoragePath)
+            let handler <- FlowYieldVaultsTransactionHandler.createHandler(workerCap: workerCap)
+            signer.storage.save(<-handler, to: FlowYieldVaultsTransactionHandler.HandlerStoragePath)
         }
 
         let handlerCap = signer.capabilities.storage
             .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(
-                FlowVaultsTransactionHandler.HandlerStoragePath
+                FlowYieldVaultsTransactionHandler.HandlerStoragePath
             )
 
         if signer.storage.borrow<&AnyResource>(from: FlowTransactionSchedulerUtils.managerStoragePath) == nil {

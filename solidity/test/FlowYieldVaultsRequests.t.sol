@@ -2,21 +2,21 @@
 pragma solidity 0.8.20;
 
 import "forge-std/Test.sol";
-import "../src/FlowVaultsRequests.sol";
+import "../src/FlowYieldVaultsRequests.sol";
 
-contract FlowVaultsRequestsTestHelper is FlowVaultsRequests {
-    constructor(address coaAddress) FlowVaultsRequests(coaAddress) {}
+contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
+    constructor(address coaAddress) FlowYieldVaultsRequests(coaAddress) {}
 
-    function testRegisterTideId(uint64 tideId, address owner) external {
-        validTideIds[tideId] = true;
-        tideOwners[tideId] = owner;
-        tidesByUser[owner].push(tideId);
-        userOwnsTide[owner][tideId] = true;
+    function testRegisterYieldVaultId(uint64 yieldVaultId, address owner) external {
+        validYieldVaultIds[yieldVaultId] = true;
+        yieldVaultOwners[yieldVaultId] = owner;
+        yieldVaultsByUser[owner].push(yieldVaultId);
+        userOwnsYieldVault[owner][yieldVaultId] = true;
     }
 }
 
-contract FlowVaultsRequestsTest is Test {
-    FlowVaultsRequestsTestHelper public c;
+contract FlowYieldVaultsRequestsTest is Test {
+    FlowYieldVaultsRequestsTestHelper public c;
     address user = makeAddr("user");
     address user2 = makeAddr("user2");
     address coa = makeAddr("coa");
@@ -31,63 +31,63 @@ contract FlowVaultsRequestsTest is Test {
     error OwnableInvalidOwner(address owner);
 
     string constant VAULT_ID = "A.0ae53cb6e3f42a79.FlowToken.Vault";
-    string constant STRATEGY_ID = "A.045a1763c93006ca.FlowVaultsStrategies.TracerStrategy";
+    string constant STRATEGY_ID = "A.045a1763c93006ca.FlowYieldVaultsStrategies.TracerStrategy";
 
     function setUp() public {
         vm.deal(user, 100 ether);
         vm.deal(user2, 100 ether);
-        c = new FlowVaultsRequestsTestHelper(coa);
-        c.testRegisterTideId(42, user);
+        c = new FlowYieldVaultsRequestsTestHelper(coa);
+        c.testRegisterYieldVaultId(42, user);
     }
 
     // ============================================
     // USER REQUEST LIFECYCLE
     // ============================================
 
-    function test_CreateTide() public {
+    function test_CreateYieldVault() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         assertEq(reqId, 1);
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
         assertEq(c.getPendingRequestCount(), 1);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.CREATE_TIDE));
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.CREATE_YIELDVAULT));
         assertEq(req.user, user);
         assertEq(req.amount, 1 ether);
     }
 
-    function test_DepositToTide() public {
+    function test_DepositToYieldVault() public {
         vm.prank(user);
-        uint256 reqId = c.depositToTide{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE));
-        assertEq(req.tideId, 42);
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
+        assertEq(req.yieldVaultId, 42);
     }
 
-    function test_WithdrawFromTide() public {
+    function test_WithdrawFromYieldVault() public {
         vm.prank(user);
-        uint256 reqId = c.withdrawFromTide(42, 0.5 ether);
+        uint256 reqId = c.withdrawFromYieldVault(42, 0.5 ether);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.WITHDRAW_FROM_TIDE));
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.WITHDRAW_FROM_YIELDVAULT));
         assertEq(req.amount, 0.5 ether);
     }
 
-    function test_CloseTide() public {
+    function test_CloseYieldVault() public {
         vm.prank(user);
-        uint256 reqId = c.closeTide(42);
+        uint256 reqId = c.closeYieldVault(42);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.CLOSE_TIDE));
-        assertEq(req.tideId, 42);
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.CLOSE_YIELDVAULT));
+        assertEq(req.yieldVaultId, 42);
     }
 
     function test_CancelRequest_RefundsFunds() public {
         vm.startPrank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
         uint256 balBefore = user.balance;
 
         c.cancelRequest(reqId);
@@ -97,25 +97,25 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
         assertEq(c.getPendingRequestCount(), 0);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.FAILED));
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
     }
 
     function test_CancelRequest_RevertNotOwner() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(user2);
-        vm.expectRevert(FlowVaultsRequests.NotRequestOwner.selector);
+        vm.expectRevert(FlowYieldVaultsRequests.NotRequestOwner.selector);
         c.cancelRequest(reqId);
     }
 
     function test_CancelRequest_RevertAlreadyCancelled() public {
         vm.startPrank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
         c.cancelRequest(reqId);
 
-        vm.expectRevert(FlowVaultsRequests.CanOnlyCancelPending.selector);
+        vm.expectRevert(FlowYieldVaultsRequests.CanOnlyCancelPending.selector);
         c.cancelRequest(reqId);
         vm.stopPrank();
     }
@@ -126,7 +126,7 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_StartProcessing_Success() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
 
@@ -136,53 +136,53 @@ contract FlowVaultsRequestsTest is Test {
         // Balance deducted atomically
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.PROCESSING));
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PROCESSING));
     }
 
     function test_StartProcessing_RevertNotPending() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
         c.startProcessing(reqId);
 
-        vm.expectRevert(FlowVaultsRequests.RequestAlreadyFinalized.selector);
+        vm.expectRevert(FlowYieldVaultsRequests.RequestAlreadyFinalized.selector);
         c.startProcessing(reqId);
         vm.stopPrank();
     }
 
     function test_StartProcessing_RevertUnauthorized() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.NotAuthorizedCOA.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.NotAuthorizedCOA.selector, user));
         c.startProcessing(reqId);
     }
 
     function test_CompleteProcessing_Success() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
         c.startProcessing(reqId);
-        c.completeProcessing(reqId, true, 100, "Tide created");
+        c.completeProcessing(reqId, true, 100, "YieldVault created");
         vm.stopPrank();
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.COMPLETED));
-        assertEq(req.tideId, 100);
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
+        assertEq(req.yieldVaultId, 100);
         assertEq(c.getPendingRequestCount(), 0);
 
-        // Tide ownership registered
-        assertEq(c.doesUserOwnTide(user, 100), true);
-        assertEq(c.isTideIdValid(100), true);
+        // YieldVault ownership registered
+        assertEq(c.doesUserOwnYieldVault(user, 100), true);
+        assertEq(c.isYieldVaultIdValid(100), true);
     }
 
     function test_CompleteProcessing_FailureRefundsBalance() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
         c.startProcessing(reqId);
@@ -195,29 +195,29 @@ contract FlowVaultsRequestsTest is Test {
         // Balance restored on failure
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.FAILED));
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
     }
 
-    function test_CompleteProcessing_CloseTideRemovesOwnership() public {
+    function test_CompleteProcessing_CloseYieldVaultRemovesOwnership() public {
         vm.prank(user);
-        uint256 reqId = c.closeTide(42);
+        uint256 reqId = c.closeYieldVault(42);
 
         vm.startPrank(coa);
         c.startProcessing(reqId);
         c.completeProcessing(reqId, true, 42, "Closed");
         vm.stopPrank();
 
-        assertEq(c.doesUserOwnTide(user, 42), false);
-        assertEq(c.isTideIdValid(42), false);
+        assertEq(c.doesUserOwnYieldVault(user, 42), false);
+        assertEq(c.isYieldVaultIdValid(42), false);
     }
 
     function test_CompleteProcessing_RevertNotProcessing() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(coa);
-        vm.expectRevert(FlowVaultsRequests.RequestAlreadyFinalized.selector);
+        vm.expectRevert(FlowYieldVaultsRequests.RequestAlreadyFinalized.selector);
         c.completeProcessing(reqId, true, 100, "Should fail");
     }
 
@@ -236,7 +236,7 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_SetAuthorizedCOA_RevertZeroAddress() public {
         vm.prank(c.owner());
-        vm.expectRevert(FlowVaultsRequests.InvalidCOAAddress.selector);
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidCOAAddress.selector);
         c.setAuthorizedCOA(address(0));
     }
 
@@ -264,17 +264,17 @@ contract FlowVaultsRequestsTest is Test {
         c.setMaxPendingRequestsPerUser(2);
 
         vm.startPrank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
-        vm.expectRevert(FlowVaultsRequests.TooManyPendingRequests.selector);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.expectRevert(FlowYieldVaultsRequests.TooManyPendingRequests.selector);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
         vm.stopPrank();
     }
 
     function test_DropRequests() public {
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
         uint256 balBefore = user.balance;
 
         uint256[] memory ids = new uint256[](1);
@@ -287,8 +287,8 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(user.balance, balBefore + 1 ether);
         assertEq(c.getPendingRequestCount(), 0);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.FAILED));
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
     }
 
     // ============================================
@@ -367,12 +367,12 @@ contract FlowVaultsRequestsTest is Test {
 
         // Allowlisted user can create
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         // Non-allowlisted user cannot
         vm.prank(user2);
-        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.NotInAllowlist.selector, user2));
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.NotInAllowlist.selector, user2));
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
     function test_Blocklist() public {
@@ -385,8 +385,8 @@ contract FlowVaultsRequestsTest is Test {
         vm.stopPrank();
 
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.Blocklisted.selector, user));
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.Blocklisted.selector, user));
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
     function test_BlocklistTakesPrecedence() public {
@@ -402,53 +402,53 @@ contract FlowVaultsRequestsTest is Test {
 
         // User is both allowlisted AND blocklisted - blocklist wins
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.Blocklisted.selector, user));
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.Blocklisted.selector, user));
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
     // ============================================
     // VALIDATION
     // ============================================
 
-    function test_CreateTide_RevertZeroAmount() public {
+    function test_CreateYieldVault_RevertZeroAmount() public {
         vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.AmountMustBeGreaterThanZero.selector);
-        c.createTide{value: 0}(NATIVE_FLOW, 0, VAULT_ID, STRATEGY_ID);
+        vm.expectRevert(FlowYieldVaultsRequests.AmountMustBeGreaterThanZero.selector);
+        c.createYieldVault{value: 0}(NATIVE_FLOW, 0, VAULT_ID, STRATEGY_ID);
     }
 
-    function test_CreateTide_RevertMsgValueMismatch() public {
+    function test_CreateYieldVault_RevertMsgValueMismatch() public {
         vm.prank(user);
-        vm.expectRevert(FlowVaultsRequests.MsgValueMustEqualAmount.selector);
-        c.createTide{value: 0.5 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustEqualAmount.selector);
+        c.createYieldVault{value: 0.5 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
-    function test_CreateTide_RevertBelowMinimum() public {
+    function test_CreateYieldVault_RevertBelowMinimum() public {
         vm.prank(user);
         vm.expectRevert(
             abi.encodeWithSelector(
-                FlowVaultsRequests.BelowMinimumBalance.selector,
+                FlowYieldVaultsRequests.BelowMinimumBalance.selector,
                 NATIVE_FLOW,
                 0.5 ether,
                 1 ether
             )
         );
-        c.createTide{value: 0.5 ether}(NATIVE_FLOW, 0.5 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 0.5 ether}(NATIVE_FLOW, 0.5 ether, VAULT_ID, STRATEGY_ID);
     }
 
-    function test_DepositToTide_RevertInvalidTideId() public {
+    function test_DepositToYieldVault_RevertInvalidYieldVaultId() public {
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(FlowVaultsRequests.InvalidTideId.selector, 999, user));
-        c.depositToTide{value: 1 ether}(999, NATIVE_FLOW, 1 ether);
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.InvalidYieldVaultId.selector, 999, user));
+        c.depositToYieldVault{value: 1 ether}(999, NATIVE_FLOW, 1 ether);
     }
 
-    function test_DepositToTide_AnyoneCanDeposit() public {
-        // Tide 42 is owned by user, but user2 can deposit to it
+    function test_DepositToYieldVault_AnyoneCanDeposit() public {
+        // YieldVault 42 is owned by user, but user2 can deposit to it
         vm.prank(user2);
-        uint256 reqId = c.depositToTide{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
+        uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.requestType), uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE));
-        assertEq(req.tideId, 42);
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
+        assertEq(req.yieldVaultId, 42);
         assertEq(req.user, user2);
         assertEq(req.amount, 1 ether);
         assertEq(c.getUserPendingBalance(user2, NATIVE_FLOW), 1 ether);
@@ -460,10 +460,10 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_UserBalancesAreSeparate() public {
         vm.prank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(user2);
-        c.createTide{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
 
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
         assertEq(c.getUserPendingBalance(user2, NATIVE_FLOW), 2 ether);
@@ -475,8 +475,8 @@ contract FlowVaultsRequestsTest is Test {
 
     function test_GetPendingRequestsUnpacked() public {
         vm.startPrank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
-        c.depositToTide{value: 2 ether}(42, NATIVE_FLOW, 2 ether);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.depositToYieldVault{value: 2 ether}(42, NATIVE_FLOW, 2 ether);
         vm.stopPrank();
 
         (
@@ -499,15 +499,15 @@ contract FlowVaultsRequestsTest is Test {
         assertEq(users[0], user);
         assertEq(amounts[0], 1 ether);
         assertEq(amounts[1], 2 ether);
-        assertEq(requestTypes[0], uint8(FlowVaultsRequests.RequestType.CREATE_TIDE));
-        assertEq(requestTypes[1], uint8(FlowVaultsRequests.RequestType.DEPOSIT_TO_TIDE));
+        assertEq(requestTypes[0], uint8(FlowYieldVaultsRequests.RequestType.CREATE_YIELDVAULT));
+        assertEq(requestTypes[1], uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
     }
 
     function test_GetPendingRequestsUnpacked_Pagination() public {
         vm.startPrank(user);
-        c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
-        c.createTide{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
-        c.createTide{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
         vm.stopPrank();
 
         // Get first 2
@@ -527,10 +527,10 @@ contract FlowVaultsRequestsTest is Test {
     // INTEGRATION: FULL LIFECYCLE
     // ============================================
 
-    function test_FullCreateTideLifecycle() public {
-        // 1. User creates tide
+    function test_FullCreateYieldVaultLifecycle() public {
+        // 1. User creates yieldvault
         vm.prank(user);
-        uint256 reqId = c.createTide{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
 
         // 2. COA starts processing (deducts balance atomically)
@@ -540,21 +540,21 @@ contract FlowVaultsRequestsTest is Test {
 
         // 3. COA completes processing (funds are bridged via COA in Cadence)
         vm.prank(coa);
-        c.completeProcessing(reqId, true, 100, "Tide created");
+        c.completeProcessing(reqId, true, 100, "YieldVault created");
 
         // Verify final state
         assertEq(c.getPendingRequestCount(), 0);
-        assertEq(c.doesUserOwnTide(user, 100), true);
+        assertEq(c.doesUserOwnYieldVault(user, 100), true);
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.COMPLETED));
-        assertEq(req.tideId, 100);
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
+        assertEq(req.yieldVaultId, 100);
     }
 
     function test_FullWithdrawLifecycle() public {
-        // User withdraws from existing tide
+        // User withdraws from existing yieldvault
         vm.prank(user);
-        uint256 reqId = c.withdrawFromTide(42, 0.5 ether);
+        uint256 reqId = c.withdrawFromYieldVault(42, 0.5 ether);
 
         // COA processes
         vm.startPrank(coa);
@@ -562,7 +562,7 @@ contract FlowVaultsRequestsTest is Test {
         c.completeProcessing(reqId, true, 42, "Withdrawn");
         vm.stopPrank();
 
-        FlowVaultsRequests.Request memory req = c.getRequest(reqId);
-        assertEq(uint8(req.status), uint8(FlowVaultsRequests.RequestStatus.COMPLETED));
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
     }
 }
