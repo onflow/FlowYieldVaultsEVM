@@ -38,14 +38,19 @@
 			"source": "mainnet://6801a6222ebf784a.BandOracle",
 			"hash": "ababa195ef50b63d71520022aa2468656a9703b924c0f5228cfaa51a71db094d",
 			"aliases": {
-				"mainnet": "6801a6222ebf784a"
+				"emulator": "045a1763c93006ca",
+				"mainnet": "6801a6222ebf784a",
+				"testing": "0000000000000007"
 			}
 		},
 		"BandOracleConnectors": {
 			"source": "mainnet://f627b5c89141ed99.BandOracleConnectors",
 			"hash": "0bb4d8014bb2b195a25004cf9221e29857f12828bff6e7efc02b781debdee07a",
 			"aliases": {
-				"mainnet": "f627b5c89141ed99"
+				"emulator": "045a1763c93006ca",
+				"mainnet": "f627b5c89141ed99",
+				"testing": "0000000000000007",
+				"testnet": "bb76ea2f8aad74a0"
 			}
 		},
 		"Burner": {
@@ -129,7 +134,9 @@
 			"source": "mainnet://cc15a0c9c656b648.EVMNativeFLOWConnectors",
 			"hash": "345dbfab60b1e9688d30ba49cc856fb8f3edcd53c5f52879dce0a508fc874203",
 			"aliases": {
-				"mainnet": "cc15a0c9c656b648"
+				"emulator": "045a1763c93006ca",
+				"mainnet": "cc15a0c9c656b648",
+				"testing": "0000000000000007"
 			}
 		},
 		"FlowEVMBridge": {
