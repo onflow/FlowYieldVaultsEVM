@@ -19,7 +19,7 @@ access(all) fun main(account: Address): {String: AnyStruct} {
     let evmMappings: [{String: AnyStruct}] = []
 
     for evmAddr in yieldVaultsByEVM.keys {
-        let yieldVaults = FlowYieldVaultsEVM.getYieldVaultIDsForEVMAddress(evmAddr)
+        let yieldVaults = FlowYieldVaultsEVM.getYieldVaultIdsForEVMAddress(evmAddr)
         allYieldVaultIds.appendAll(yieldVaults)
 
         evmMappings.append({

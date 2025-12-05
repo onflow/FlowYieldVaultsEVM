@@ -18,58 +18,58 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              Flow EVM                                       │
 │                                                                             │
-│  ┌──────────────┐         ┌─────────────────────────┐                       │
-│  │   EVM User   │────────▶│   FlowYieldVaultsRequests    │                       │
-│  │              │         │                         │                       │
-│  │  - Deposit   │         │  - Request queue        │                       │
-│  │  - Request   │◀────────│  - Fund escrow          │                       │
-│  │  - Cancel    │         │  - Balance tracking     │                       │
-│  └──────────────┘         └───────────┬─────────────┘                       │
-│                                       │                                     │
-└───────────────────────────────────────┼─────────────────────────────────────┘
-                                        │ COA calls:
-                                        │ - startProcessing()
-                                        │ - completeProcessing()
-┌───────────────────────────────────────┼─────────────────────────────────────┐
+│  ┌──────────────┐         ┌───────────────────────────┐                    │
+│  │   EVM User   │────────▶│  FlowYieldVaultsRequests  │                    │
+│  │              │         │                           │                    │
+│  │  - Deposit   │         │  - Request queue          │                    │
+│  │  - Request   │◀────────│  - Fund escrow            │                    │
+│  │  - Cancel    │         │  - Balance tracking       │                    │
+│  └──────────────┘         └─────────────┬─────────────┘                    │
+│                                         │                                   │
+└─────────────────────────────────────────┼───────────────────────────────────┘
+                                          │ COA calls:
+                                          │ - startProcessing()
+                                          │ - completeProcessing()
+┌─────────────────────────────────────────┼───────────────────────────────────┐
 │                              Flow Cadence                                   │
-│                                       ▼                                     │
-│  ┌────────────────────────────────────────────────────────────┐             │
-│  │                      FlowYieldVaultsEVM                         │             │
-│  │                                                            │             │
-│  │  ┌─────────────────────────────────────────────────────┐   │             │
-│  │  │                     Worker                          │   │             │
-│  │  │                                                     │   │             │
-│  │  │  Capabilities:                                      │   │             │
-│  │  │  - coaCap (EVM.Call, EVM.Withdraw, EVM.Bridge)      │   │             │
-│  │  │  - yieldVaultManagerCap (FungibleToken.Withdraw)          │   │             │
-│  │  │  - betaBadgeCap (FlowYieldVaultsClosedBeta.Beta)         │   │             │
-│  │  │  - feeProviderCap (FungibleToken.Withdraw)          │   │             │
-│  │  │                                                     │   │             │
-│  │  │  Functions:                                         │   │             │
-│  │  │  - processRequests()                                │   │             │
-│  │  │  - processCreateYieldVault()                              │   │             │
-│  │  │  - processDepositToYieldVault()                           │   │             │
-│  │  │  - processWithdrawFromYieldVault()                        │   │             │
-│  │  │  - processCloseYieldVault()                               │   │             │
-│  │  └─────────────────────────────────────────────────────┘   │             │
-│  │                                                            │             │
-│  │  State:                                                    │             │
-│  │  - yieldVaultsByEVMAddress: {String: [UInt64]}                   │             │
-│  │  - yieldVaultOwnershipLookup: {String: {UInt64: Bool}}           │             │
-│  │  - flowYieldVaultsRequestsAddress: EVM.EVMAddress?              │             │
-│  │  - maxRequestsPerTx: Int (default: 1)                      │             │
-│  └────────────────────────────────────────────────────────────┘             │
+│                                         ▼                                   │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                       FlowYieldVaultsEVM                              │  │
+│  │                                                                       │  │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
+│  │  │                          Worker                                 │ │  │
+│  │  │                                                                 │ │  │
+│  │  │  Capabilities:                                                  │ │  │
+│  │  │  - coaCap (EVM.Call, EVM.Withdraw, EVM.Bridge)                  │ │  │
+│  │  │  - yieldVaultManagerCap (FungibleToken.Withdraw)                │ │  │
+│  │  │  - betaBadgeCap (FlowYieldVaultsClosedBeta.Beta)                │ │  │
+│  │  │  - feeProviderCap (FungibleToken.Withdraw)                      │ │  │
+│  │  │                                                                 │ │  │
+│  │  │  Functions:                                                     │ │  │
+│  │  │  - processRequests()                                            │ │  │
+│  │  │  - processCreateYieldVault()                                    │ │  │
+│  │  │  - processDepositToYieldVault()                                 │ │  │
+│  │  │  - processWithdrawFromYieldVault()                              │ │  │
+│  │  │  - processCloseYieldVault()                                     │ │  │
+│  │  └─────────────────────────────────────────────────────────────────┘ │  │
+│  │                                                                       │  │
+│  │  State:                                                               │  │
+│  │  - yieldVaultsByEVMAddress: {String: [UInt64]}                        │  │
+│  │  - yieldVaultOwnershipLookup: {String: {UInt64: Bool}}                │  │
+│  │  - flowYieldVaultsRequestsAddress: EVM.EVMAddress?                    │  │
+│  │  - maxRequestsPerTx: Int (default: 1)                                 │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
 │                              ▲                                              │
 │                              │ triggers                                     │
-│  ┌───────────────────────────┴────────────────────────────────-┐            │
-│  │            FlowYieldVaultsTransactionHandler                     │            │
-│  │                                                             │            │
-│  │  - Implements FlowTransactionScheduler.TransactionHandler   │            │
-│  │  - Auto-schedules next execution after each run             │            │
-│  │  - Adaptive delay based on pending request count            │            │
-│  │  - Supports parallel transaction scheduling                 │            │
-│  │  - Pausable via Admin resource                              │            │
-│  └─────────────────────────────────────────────────────────────┘            │
+│  ┌───────────────────────────┴─────────────────────────────────────────┐   │
+│  │              FlowYieldVaultsTransactionHandler                       │   │
+│  │                                                                      │   │
+│  │  - Implements FlowTransactionScheduler.TransactionHandler           │   │
+│  │  - Auto-schedules next execution after each run                     │   │
+│  │  - Adaptive delay based on pending request count                    │   │
+│  │  - Supports parallel transaction scheduling                         │   │
+│  │  - Pausable via Admin resource                                      │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -186,7 +186,7 @@ struct Request {
     RequestStatus status;        // PENDING | PROCESSING | COMPLETED | FAILED
     address tokenAddress;        // NATIVE_FLOW (0xFFfF...FfFFFfF) or ERC20 address
     uint256 amount;              // Amount in wei (0 for CLOSE_YIELDVAULT)
-    uint64 yieldVaultId;               // Target YieldVault ID (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed)
+    uint64 yieldVaultId;               // Target YieldVault Id (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed)
     uint256 timestamp;           // Block timestamp when created
     string message;              // Status message or error reason
     string vaultIdentifier;      // Cadence vault type (e.g., "A.xxx.FlowToken.Vault")
@@ -246,47 +246,50 @@ access(all) struct ProcessResult {
 ### CREATE_YIELDVAULT
 
 ```
-┌─────────────┐     ┌────────────────────┐     ┌─────────────────┐     ┌──────────────┐
-│  EVM User   │     │ FlowYieldVaultsRequests │     │  FlowYieldVaultsEVM  │     │  Flow YieldVaults │
-└──────┬──────┘     └─────────┬──────────┘     └────────┬────────┘     └──────┬───────┘
-       │                      │                         │                      │
-       │ createYieldVault(token,    │                         │                      │
-       │ amount, vault, strat)│                         │                      │
-       │─────────────────────▶│                         │                      │
-       │                      │ Escrow funds            │                      │
-       │                      │ Create PENDING request  │                      │
-       │◀─────────────────────│                         │                      │
-       │     requestId        │                         │                      │
-       │                      │                         │                      │
-       │                      │     getPendingRequests  │                      │
-       │                      │◀────────────────────────│                      │
-       │                      │     [EVMRequest]        │                      │
-       │                      │────────────────────────▶│                      │
-       │                      │                         │                      │
-       │                      │     startProcessing(id) │                      │
-       │                      │◀────────────────────────│                      │
-       │                      │ Mark PROCESSING         │                      │
-       │                      │ Deduct user balance     │                      │
-       │                      │────────────────────────▶│                      │
-       │                      │                         │                      │
-       │                      │                         │ COA.withdraw(amount) │
-       │                      │                         │─────────────────────▶│
-       │                      │                         │      $FLOW           │
-       │                      │                         │◀─────────────────────│
-       │                      │                         │                      │
-       │                      │                         │ createYieldVault(vault)    │
-       │                      │                         │─────────────────────▶│
-       │                      │                         │      yieldVaultId          │
-       │                      │                         │◀─────────────────────│
-       │                      │                         │                      │
-       │                      │                         │ Store yieldVaultId mapping │
-       │                      │                         │                      │
-       │                      │ completeProcessing(id,  │                      │
-       │                      │   true, yieldVaultId, msg)    │                      │
-       │                      │◀────────────────────────│                      │
-       │                      │ Mark COMPLETED          │                      │
-       │                      │ Register YieldVault           │                      │
-       │                      │────────────────────────▶│                      │
+┌─────────────┐  ┌─────────────────────-──┐  ┌──────────────────┐  ┌──────────────────┐
+│  EVM User   │  │ FlowYieldVaultsRequests│  │FlowYieldVaultsEVM│  │ Flow YieldVaults │
+└──────┬──────┘  └───────────┬─────────-──┘  └────────┬─────────┘  └────────┬─────────┘
+       │                     │                        │                     │
+       │ createYieldVault(   │                        │                     │
+       │ token, amount,      │                        │                     │
+       │ vault, strategy)    │                        │                     │
+       │────────────────────▶│                        │                     │
+       │                     │ Escrow funds           │                     │
+       │                     │ Create PENDING request │                     │
+       │◀────────────────────│                        │                     │
+       │     requestId       │                        │                     │
+       │                     │                        │                     │
+       │                     │   getPendingRequests   │                     │
+       │                     │◀───────────────────────│                     │
+       │                     │     [EVMRequest]       │                     │
+       │                     │───────────────────────▶│                     │
+       │                     │                        │                     │
+       │                     │   startProcessing(id)  │                     │
+       │                     │◀───────────────────────│                     │
+       │                     │ Mark PROCESSING        │                     │
+       │                     │ Deduct user balance    │                     │
+       │                     │───────────────────────▶│                     │
+       │                     │                        │                     │
+       │                     │                        │ COA.withdraw(amount)│
+       │                     │                        │────────────────────▶│
+       │                     │                        │      $FLOW          │
+       │                     │                        │◀────────────────────│
+       │                     │                        │                     │
+       │                     │                        │ createYieldVault()  │
+       │                     │                        │────────────────────▶│
+       │                     │                        │   yieldVaultId      │
+       │                     │                        │◀────────────────────│
+       │                     │                        │                     │
+       │                     │                        │ Store yieldVaultId  │
+       │                     │                        │    mapping          │
+       │                     │                        │                     │
+       │                     │ completeProcessing(    │                     │
+       │                     │   id, true,            │                     │
+       │                     │   yieldVaultId, msg)   │                     │
+       │                     │◀───────────────────────│                     │
+       │                     │ Mark COMPLETED         │                     │
+       │                     │ Register YieldVault    │                     │
+       │                     │───────────────────────▶│                     │
 ```
 
 ### DEPOSIT_TO_YIELDVAULT
@@ -449,8 +452,8 @@ function getPendingRequestCount() returns (uint256);
 // User's pending request count
 function getUserPendingRequestCount(address user) returns (uint256);
 
-// User's YieldVault IDs
-function getYieldVaultIDsForUser(address user) returns (uint64[] memory);
+// User's YieldVault Ids
+function getYieldVaultIdsForUser(address user) returns (uint64[] memory);
 
 // Ownership check (O(1))
 function doesUserOwnYieldVault(address user, uint64 yieldVaultId) returns (bool);
@@ -459,8 +462,8 @@ function doesUserOwnYieldVault(address user, uint64 yieldVaultId) returns (bool)
 ### Cadence Side
 
 ```cadence
-// YieldVault IDs by EVM address
-access(all) view fun getYieldVaultIDsForEVMAddress(_ evmAddress: String): [UInt64]
+// YieldVault Ids by EVM address
+access(all) view fun getYieldVaultIdsForEVMAddress(_ evmAddress: String): [UInt64]
 
 // Ownership check (O(1))
 access(all) view fun doesEVMAddressOwnYieldVault(evmAddress: String, yieldVaultId: UInt64): Bool

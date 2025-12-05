@@ -58,7 +58,7 @@ fun testCreateYieldVaultFromEVMRequest() {
     )
     
     // Verify no yieldvaults exist for this user initially
-    let yieldVaultsBefore = FlowYieldVaultsEVM.getYieldVaultIDsForEVMAddress(userEVMAddr1.toString())
+    let yieldVaultsBefore = FlowYieldVaultsEVM.getYieldVaultIdsForEVMAddress(userEVMAddr1.toString())
     Test.assertEqual(0, yieldVaultsBefore.length)
     
     // --- act ---------------------------------------------------------------
@@ -80,7 +80,7 @@ fun testCreateYieldVaultFromEVMRequest() {
 access(all)
 fun testDepositToExistingYieldVault() {
     // --- arrange -----------------------------------------------------------
-    // Assume YieldVault ID 1 exists for userEVMAddr1 (created in previous operation)
+    // Assume YieldVault Id 1 exists for userEVMAddr1 (created in previous operation)
     let depositRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 2,
         user: userEVMAddr1,

@@ -58,6 +58,8 @@ cd ./lib/FlowYieldVaults
 # Start Flow Emulator (runs in background)
 ./local/run_emulator.sh
 
+flow deps install --skip-alias --skip-deployments
+
 # Setup wallets (creates test accounts)
 ./local/setup_wallets.sh
 

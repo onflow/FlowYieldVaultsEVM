@@ -121,7 +121,7 @@ access(all)
 fun testYieldVaultsByEVMAddressMapping() {
     // Verify the yieldVaultsByEVMAddress mapping is accessible
     let testAddress = "0x6666666666666666666666666666666666666666"
-    let yieldVaultIds = FlowYieldVaultsEVM.getYieldVaultIDsForEVMAddress(testAddress)
+    let yieldVaultIds = FlowYieldVaultsEVM.getYieldVaultIdsForEVMAddress(testAddress)
     
     // Should return empty array for address with no yieldvaults
     Test.assertEqual(0, yieldVaultIds.length)

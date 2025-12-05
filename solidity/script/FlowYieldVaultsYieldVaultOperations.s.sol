@@ -88,7 +88,7 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
     /// @notice Deposits additional funds to an existing YieldVault
     /// @dev Anyone can deposit to any valid YieldVault (not restricted to owner)
     /// @param contractAddress The FlowYieldVaultsRequests contract address
-    /// @param yieldVaultId The YieldVault ID to deposit to
+    /// @param yieldVaultId The YieldVault Id to deposit to
     function depositToYieldVault(
         address contractAddress,
         uint64 yieldVaultId
@@ -111,12 +111,12 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
         vm.stopBroadcast();
 
         _logRequestCreated("DEPOSIT_TO_YIELDVAULT", requestId, user, amount);
-        console.log("YieldVault ID:", yieldVaultId);
+        console.log("YieldVault Id:", yieldVaultId);
     }
 
     /// @notice Requests a withdrawal from an existing YieldVault
     /// @param contractAddress The FlowYieldVaultsRequests contract address
-    /// @param yieldVaultId The YieldVault ID to withdraw from
+    /// @param yieldVaultId The YieldVault Id to withdraw from
     /// @param amount Amount to withdraw in wei
     function withdrawFromYieldVault(
         address contractAddress,
@@ -142,12 +142,12 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
         vm.stopBroadcast();
 
         _logRequestCreated("WITHDRAW_FROM_YIELDVAULT", requestId, user, amount);
-        console.log("YieldVault ID:", yieldVaultId);
+        console.log("YieldVault Id:", yieldVaultId);
     }
 
     /// @notice Requests closure of a YieldVault and withdrawal of all funds
     /// @param contractAddress The FlowYieldVaultsRequests contract address
-    /// @param yieldVaultId The YieldVault ID to close
+    /// @param yieldVaultId The YieldVault Id to close
     function closeYieldVault(
         address contractAddress,
         uint64 yieldVaultId
@@ -168,7 +168,7 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
         vm.stopBroadcast();
 
         _logRequestCreated("CLOSE_YIELDVAULT", requestId, user, 0);
-        console.log("YieldVault ID:", yieldVaultId);
+        console.log("YieldVault Id:", yieldVaultId);
     }
 
     /// @notice Cancels a pending request and refunds funds
@@ -214,7 +214,7 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
         console.log("Pending FLOW balance:", balance);
     }
 
-    /// @notice Gets all YieldVault IDs owned by a user
+    /// @notice Gets all YieldVault Ids owned by a user
     /// @param contractAddress The FlowYieldVaultsRequests contract address
     /// @param user The user address to check
     function getUserYieldVaults(
@@ -224,12 +224,12 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
         FlowYieldVaultsRequests requests = FlowYieldVaultsRequests(
             payable(contractAddress)
         );
-        uint64[] memory yieldVaults = requests.getYieldVaultIDsForUser(user);
+        uint64[] memory yieldVaults = requests.getYieldVaultIdsForUser(user);
 
         console.log("User:", user);
         console.log("YieldVault count:", yieldVaults.length);
         for (uint256 i = 0; i < yieldVaults.length; i++) {
-            console.log("  YieldVault ID:", yieldVaults[i]);
+            console.log("  YieldVault Id:", yieldVaults[i]);
         }
     }
 

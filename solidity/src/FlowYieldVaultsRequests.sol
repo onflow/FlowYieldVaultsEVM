@@ -61,7 +61,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param status Current status of the request
     /// @param tokenAddress Token being deposited/withdrawn (NATIVE_FLOW for native $FLOW)
     /// @param amount Amount of tokens involved
-    /// @param yieldVaultId Associated YieldVault ID (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed)
+    /// @param yieldVaultId Associated YieldVault Id (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed)
     /// @param timestamp Block timestamp when request was created
     /// @param message Status message or error reason
     /// @param vaultIdentifier Cadence vault type identifier for CREATE_YIELDVAULT
@@ -130,13 +130,13 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Count of pending requests per user
     mapping(address => uint256) public userPendingRequestCount;
 
-    /// @notice Registry of valid YieldVault IDs created through this contract
+    /// @notice Registry of valid YieldVault Ids created through this contract
     mapping(uint64 => bool) public validYieldVaultIds;
 
-    /// @notice Owner address for each YieldVault ID
+    /// @notice Owner address for each YieldVault Id
     mapping(uint64 => address) public yieldVaultOwners;
 
-    /// @notice Array of YieldVault IDs owned by each user
+    /// @notice Array of YieldVault Ids owned by each user
     mapping(address => uint64[]) public yieldVaultsByUser;
 
     /// @notice O(1) lookup for yieldvault ownership verification
@@ -213,7 +213,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice User has too many pending requests
     error TooManyPendingRequests();
 
-    /// @notice YieldVault ID is invalid or not owned by user
+    /// @notice YieldVault Id is invalid or not owned by user
     error InvalidYieldVaultId(uint64 yieldVaultId, address user);
 
     // ============================================
@@ -226,7 +226,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestType Type of operation requested
     /// @param tokenAddress Token involved in the request
     /// @param amount Amount of tokens
-    /// @param yieldVaultId Associated YieldVault ID (0 for new yieldvaults)
+    /// @param yieldVaultId Associated YieldVault Id (0 for new yieldvaults)
     event RequestCreated(
         uint256 indexed requestId,
         address indexed user,
@@ -239,7 +239,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Emitted when a request status changes
     /// @param requestId Request being updated
     /// @param status New status
-    /// @param yieldVaultId Associated YieldVault ID
+    /// @param yieldVaultId Associated YieldVault Id
     /// @param message Status message or error reason
     event RequestProcessed(
         uint256 indexed requestId,
@@ -325,7 +325,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     event MaxPendingRequestsPerUserUpdated(uint256 oldMax, uint256 newMax);
 
     /// @notice Emitted when a new YieldVault is registered
-    /// @param yieldVaultId Newly registered YieldVault ID
+    /// @param yieldVaultId Newly registered YieldVault Id
     event YieldVaultIdRegistered(uint64 indexed yieldVaultId);
 
     /// @notice Emitted when requests are dropped by admin
@@ -536,8 +536,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
                 if (
                     (request.requestType == RequestType.CREATE_YIELDVAULT ||
-                        request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
-                    request.amount > 0
+                        request.requestType ==
+                        RequestType.DEPOSIT_TO_YIELDVAULT) && request.amount > 0
                 ) {
                     pendingUserBalances[request.user][
                         request.tokenAddress
@@ -621,7 +621,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Deposits additional funds to an existing YieldVault
-    /// @param yieldVaultId YieldVault ID to deposit to
+    /// @param yieldVaultId YieldVault Id to deposit to
     /// @param tokenAddress Token to deposit
     /// @param amount Amount to deposit
     /// @return requestId The created request ID
@@ -638,7 +638,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         returns (uint256)
     {
         _validateDeposit(tokenAddress, amount);
-        if (!validYieldVaultIds[yieldVaultId]) revert InvalidYieldVaultId(yieldVaultId, msg.sender);
+        if (!validYieldVaultIds[yieldVaultId])
+            revert InvalidYieldVaultId(yieldVaultId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
 
         return
@@ -653,7 +654,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Requests a withdrawal from an existing YieldVault
-    /// @param yieldVaultId YieldVault ID to withdraw from
+    /// @param yieldVaultId YieldVault Id to withdraw from
     /// @param amount Amount to withdraw
     /// @return requestId The created request ID
     function withdrawFromYieldVault(
@@ -676,7 +677,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Requests closure of a YieldVault and withdrawal of all funds
-    /// @param yieldVaultId YieldVault ID to close
+    /// @param yieldVaultId YieldVault Id to close
     /// @return requestId The created request ID
     function closeYieldVault(
         uint64 yieldVaultId
@@ -797,7 +798,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @dev Called after Cadence-side operations complete. Refunds user balance on failure.
     /// @param requestId Request ID to complete
     /// @param success Whether the Cadence operation succeeded
-    /// @param yieldVaultId YieldVault ID associated with the request
+    /// @param yieldVaultId YieldVault Id associated with the request
     /// @param message Status message or error description
     function completeProcessing(
         uint256 requestId,
@@ -886,7 +887,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return statuses Request statuses
     /// @return tokenAddresses Token addresses
     /// @return amounts Amounts
-    /// @return yieldVaultIds YieldVault IDs
+    /// @return yieldVaultIds YieldVault Ids
     /// @return timestamps Timestamps
     /// @return messages Messages
     /// @return vaultIdentifiers Vault identifiers
@@ -972,10 +973,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         return requests[requestId];
     }
 
-    /// @notice Checks if a YieldVault ID is valid
-    /// @param yieldVaultId YieldVault ID to check
+    /// @notice Checks if a YieldVault Id is valid
+    /// @param yieldVaultId YieldVault Id to check
     /// @return True if valid
-    function isYieldVaultIdValid(uint64 yieldVaultId) external view returns (bool) {
+    function isYieldVaultIdValid(
+        uint64 yieldVaultId
+    ) external view returns (bool) {
         return validYieldVaultIds[yieldVaultId];
     }
 
@@ -988,10 +991,10 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         return userPendingRequestCount[user];
     }
 
-    /// @notice Gets all YieldVault IDs owned by a user
+    /// @notice Gets all YieldVault Ids owned by a user
     /// @param user User address
-    /// @return Array of YieldVault IDs
-    function getYieldVaultIDsForUser(
+    /// @return Array of YieldVault Ids
+    function getYieldVaultIdsForUser(
         address user
     ) external view returns (uint64[] memory) {
         return yieldVaultsByUser[user];
@@ -999,7 +1002,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice Checks if a user owns a specific YieldVault (O(1) lookup)
     /// @param user User address
-    /// @param yieldVaultId YieldVault ID
+    /// @param yieldVaultId YieldVault Id
     /// @return True if user owns the YieldVault
     function doesUserOwnYieldVault(
         address user,
@@ -1040,8 +1043,14 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /// @dev Validates that user owns the specified YieldVault
-    function _validateYieldVaultOwnership(uint64 yieldVaultId, address user) internal view {
-        if (!validYieldVaultIds[yieldVaultId] || yieldVaultOwners[yieldVaultId] != user) {
+    function _validateYieldVaultOwnership(
+        uint64 yieldVaultId,
+        address user
+    ) internal view {
+        if (
+            !validYieldVaultIds[yieldVaultId] ||
+            yieldVaultOwners[yieldVaultId] != user
+        ) {
             revert InvalidYieldVaultId(yieldVaultId, user);
         }
     }
@@ -1089,7 +1098,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint64[] storage userYieldVaults = yieldVaultsByUser[user];
         for (uint256 i = 0; i < userYieldVaults.length; ) {
             if (userYieldVaults[i] == yieldVaultId) {
-                userYieldVaults[i] = userYieldVaults[userYieldVaults.length - 1];
+                userYieldVaults[i] = userYieldVaults[
+                    userYieldVaults.length - 1
+                ];
                 userYieldVaults.pop();
                 break;
             }

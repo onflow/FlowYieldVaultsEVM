@@ -108,7 +108,7 @@ access(all) contract FlowYieldVaultsEVM {
     access(all) let noYieldVaultId: UInt64
 
     /// @notice Result of processing a single request
-    /// @dev yieldVaultId uses UInt64.max as sentinel for "no yieldvault" since valid IDs can be 0
+    /// @dev yieldVaultId uses UInt64.max as sentinel for "no yieldvault" since valid Ids can be 0
     access(all) struct ProcessResult {
         access(all) let success: Bool
         access(all) let yieldVaultId: UInt64
@@ -140,8 +140,8 @@ access(all) contract FlowYieldVaultsEVM {
     /// @notice Storage path for Admin resource
     access(all) let AdminStoragePath: StoragePath
 
-    /// @notice YieldVault IDs owned by each EVM address
-    /// @dev Maps EVM address string to array of owned YieldVault IDs for public queries
+    /// @notice YieldVault Ids owned by each EVM address
+    /// @dev Maps EVM address string to array of owned YieldVault Ids for public queries
     access(all) let yieldVaultsByEVMAddress: {String: [UInt64]}
 
     /// @notice O(1) lookup for yieldvault ownership verification
@@ -171,26 +171,26 @@ access(all) contract FlowYieldVaultsEVM {
 
     /// @notice Emitted when a new YieldVault is created for an EVM user
     /// @param evmAddress The EVM address of the user
-    /// @param yieldVaultId The newly created YieldVault ID
+    /// @param yieldVaultId The newly created YieldVault Id
     /// @param amount The initial deposit amount
     access(all) event YieldVaultCreatedForEVMUser(evmAddress: String, yieldVaultId: UInt64, amount: UFix64)
 
     /// @notice Emitted when funds are deposited to an existing YieldVault
     /// @param evmAddress The EVM address of the user
-    /// @param yieldVaultId The YieldVault ID receiving the deposit
+    /// @param yieldVaultId The YieldVault Id receiving the deposit
     /// @param amount The deposited amount
     /// @param isYieldVaultOwner Whether the depositor is the yieldvault owner
     access(all) event YieldVaultDepositedForEVMUser(evmAddress: String, yieldVaultId: UInt64, amount: UFix64, isYieldVaultOwner: Bool)
 
     /// @notice Emitted when funds are withdrawn from a YieldVault
     /// @param evmAddress The EVM address of the user
-    /// @param yieldVaultId The YieldVault ID being withdrawn from
+    /// @param yieldVaultId The YieldVault Id being withdrawn from
     /// @param amount The withdrawn amount
     access(all) event YieldVaultWithdrawnForEVMUser(evmAddress: String, yieldVaultId: UInt64, amount: UFix64)
 
     /// @notice Emitted when a YieldVault is closed
     /// @param evmAddress The EVM address of the user
-    /// @param yieldVaultId The closed YieldVault ID
+    /// @param yieldVaultId The closed YieldVault Id
     /// @param amountReturned The total amount returned to the user
     access(all) event YieldVaultClosedForEVMUser(evmAddress: String, yieldVaultId: UInt64, amountReturned: UFix64)
 
@@ -533,7 +533,7 @@ access(all) contract FlowYieldVaultsEVM {
             return ProcessResult(
                 success: true,
                 yieldVaultId: yieldVaultId,
-                message: "YieldVault ID \(yieldVaultId) created successfully with amount \(amount) FLOW"
+                message: "YieldVault Id \(yieldVaultId) created successfully with amount \(amount) FLOW"
             )
         }
 
@@ -545,7 +545,7 @@ access(all) contract FlowYieldVaultsEVM {
                     return ProcessResult(
                         success: false,
                         yieldVaultId: request.yieldVaultId,
-                        message: "User \(evmAddr) does not own YieldVault ID \(request.yieldVaultId)"
+                        message: "User \(evmAddr) does not own YieldVault Id \(request.yieldVaultId)"
                     )
                 }
             } else {
@@ -571,7 +571,7 @@ access(all) contract FlowYieldVaultsEVM {
             return ProcessResult(
                 success: true,
                 yieldVaultId: request.yieldVaultId,
-                message: "YieldVault ID \(request.yieldVaultId) closed successfully, returned \(amount) FLOW"
+                message: "YieldVault Id \(request.yieldVaultId) closed successfully, returned \(amount) FLOW"
             )
         }
 
@@ -616,7 +616,7 @@ access(all) contract FlowYieldVaultsEVM {
             return ProcessResult(
                 success: true,
                 yieldVaultId: request.yieldVaultId,
-                message: "Deposited \(amount) FLOW to YieldVault ID \(request.yieldVaultId)"
+                message: "Deposited \(amount) FLOW to YieldVault Id \(request.yieldVaultId)"
             )
         }
 
@@ -628,7 +628,7 @@ access(all) contract FlowYieldVaultsEVM {
                     return ProcessResult(
                         success: false,
                         yieldVaultId: request.yieldVaultId,
-                        message: "User \(evmAddr) does not own YieldVault ID \(request.yieldVaultId)"
+                        message: "User \(evmAddr) does not own YieldVault Id \(request.yieldVaultId)"
                     )
                 }
             } else {
@@ -651,7 +651,7 @@ access(all) contract FlowYieldVaultsEVM {
             return ProcessResult(
                 success: true,
                 yieldVaultId: request.yieldVaultId,
-                message: "Withdrew \(actualAmount) FLOW from YieldVault ID \(request.yieldVaultId)"
+                message: "Withdrew \(actualAmount) FLOW from YieldVault Id \(request.yieldVaultId)"
             )
         }
 
@@ -688,7 +688,7 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Marks a request as COMPLETED or FAILED with refund on failure
         /// @param requestId The request ID to complete
         /// @param success Whether the operation succeeded
-        /// @param yieldVaultId The associated YieldVault ID
+        /// @param yieldVaultId The associated YieldVault Id
         /// @param message Status message or error reason
         /// @return True if the EVM call succeeded, false otherwise
         access(self) fun completeProcessing(requestId: UInt256, success: Bool, yieldVaultId: UInt64, message: String): Bool {
@@ -923,16 +923,16 @@ access(all) contract FlowYieldVaultsEVM {
     // Public Functions
     // ============================================
 
-    /// @notice Gets all YieldVault IDs owned by an EVM address
+    /// @notice Gets all YieldVault Ids owned by an EVM address
     /// @param evmAddress The EVM address string to query
-    /// @return Array of YieldVault IDs owned by the address
-    access(all) view fun getYieldVaultIDsForEVMAddress(_ evmAddress: String): [UInt64] {
+    /// @return Array of YieldVault Ids owned by the address
+    access(all) view fun getYieldVaultIdsForEVMAddress(_ evmAddress: String): [UInt64] {
         return self.yieldVaultsByEVMAddress[evmAddress] ?? []
     }
 
-    /// @notice Checks if an EVM address owns a specific YieldVault ID (O(1) lookup)
+    /// @notice Checks if an EVM address owns a specific YieldVault Id (O(1) lookup)
     /// @param evmAddress The EVM address string to check
-    /// @param yieldVaultId The YieldVault ID to verify ownership of
+    /// @param yieldVaultId The YieldVault Id to verify ownership of
     /// @return True if the address owns the YieldVault, false otherwise
     access(all) view fun doesEVMAddressOwnYieldVault(evmAddress: String, yieldVaultId: UInt64): Bool {
         if let ownershipMap = self.yieldVaultOwnershipLookup[evmAddress] {

@@ -34,25 +34,6 @@
 		}
 	},
 	"dependencies": {
-		"BandOracle": {
-			"source": "mainnet://6801a6222ebf784a.BandOracle",
-			"hash": "ababa195ef50b63d71520022aa2468656a9703b924c0f5228cfaa51a71db094d",
-			"aliases": {
-				"emulator": "045a1763c93006ca",
-				"mainnet": "6801a6222ebf784a",
-				"testing": "0000000000000007"
-			}
-		},
-		"BandOracleConnectors": {
-			"source": "mainnet://f627b5c89141ed99.BandOracleConnectors",
-			"hash": "0bb4d8014bb2b195a25004cf9221e29857f12828bff6e7efc02b781debdee07a",
-			"aliases": {
-				"emulator": "045a1763c93006ca",
-				"mainnet": "f627b5c89141ed99",
-				"testing": "0000000000000007",
-				"testnet": "bb76ea2f8aad74a0"
-			}
-		},
 		"Burner": {
 			"source": "mainnet://f233dcee88fe0abe.Burner",
 			"hash": "71af18e227984cd434a3ad00bb2f3618b76482842bae920ee55662c37c8bf331",
@@ -493,6 +474,13 @@
 				"location": "lib/FlowYieldVaults/local/emulator-account.pkey"
 			}
 		},
+		"emulator-flow-yield-vaults": {
+			"address": "045a1763c93006ca",
+			"key": {
+				"type": "file",
+				"location": "lib/FlowYieldVaults/local/emulator-flow-yield-vaults.pkey"
+			}
+		},
 		"testnet-account": {
 			"address": "4135b56ffc55ecef",
 			"key": {
@@ -501,18 +489,11 @@
 				"hashAlgorithm": "SHA2_256",
 				"privateKey": "be20e132ffff6ba7963bbf6295d3a499c9fe1ca886d5643033a3fc2c1852bbfd"
 			}
-		},
-		"tidal": {
-			"address": "045a1763c93006ca",
-			"key": {
-				"type": "file",
-				"location": "lib/FlowYieldVaults/local/emulator-tidal.pkey"
-			}
 		}
 	},
 	"deployments": {
 		"emulator": {
-			"tidal": [
+			"emulator-flow-yield-vaults": [
 				"FlowYieldVaultsTransactionHandler",
 				"FlowYieldVaultsEVM"
 			]

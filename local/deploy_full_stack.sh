@@ -169,11 +169,16 @@ echo "=== Initializing project ==="
 echo "Deploying Cadence contracts..."
 flow project deploy || echo "⚠ Some contracts may already be deployed, continuing..."
 
+# Grant FlowYieldVaults beta badge to emulator-flow-yield-vaults account
+echo "Granting FlowYieldVaults beta badge to emulator-flow-yield-vaults..."
+flow transactions send ./lib/FlowYieldVaults/cadence/transactions/test/self_grant_beta.cdc \
+  --signer emulator-flow-yield-vaults --compute-limit 9999
+
 # Setup worker with beta badge
 echo "Setting up worker with badge for contract $FLOW_VAULTS_REQUESTS_CONTRACT..."
 flow transactions send ./cadence/transactions/setup_worker_with_badge.cdc \
   "$FLOW_VAULTS_REQUESTS_CONTRACT" \
-  --signer tidal --compute-limit 9999
+  --signer emulator-flow-yield-vaults --compute-limit 9999
 
 echo "✓ Project initialization complete"
 

@@ -74,7 +74,7 @@ jobs:
       
       - name: Process Create Request
         run: |
-          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
+          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer emulator-flow-yield-vaults --compute-limit 9999
       
       - name: Verify YieldVault Creation
         run: |
@@ -117,7 +117,7 @@ jobs:
           echo "TEST 2: FULL YIELDVAULT LIFECYCLE"
           echo "========================================="
           echo "Step 1: Depositing additional 20 FLOW..."
-          # Note: Using yieldvault ID 0 based on the event logs from your output
+          # Note: Using yieldvault Id 0 based on the event logs from your output
           forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYieldVaultsYieldVaultOperations \
             --root ./solidity \
             --sig "depositToYieldVault(address,uint64)" ${{ env.CONTRACT_ADDRESS }} 0 \
@@ -129,7 +129,7 @@ jobs:
       
       - name: Process Deposit Request
         run: |
-          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
+          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer emulator-flow-yield-vaults --compute-limit 9999
       
       - name: Verify Deposit
         run: |
@@ -158,7 +158,7 @@ jobs:
       
       - name: Process Withdraw Request
         run: |
-          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
+          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer emulator-flow-yield-vaults --compute-limit 9999
       
       - name: Verify Withdrawal
         run: |
@@ -187,7 +187,7 @@ jobs:
       
       - name: Process Close Request
         run: |
-          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
+          flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer emulator-flow-yield-vaults --compute-limit 9999
       
       - name: Verify YieldVault Closed
         run: |

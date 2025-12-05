@@ -275,7 +275,7 @@ fun setupCOA(_ signer: Test.TestAccount): Test.TransactionResult {
 /* --- FlowYieldVaultsEVM specific script helpers --- */
 
 access(all)
-fun getYieldVaultIDsForEVMAddress(_ evmAddress: String): [UInt64]? {
+fun getYieldVaultIdsForEVMAddress(_ evmAddress: String): [UInt64]? {
     let res = _executeScript("../scripts/check_user_yieldvaults.cdc", [evmAddress])
     if res.status == Test.ResultStatus.succeeded {
         return res.returnValue as! [UInt64]?

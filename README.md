@@ -11,31 +11,31 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              Flow EVM                                       │
-│  ┌──────────────┐         ┌─────────────────────────┐                       │
-│  │   EVM User   │────────▶│   FlowYieldVaultsRequests    │                       │
-│  │              │         │   (Request Queue +      │                       │
-│  │              │◀────────│    Fund Escrow)         │                       │
-│  └──────────────┘         └───────────┬─────────────┘                       │
-│                                       │                                     │
-└───────────────────────────────────────┼─────────────────────────────────────┘
-                                        │ COA Bridge
-┌───────────────────────────────────────┼──────────────────────────────────────┐
-│                              Flow Cadence                                    │
-│                                       ▼                                      │
-│  ┌────────────────────────────────────────────────────────────┐              │
-│  │                      FlowYieldVaultsEVM                         │              │
-│  │  ┌────────────┐    ┌─────────────┐    ┌─────────────────┐  │              │
-│  │  │   Worker   │───▶│ YieldVaultManager │───▶│   Flow YieldVaults   │  │              │
-│  │  │  (+ COA)   │    │             │    │   (YieldVaults)       │  │              │
-│  │  └────────────┘    └─────────────┘    └─────────────────┘  │              │
-│  └────────────────────────────────────────────────────────────┘              │
-│                              ▲                                               │
-│  ┌───────────────────────────┴────────────────────────────────┐              │
-│  │            FlowYieldVaultsTransactionHandler                    │              │
-│  │  (Auto-scheduling with FlowTransactionScheduler)           │              │
-│  └────────────────────────────────────────────────────────────┘              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
+│  ┌──────────────┐         ┌───────────────────────────┐                     │
+│  │   EVM User   │────────▶│  FlowYieldVaultsRequests  │                     │
+│  │              │         │   (Request Queue +        │                     │
+│  │              │◀────────│    Fund Escrow)           │                     │
+│  └──────────────┘         └─────────────┬─────────────┘                     │
+│                                         │                                   │
+└─────────────────────────────────────────┼───────────────────────────────────┘
+                                          │ COA Bridge
+┌─────────────────────────────────────────┼───────────────────────────────────┐
+│                              Flow Cadence                                   │
+│                                         ▼                                   │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                       FlowYieldVaultsEVM                              │  │
+│  │  ┌────────────┐    ┌──────────────────┐    ┌─────────────────────┐    │  │
+│  │  │   Worker   │───▶│ YieldVaultManager│───▶│  Flow YieldVaults   │    │  │
+│  │  │  (+ COA)   │    │                  │    │    (YieldVaults)    │    │  │
+│  │  └────────────┘    └──────────────────┘    └─────────────────────┘    │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                              ▲                                              │
+│  ┌───────────────────────────┴─────────────────────────────────────────┐    │
+│  │              FlowYieldVaultsTransactionHandler                      │    │
+│  │       (Auto-scheduling with FlowTransactionScheduler)               │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Components
@@ -89,7 +89,7 @@ forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYie
   --rpc-url http://localhost:8545 --broadcast --legacy
 
 # 3. Process requests (triggers Worker)
-flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer tidal --compute-limit 9999
+flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer emulator-flow-yield-vaults --compute-limit 9999
 ```
 
 ### EVM Operations
