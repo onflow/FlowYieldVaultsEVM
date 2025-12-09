@@ -1,0 +1,34 @@
+{
+  "contracts": {
+    "FlowYieldVaultsRequests": {
+      "abi": "./artifacts/FlowYieldVaultsRequests.json",
+      "addresses": {
+        "testnet": "0xa60716444dbce15606eba3cc7ce56c8c1d34170f",
+        "mainnet": "0x0000000000000000000000000000000000000000"
+      }
+    },
+    "FlowYieldVaultsEVM": {
+      "network": "flow",
+      "addresses": {
+        "testnet": "0x4135b56ffc55ecef",
+        "mainnet": "0x0000000000000000"
+      }
+    }
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "lastUpdated": "2025-12-09T22:18:39Z",
+    "networks": {
+      "testnet": {
+        "chainId": "545",
+        "name": "Flow EVM Testnet",
+        "rpcUrl": "https://testnet.evm.nodes.onflow.org"
+      },
+      "mainnet": {
+        "chainId": "747",
+        "name": "Flow EVM Mainnet",
+        "rpcUrl": "https://mainnet.evm.nodes.onflow.org"
+      }
+    }
+  }
+}

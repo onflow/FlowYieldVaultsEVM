@@ -251,6 +251,7 @@ Coverage includes:
 
 ## Documentation
 
+- [Frontend Integration](./FRONTEND_INTEGRATION.md) - Guide for frontend developers
 - [Architecture Design](./FLOW_VAULTS_EVM_BRIDGE_DESIGN.md) - Detailed bridge design and data flows
 - [Testing](./TESTING.md) - Test suite documentation
 

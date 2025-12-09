@@ -5,7 +5,7 @@
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
-				"testnet": "3bda2f90274dbc9b"
+				"testnet": "0xd2580caf2ef07c2f"
 			}
 		},
 		"FlowYieldVaultsClosedBeta": {
@@ -13,7 +13,7 @@
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
-				"testnet": "3bda2f90274dbc9b"
+				"testnet": "0xd2580caf2ef07c2f"
 			}
 		},
 		"FlowYieldVaultsEVM": {
