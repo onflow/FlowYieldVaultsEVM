@@ -213,6 +213,47 @@ access(all) contract FlowYieldVaultsEVM {
     /// @param reason The failure reason
     access(all) event WithdrawFundsFromEVMFailed(requestId: UInt256, amount: UFix64, tokenAddress: String, reason: String)
 
+    /// @notice Emitted when allowlist status changes on EVM
+    /// @param enabled The new allowlist status
+    access(all) event EVMAllowlistStatusChanged(enabled: Bool)
+
+    /// @notice Emitted when addresses are added/removed from allowlist on EVM
+    /// @param addresses The addresses that were updated
+    /// @param added True if addresses were added, false if removed
+    access(all) event EVMAllowlistUpdated(addresses: [String], added: Bool)
+
+    /// @notice Emitted when blocklist status changes on EVM
+    /// @param enabled The new blocklist status
+    access(all) event EVMBlocklistStatusChanged(enabled: Bool)
+
+    /// @notice Emitted when addresses are added/removed from blocklist on EVM
+    /// @param addresses The addresses that were updated
+    /// @param added True if addresses were added, false if removed
+    access(all) event EVMBlocklistUpdated(addresses: [String], added: Bool)
+
+    /// @notice Emitted when token configuration changes on EVM
+    /// @param tokenAddress The token address configured
+    /// @param isSupported Whether the token is supported
+    /// @param minimumBalance The minimum balance required
+    /// @param isNative Whether the token is native FLOW
+    access(all) event EVMTokenConfigured(tokenAddress: String, isSupported: Bool, minimumBalance: UInt256, isNative: Bool)
+
+    /// @notice Emitted when authorized COA changes on EVM
+    /// @param newCOA The new authorized COA address
+    access(all) event EVMAuthorizedCOAUpdated(newCOA: String)
+
+    /// @notice Emitted when max pending requests per user changes on EVM
+    /// @param maxRequests The new maximum pending requests per user
+    access(all) event EVMMaxPendingRequestsPerUserUpdated(maxRequests: UInt256)
+
+    /// @notice Emitted when requests are dropped on EVM
+    /// @param requestIds The request IDs that were dropped
+    access(all) event EVMRequestsDropped(requestIds: [UInt256])
+
+    /// @notice Emitted when a request is cancelled on EVM
+    /// @param requestId The request ID that was cancelled
+    access(all) event EVMRequestCancelled(requestId: UInt256)
+
     // ============================================
     // Resources
     // ============================================
@@ -916,6 +957,287 @@ access(all) contract FlowYieldVaultsEVM {
             }
 
             return requests
+        }
+
+        // ============================================
+        // EVM Admin Functions
+        // ============================================
+
+        /// @dev Converts an array of EVM addresses to an array of strings for event emission
+        access(self) fun evmAddressesToStrings(_ addresses: [EVM.EVMAddress]): [String] {
+            var result: [String] = []
+            for addr in addresses {
+                result.append(addr.toString())
+            }
+            return result
+        }
+
+        /// @notice Enables or disables the allowlist on the EVM contract
+        /// @param enabled True to enable, false to disable
+        access(all) fun setAllowlistEnabled(_ enabled: Bool) {
+            let calldata = EVM.encodeABIWithSignature(
+                "setAllowlistEnabled(bool)",
+                [enabled]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 100_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("setAllowlistEnabled failed: ".concat(errorMsg))
+            }
+
+            emit EVMAllowlistStatusChanged(enabled: enabled)
+        }
+
+        /// @notice Adds multiple addresses to the allowlist on the EVM contract
+        /// @param addresses The addresses to add to the allowlist
+        access(all) fun batchAddToAllowlist(_ addresses: [EVM.EVMAddress]) {
+            let calldata = EVM.encodeABIWithSignature(
+                "batchAddToAllowlist(address[])",
+                [addresses]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 300_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("batchAddToAllowlist failed: ".concat(errorMsg))
+            }
+
+            emit EVMAllowlistUpdated(addresses: self.evmAddressesToStrings(addresses), added: true)
+        }
+
+        /// @notice Removes multiple addresses from the allowlist on the EVM contract
+        /// @param addresses The addresses to remove from the allowlist
+        access(all) fun batchRemoveFromAllowlist(_ addresses: [EVM.EVMAddress]) {
+            let calldata = EVM.encodeABIWithSignature(
+                "batchRemoveFromAllowlist(address[])",
+                [addresses]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 300_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("batchRemoveFromAllowlist failed: ".concat(errorMsg))
+            }
+
+            emit EVMAllowlistUpdated(addresses: self.evmAddressesToStrings(addresses), added: false)
+        }
+
+        /// @notice Enables or disables the blocklist on the EVM contract
+        /// @param enabled True to enable, false to disable
+        access(all) fun setBlocklistEnabled(_ enabled: Bool) {
+            let calldata = EVM.encodeABIWithSignature(
+                "setBlocklistEnabled(bool)",
+                [enabled]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 100_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("setBlocklistEnabled failed: ".concat(errorMsg))
+            }
+
+            emit EVMBlocklistStatusChanged(enabled: enabled)
+        }
+
+        /// @notice Adds multiple addresses to the blocklist on the EVM contract
+        /// @param addresses The addresses to add to the blocklist
+        access(all) fun batchAddToBlocklist(_ addresses: [EVM.EVMAddress]) {
+            let calldata = EVM.encodeABIWithSignature(
+                "batchAddToBlocklist(address[])",
+                [addresses]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 300_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("batchAddToBlocklist failed: ".concat(errorMsg))
+            }
+
+            emit EVMBlocklistUpdated(addresses: self.evmAddressesToStrings(addresses), added: true)
+        }
+
+        /// @notice Removes multiple addresses from the blocklist on the EVM contract
+        /// @param addresses The addresses to remove from the blocklist
+        access(all) fun batchRemoveFromBlocklist(_ addresses: [EVM.EVMAddress]) {
+            let calldata = EVM.encodeABIWithSignature(
+                "batchRemoveFromBlocklist(address[])",
+                [addresses]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 300_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("batchRemoveFromBlocklist failed: ".concat(errorMsg))
+            }
+
+            emit EVMBlocklistUpdated(addresses: self.evmAddressesToStrings(addresses), added: false)
+        }
+
+        /// @notice Configures a token on the EVM contract
+        /// @param tokenAddress The token address to configure
+        /// @param isSupported Whether the token is supported
+        /// @param minimumBalance The minimum balance required for deposits
+        /// @param isNative Whether the token is native FLOW
+        access(all) fun setTokenConfig(
+            tokenAddress: EVM.EVMAddress,
+            isSupported: Bool,
+            minimumBalance: UInt256,
+            isNative: Bool
+        ) {
+            let calldata = EVM.encodeABIWithSignature(
+                "setTokenConfig(address,bool,uint256,bool)",
+                [tokenAddress, isSupported, minimumBalance, isNative]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 150_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("setTokenConfig failed: ".concat(errorMsg))
+            }
+
+            emit EVMTokenConfigured(
+                tokenAddress: tokenAddress.toString(),
+                isSupported: isSupported,
+                minimumBalance: minimumBalance,
+                isNative: isNative
+            )
+        }
+
+        /// @notice Sets the authorized COA address on the EVM contract
+        /// @param coa The new authorized COA address
+        access(all) fun setAuthorizedCOA(_ coa: EVM.EVMAddress) {
+            let calldata = EVM.encodeABIWithSignature(
+                "setAuthorizedCOA(address)",
+                [coa]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 100_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("setAuthorizedCOA failed: ".concat(errorMsg))
+            }
+
+            emit EVMAuthorizedCOAUpdated(newCOA: coa.toString())
+        }
+
+        /// @notice Sets the maximum pending requests per user on the EVM contract
+        /// @param maxRequests The new maximum pending requests per user (0 = unlimited)
+        access(all) fun setMaxPendingRequestsPerUser(_ maxRequests: UInt256) {
+            let calldata = EVM.encodeABIWithSignature(
+                "setMaxPendingRequestsPerUser(uint256)",
+                [maxRequests]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 100_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("setMaxPendingRequestsPerUser failed: ".concat(errorMsg))
+            }
+
+            emit EVMMaxPendingRequestsPerUserUpdated(maxRequests: maxRequests)
+        }
+
+        /// @notice Drops pending requests on the EVM contract and refunds users
+        /// @param requestIds The request IDs to drop
+        access(all) fun dropRequests(_ requestIds: [UInt256]) {
+            let gasLimit: UInt64 = 500_000 + UInt64(requestIds.length) * 100_000
+
+            let calldata = EVM.encodeABIWithSignature(
+                "dropRequests(uint256[])",
+                [requestIds]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: gasLimit,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("dropRequests failed: ".concat(errorMsg))
+            }
+
+            emit EVMRequestsDropped(requestIds: requestIds)
+        }
+
+        /// @notice Cancels a pending request on the EVM contract
+        /// @param requestId The request ID to cancel
+        access(all) fun cancelRequest(_ requestId: UInt256) {
+            let calldata = EVM.encodeABIWithSignature(
+                "cancelRequest(uint256)",
+                [requestId]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 300_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("cancelRequest failed: ".concat(errorMsg))
+            }
+
+            emit EVMRequestCancelled(requestId: requestId)
         }
     }
 
