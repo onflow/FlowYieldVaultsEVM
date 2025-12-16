@@ -226,7 +226,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestType Type of operation requested
     /// @param tokenAddress Token involved in the request
     /// @param amount Amount of tokens
-    /// @param yieldVaultId Associated YieldVault Id (0 for new yieldvaults)
+    /// @param yieldVaultId Associated YieldVault Id (0 for CREATE_YIELDVAULT until assigned by Cadence)
     event RequestCreated(
         uint256 indexed requestId,
         address indexed user,

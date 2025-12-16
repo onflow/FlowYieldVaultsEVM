@@ -13,15 +13,14 @@ import "FungibleToken"
 ///
 ///      Key features:
 ///      - Dynamic delay adjustment based on pending request count
-///      - Parallel transaction scheduling for high throughput
+///      - Cost-optimized idle polling (low effort when no pending requests)
 ///      - Pausable execution for maintenance
 ///
 ///      Delay thresholds:
-///      - >= 50 pending: 5s delay (high load)
-///      - >= 20 pending: 15s delay (medium-high load)
-///      - >= 10 pending: 30s delay (medium load)
-///      - >= 5 pending: 45s delay (low load)
-///      - >= 0 pending: 60s delay (idle)
+///      - > 10 pending: 3s delay (high load)
+///      - >= 5 pending: 5s delay (medium load)
+///      - >= 1 pending: 7s delay (low load)
+///      - 0 pending: 30s delay (idle)
 access(all) contract FlowYieldVaultsTransactionHandler {
 
     // ============================================
@@ -39,17 +38,24 @@ access(all) contract FlowYieldVaultsTransactionHandler {
 
     /// @notice Mapping of pending request thresholds to execution delays (in seconds)
     /// @dev Higher pending counts result in shorter delays for faster processing
-    access(all) var thresholdToDelay: {Int: UFix64}
+    access(contract) var thresholdToDelay: {Int: UFix64}
 
     /// @notice Default delay when no threshold matches
     access(all) let defaultDelay: UFix64
 
     /// @notice When true, scheduled executions skip processing and don't schedule next execution
-    access(all) var isPaused: Bool
+    access(contract) var isPaused: Bool
 
-    /// @notice Maximum parallel transactions to schedule at once
-    /// @dev Each transaction processes up to FlowYieldVaultsEVM.maxRequestsPerTx requests
-    access(all) var maxParallelTransactions: Int
+    /// @notice Base execution effort per request processed
+    /// @dev Total executionEffort = baseEffortPerRequest * maxRequestsPerTx + baseOverhead
+    access(contract) var baseEffortPerRequest: UInt64
+
+    /// @notice Base overhead for transaction execution (independent of request count)
+    access(contract) var baseOverhead: UInt64
+
+    /// @notice Minimal execution effort used when idle (no pending requests)
+    /// @dev Keeps costs low for polling transactions that won't process anything
+    access(contract) var idleExecutionEffort: UInt64
 
     // ============================================
     // Events
@@ -61,14 +67,15 @@ access(all) contract FlowYieldVaultsTransactionHandler {
     /// @notice Emitted when the handler is unpaused
     access(all) event HandlerUnpaused()
 
-    /// @notice Emitted when maxParallelTransactions is updated
-    /// @param oldValue The previous value
-    /// @param newValue The new value
-    access(all) event MaxParallelTransactionsUpdated(oldValue: Int, newValue: Int)
-
     /// @notice Emitted when thresholdToDelay mapping is updated
     /// @param newThresholds The new threshold to delay mapping
     access(all) event ThresholdToDelayUpdated(newThresholds: {Int: UFix64})
+
+    /// @notice Emitted when execution effort parameters are updated
+    /// @param baseEffortPerRequest New base effort per request
+    /// @param baseOverhead New base overhead
+    /// @param idleExecutionEffort New idle execution effort
+    access(all) event ExecutionEffortParamsUpdated(baseEffortPerRequest: UInt64, baseOverhead: UInt64, idleExecutionEffort: UInt64)
 
     /// @notice Emitted when a scheduled execution is triggered
     /// @param transactionId The transaction ID that was executed
@@ -90,22 +97,6 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         scheduledFor: UFix64,
         delaySeconds: UFix64,
         pendingRequests: Int
-    )
-
-    /// @notice Emitted when parallel executions are scheduled
-    /// @param coordinatorId The coordinator transaction ID
-    /// @param workerIds Array of worker transaction IDs
-    /// @param scheduledFor Timestamp when executions are scheduled
-    /// @param delaySeconds Delay from current time
-    /// @param pendingRequests Current pending request count
-    /// @param workerCount Number of worker transactions scheduled
-    access(all) event ParallelExecutionsScheduled(
-        coordinatorId: UInt64,
-        workerIds: [UInt64],
-        scheduledFor: UFix64,
-        delaySeconds: UFix64,
-        pendingRequests: Int,
-        workerCount: Int
     )
 
     /// @notice Emitted when execution is skipped
@@ -144,17 +135,6 @@ access(all) contract FlowYieldVaultsTransactionHandler {
             emit HandlerUnpaused()
         }
 
-        /// @notice Sets the maximum number of parallel transactions
-        /// @param count The new maximum (must be > 0)
-        access(all) fun setMaxParallelTransactions(count: Int) {
-            pre {
-                count > 0: "Max parallel transactions must be greater than 0"
-            }
-            let oldValue = FlowYieldVaultsTransactionHandler.maxParallelTransactions
-            FlowYieldVaultsTransactionHandler.maxParallelTransactions = count
-            emit MaxParallelTransactionsUpdated(oldValue: oldValue, newValue: count)
-        }
-
         /// @notice Updates the threshold to delay mapping
         /// @param newThresholds The new mapping of pending request thresholds to delays
         access(all) fun setThresholdToDelay(newThresholds: {Int: UFix64}) {
@@ -163,6 +143,22 @@ access(all) contract FlowYieldVaultsTransactionHandler {
             }
             FlowYieldVaultsTransactionHandler.thresholdToDelay = newThresholds
             emit ThresholdToDelayUpdated(newThresholds: newThresholds)
+        }
+
+        /// @notice Updates execution effort calculation parameters
+        /// @dev executionEffort = baseEffortPerRequest * maxRequestsPerTx + baseOverhead
+        /// @param baseEffortPerRequest Effort units per request (e.g., 800 for EVM calls)
+        /// @param baseOverhead Fixed overhead regardless of request count (e.g., 1500)
+        /// @param idleExecutionEffort Minimal effort when no pending requests (e.g., 3000 to handle burst arrivals)
+        access(all) fun setExecutionEffortParams(baseEffortPerRequest: UInt64, baseOverhead: UInt64, idleExecutionEffort: UInt64) {
+            pre {
+                baseEffortPerRequest > 0: "baseEffortPerRequest must be greater than 0"
+                idleExecutionEffort > 0: "idleExecutionEffort must be greater than 0"
+            }
+            FlowYieldVaultsTransactionHandler.baseEffortPerRequest = baseEffortPerRequest
+            FlowYieldVaultsTransactionHandler.baseOverhead = baseOverhead
+            FlowYieldVaultsTransactionHandler.idleExecutionEffort = idleExecutionEffort
+            emit ExecutionEffortParamsUpdated(baseEffortPerRequest: baseEffortPerRequest, baseOverhead: baseOverhead, idleExecutionEffort: idleExecutionEffort)
         }
 
         /// @notice Stops all scheduled executions by pausing and cancelling all pending transactions
@@ -232,8 +228,9 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         /// @notice Executes the scheduled transaction
         /// @dev Called by FlowTransactionScheduler when the scheduled time arrives.
         ///      Processes requests and schedules the next execution.
+        ///      Priority and execution effort are calculated dynamically based on maxRequestsPerTx.
         /// @param id The transaction ID being executed
-        /// @param data Array [UInt8 priority, UInt64 executionEffort] - priority (0=High, 1=Medium, 2=Low)
+        /// @param data Unused - priority and effort calculated dynamically from contract state
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
             if FlowYieldVaultsTransactionHandler.isPaused {
                 emit ExecutionSkipped(transactionId: id, reason: "Handler is paused")
@@ -246,28 +243,18 @@ access(all) contract FlowYieldVaultsTransactionHandler {
                 return
             }
 
-            // Parse data: [priority: UInt8, executionEffort: UInt64]
-            var priorityRaw: UInt8 = 1
-            var executionEffort: UInt64 = 7499
-
-            if let dataArray = data as? [AnyStruct] {
-                if dataArray.length >= 1 {
-                    priorityRaw = (dataArray[0] as? UInt8) ?? priorityRaw
-                }
-                if dataArray.length >= 2 {
-                    executionEffort = (dataArray[1] as? UInt64) ?? executionEffort
-                }
-            }
-
+            // Process requests
+            let maxRequestsPerTx = FlowYieldVaultsEVM.getMaxRequestsPerTx()
+            worker!.processRequests(startIndex: 0, count: maxRequestsPerTx)
+            
+            // Calculate dynamic execution effort and determine priority based on effort
+            let effortAndPriority = FlowYieldVaultsTransactionHandler.calculateExecutionEffortAndPriority(maxRequestsPerTx)
+            let executionEffort = effortAndPriority["effort"]! as! UInt64
+            let priorityRaw = effortAndPriority["priority"]! as! UInt8
+            
             let priority = priorityRaw == 0
                 ? FlowTransactionScheduler.Priority.High
-                : priorityRaw == 1
-                    ? FlowTransactionScheduler.Priority.Medium
-                    : FlowTransactionScheduler.Priority.Low
-
-            // Process requests
-            let maxRequestsPerTx = FlowYieldVaultsEVM.maxRequestsPerTx
-            worker!.processRequests(startIndex: 0, count: maxRequestsPerTx)
+                : FlowTransactionScheduler.Priority.Medium
 
             self.executionCount = self.executionCount + 1
             self.lastExecutionTime = getCurrentBlock().timestamp
@@ -282,7 +269,20 @@ access(all) contract FlowYieldVaultsTransactionHandler {
                 nextExecutionDelaySeconds: nextDelay
             )
 
-            self.scheduleNextExecution(nextDelay: nextDelay, priority: priority, executionEffort: executionEffort)
+            // Use Low priority when idle (no pending requests) to minimize FLOW costs
+            // Use computed effort but cap at idleExecutionEffort (max for Low priority = 2500)
+            if pendingRequests == 0 {
+                let cappedEffort = executionEffort < FlowYieldVaultsTransactionHandler.idleExecutionEffort 
+                    ? executionEffort 
+                    : FlowYieldVaultsTransactionHandler.idleExecutionEffort
+                self.scheduleNextExecution(
+                    nextDelay: nextDelay,
+                    priority: FlowTransactionScheduler.Priority.Low,
+                    executionEffort: cappedEffort
+                )
+            } else {
+                self.scheduleNextExecution(nextDelay: nextDelay, priority: priority, executionEffort: executionEffort)
+            }
         }
 
         access(self) fun scheduleNextExecution(nextDelay: UFix64, priority: FlowTransactionScheduler.Priority, executionEffort: UInt64) {
@@ -302,13 +302,8 @@ access(all) contract FlowYieldVaultsTransactionHandler {
                 .borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
                 ?? panic("missing FlowToken vault on contract account")
 
-            // Pass [priority, executionEffort] in data so they persist across executions
-            let priorityRaw: UInt8 = priority == FlowTransactionScheduler.Priority.High ? 0
-                : priority == FlowTransactionScheduler.Priority.Medium ? 1 : 2
-            let schedulingData: [AnyStruct] = [priorityRaw, executionEffort]
-
             let estimate = FlowTransactionScheduler.estimate(
-                data: schedulingData,
+                data: [],
                 timestamp: future,
                 priority: priority,
                 executionEffort: executionEffort
@@ -317,7 +312,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
             let transactionId = manager.scheduleByHandler(
                 handlerTypeIdentifier: handlerTypeIdentifier,
                 handlerUUID: self.uuid,
-                data: schedulingData,
+                data: [],
                 timestamp: future,
                 priority: priority,
                 executionEffort: executionEffort,
@@ -377,6 +372,28 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         return <- create Handler(workerCap: workerCap)
     }
 
+    /// @notice Returns the current paused state
+    /// @return True if paused, false otherwise
+    access(all) view fun getIsPaused(): Bool {
+        return self.isPaused
+    }
+
+    /// @notice Returns the current threshold to delay mapping
+    /// @return Dictionary mapping pending request thresholds to delays in seconds
+    access(all) view fun getThresholdToDelay(): {Int: UFix64} {
+        return self.thresholdToDelay
+    }
+
+    /// @notice Returns the current execution effort parameters
+    /// @return Dictionary with baseEffortPerRequest, baseOverhead, and idleExecutionEffort
+    access(all) view fun getExecutionEffortParams(): {String: UInt64} {
+        return {
+            "baseEffortPerRequest": self.baseEffortPerRequest,
+            "baseOverhead": self.baseOverhead,
+            "idleExecutionEffort": self.idleExecutionEffort
+        }
+    }
+
     /// @notice Calculates the appropriate delay based on pending request count
     /// @dev Finds the highest threshold that pendingCount meets or exceeds
     /// @param pendingCount The current number of pending requests
@@ -399,6 +416,31 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         return self.defaultDelay
     }
 
+    /// @notice Calculates execution effort and determines appropriate priority
+    /// @dev Formula: baseEffortPerRequest * requestCount + baseOverhead
+    ///      If calculated > 7500, uses High priority (max 9999)
+    ///      Otherwise uses Medium priority (max 7500)
+    /// @param requestCount The number of requests to process (typically maxRequestsPerTx)
+    /// @return Dictionary with "effort" (UInt64) and "priority" (UInt8: 0=High, 1=Medium)
+    access(all) fun calculateExecutionEffortAndPriority(_ requestCount: Int): {String: AnyStruct} {
+        let calculated = self.baseEffortPerRequest * UInt64(requestCount) + self.baseOverhead
+        
+        // If calculated > 7500, need High priority (max 9999)
+        // Otherwise use Medium priority (max 7500)
+        if calculated > 7500 {
+            let capped = calculated < 9999 ? calculated : 9999
+            return {
+                "effort": capped,
+                "priority": 0 as UInt8
+            }
+        } else {
+            return {
+                "effort": calculated,
+                "priority": 1 as UInt8
+            }
+        }
+    }
+
     // ============================================
     // Initialization
     // ============================================
@@ -408,15 +450,26 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         self.HandlerPublicPath = /public/FlowYieldVaultsTransactionHandler
         self.AdminStoragePath = /storage/FlowYieldVaultsTransactionHandlerAdmin
         self.isPaused = false
-        self.maxParallelTransactions = 1
-        self.defaultDelay = 60.0
+        self.defaultDelay = 30.0
         self.thresholdToDelay = {
-            50: 5.0,
-            20: 15.0,
-            10: 30.0,
-            5: 45.0,
-            0: 60.0
+            11: 3.0,
+            5: 5.0,
+            1: 7.0,
+            0: 30.0
         }
+        
+        // Execution effort calculation parameters
+        // Formula: baseEffortPerRequest * maxRequestsPerTx + baseOverhead
+        // Default: 800 * 1 + 1500 = 2300 for 1 request
+        //          800 * 3 + 1500 = 3900 for 3 requests
+        //          800 * 5 + 1500 = 5500 for 5 requests
+        self.baseEffortPerRequest = 800
+        self.baseOverhead = 1500
+        
+        // Minimal execution effort for idle polling (no pending requests)
+        // Set to 2500 (max for Low priority) to handle burst arrivals after idle scheduling
+        // Uses Low priority to minimize FLOW costs when just checking status
+        self.idleExecutionEffort = 2500
 
         let admin <- create Admin()
         self.account.storage.save(<-admin, to: self.AdminStoragePath)

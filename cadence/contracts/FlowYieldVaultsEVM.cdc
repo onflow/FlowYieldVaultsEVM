@@ -132,7 +132,7 @@ access(all) contract FlowYieldVaultsEVM {
     /// @notice Maximum requests to process per transaction
     /// @dev Configurable by Admin for performance tuning. Higher values increase throughput
     ///      but risk hitting gas limits. Recommended range: 5-50.
-    access(all) var maxRequestsPerTx: Int
+    access(contract) var maxRequestsPerTx: Int
 
     /// @notice Storage path for Worker resource
     access(all) let WorkerStoragePath: StoragePath
@@ -149,7 +149,7 @@ access(all) contract FlowYieldVaultsEVM {
     access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
 
     /// @notice Address of the FlowYieldVaultsRequests contract on EVM
-    access(all) var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
+    access(contract) var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
 
     // ============================================
     // Events
@@ -945,6 +945,12 @@ access(all) contract FlowYieldVaultsEVM {
     /// @return The EVM address or nil if not set
     access(all) view fun getFlowYieldVaultsRequestsAddress(): EVM.EVMAddress? {
         return self.flowYieldVaultsRequestsAddress
+    }
+
+    /// @notice Gets the maximum requests processed per transaction
+    /// @return The current maxRequestsPerTx value
+    access(all) view fun getMaxRequestsPerTx(): Int {
+        return self.maxRequestsPerTx
     }
 
     // ============================================

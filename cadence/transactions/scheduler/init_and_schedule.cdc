@@ -9,15 +9,12 @@ import "FlowYieldVaultsEVM"
 /// @notice Creates the transaction handler and schedules the first automated execution
 /// @dev Combines init_flow_vaults_transaction_handler and schedule_initial_flow_vaults_execution.
 ///      Safe to run multiple times - will skip already-configured resources.
+///      Execution effort and priority are calculated dynamically based on FlowYieldVaultsEVM.maxRequestsPerTx.
 ///
 /// @param delaySeconds Initial delay before first execution (e.g., 5.0)
-/// @param priority 0=High, 1=Medium, 2=Low (recommend Medium)
-/// @param executionEffort Computation units (max 9999)
 ///
 transaction(
-    delaySeconds: UFix64,
-    priority: UInt8,
-    executionEffort: UInt64
+    delaySeconds: UFix64
 ) {
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
         if signer.storage.borrow<&FlowYieldVaultsEVM.Worker>(from: FlowYieldVaultsEVM.WorkerStoragePath) == nil {
@@ -52,16 +49,18 @@ transaction(
 
         let future = getCurrentBlock().timestamp + delaySeconds
 
-        let pr = priority == 0
+        // Calculate execution effort and priority dynamically based on maxRequestsPerTx
+        let maxRequestsPerTx = FlowYieldVaultsEVM.getMaxRequestsPerTx()
+        let effortAndPriority = FlowYieldVaultsTransactionHandler.calculateExecutionEffortAndPriority(maxRequestsPerTx)
+        let executionEffort = effortAndPriority["effort"]! as! UInt64
+        let priorityRaw = effortAndPriority["priority"]! as! UInt8
+        
+        let pr = priorityRaw == 0
             ? FlowTransactionScheduler.Priority.High
-            : priority == 1
-                ? FlowTransactionScheduler.Priority.Medium
-                : FlowTransactionScheduler.Priority.Low
-
-        let schedulingData: [AnyStruct] = [priority, executionEffort]
+            : FlowTransactionScheduler.Priority.Medium
 
         let est = FlowTransactionScheduler.estimate(
-            data: schedulingData,
+            data: [],
             timestamp: future,
             priority: pr,
             executionEffort: executionEffort
@@ -82,7 +81,7 @@ transaction(
 
         let transactionId = manager.schedule(
             handlerCap: handlerCap,
-            data: schedulingData,
+            data: [],
             timestamp: future,
             priority: pr,
             executionEffort: executionEffort,

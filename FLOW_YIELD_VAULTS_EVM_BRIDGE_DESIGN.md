@@ -144,20 +144,22 @@ Scheduled transaction handler with auto-scheduling.
 - Implement `FlowTransactionScheduler.TransactionHandler` interface
 - Trigger Worker's `processRequests()` on scheduled execution
 - Auto-schedule next execution based on queue depth
-- Support parallel transaction scheduling for high throughput
+- Dynamic execution effort calculation based on request count
 - Pausable for maintenance
 
 **Key State:**
 ```cadence
 // Delay configuration (pending count → delay in seconds)
-access(all) let thresholdToDelay: {Int: UFix64}  // {50: 5.0, 20: 15.0, 10: 30.0, 5: 45.0, 0: 60.0}
-access(all) let defaultDelay: UFix64  // 60.0
+access(contract) var thresholdToDelay: {Int: UFix64}  // {11: 3.0, 5: 5.0, 1: 7.0, 0: 30.0}
+access(all) let defaultDelay: UFix64  // 30.0
 
-// Parallel processing
-access(all) var maxParallelTransactions: Int  // Default: 1
+// Execution effort parameters
+access(contract) var baseEffortPerRequest: UInt64  // Default: 800
+access(contract) var baseOverhead: UInt64          // Default: 1500
+access(contract) var idleExecutionEffort: UInt64   // Default: 2500 (max for Low priority)
 
 // Control
-access(all) var isPaused: Bool
+access(contract) var isPaused: Bool
 ```
 
 #### 4. COA (Cadence Owned Account)
@@ -402,11 +404,10 @@ function completeProcessing(
 
 | Pending Requests | Delay (seconds) | Description |
 |------------------|-----------------|-------------|
-| >= 50 | 5 | High load - rapid processing |
-| >= 20 | 15 | Medium-high load |
-| >= 10 | 30 | Medium load |
-| >= 5 | 45 | Low load |
-| 0 | 60 | Idle - minimal overhead |
+| >= 11 | 3 | High load - rapid processing |
+| >= 5 | 5 | Medium load |
+| >= 1 | 7 | Low load |
+| 0 | 30 | Idle - minimal overhead |
 
 ### Scheduling Logic
 
@@ -427,20 +428,32 @@ access(all) fun getDelayForPendingCount(_ pendingCount: Int): UFix64 {
 }
 ```
 
-### Parallel Processing
+### Execution Effort Calculation
 
-When pending requests exceed `maxRequestsPerTx`, the handler schedules multiple parallel transactions:
+The handler dynamically calculates execution effort based on the maximum requests per transaction:
 
 ```cadence
-// Calculate needed transactions
-let neededTransactions = (pendingRequests + maxRequestsPerTx - 1) / maxRequestsPerTx
-let parallelCount = min(neededTransactions, maxParallelTransactions)
-
-// Schedule parallelCount transactions at the same timestamp
-for i in 0..<parallelCount {
-    manager.scheduleByHandler(...)
+access(all) fun calculateExecutionEffortAndPriority(_ requestCount: Int): {String: AnyStruct} {
+    let calculated = self.baseEffortPerRequest * UInt64(requestCount) + self.baseOverhead
+    
+    // If calculated > 7500, need High priority (max 9999)
+    // Otherwise use Medium priority (max 7500)
+    if calculated > 7500 {
+        let capped = calculated < 9999 ? calculated : 9999
+        return {
+            "effort": capped,
+            "priority": 0 as UInt8  // High priority
+        }
+    } else {
+        return {
+            "effort": calculated,
+            "priority": 1 as UInt8  // Medium priority
+        }
+    }
 }
 ```
+
+When idle (no pending requests), the handler uses Low priority to minimize FLOW costs. The execution effort is set to the computed value (based on `maxRequestsPerTx`) but capped at `idleExecutionEffort` (2500, the max for Low priority). This ensures efficient handling of burst arrivals while staying within Low priority limits.
 
 ---
 
@@ -590,9 +603,8 @@ pre {
 | `NextExecutionScheduled` | Next execution scheduled |
 | `ExecutionSkipped` | Execution skipped (paused or error) |
 | `AllExecutionsStopped` | All executions cancelled and fees refunded |
-| `MaxParallelTransactionsUpdated` | Config change |
 | `ThresholdToDelayUpdated` | Threshold config change |
-| `ParallelExecutionsScheduled` | Multiple parallel transactions scheduled |
+| `ExecutionEffortParamsUpdated` | Execution effort parameters changed |
 
 ---
 
@@ -664,8 +676,8 @@ access(all) fun createWorker(...): @Worker
 // Admin resource functions
 access(all) fun pause()
 access(all) fun unpause()
-access(all) fun setMaxParallelTransactions(count: Int)
-access(all) fun setThresholdToDelay(threshold: Int, delay: UFix64)
+access(all) fun setThresholdToDelay(newThresholds: {Int: UFix64})
+access(all) fun setExecutionEffortParams(baseEffortPerRequest: UInt64, baseOverhead: UInt64, idleExecutionEffort: UInt64)
 access(all) fun stopAll()  // Emergency: pause + cancel all scheduled executions with refunds
 ```
 
@@ -716,4 +728,5 @@ access(all) fun stopAll()  // Emergency: pause + cancel all scheduled executions
 |---------|------|---------|
 | 1.0 | Initial | Basic request/response flow |
 | 2.0 | - | Added two-phase commit |
-| 3.0 | Nov 2025 | Adaptive scheduling, parallel processing, O(1) ownership lookup |
+| 3.0 | Nov 2025 | Adaptive scheduling, O(1) ownership lookup |
+| 3.1 | Dec 2025 | Removed parallel processing, added dynamic execution effort calculation |

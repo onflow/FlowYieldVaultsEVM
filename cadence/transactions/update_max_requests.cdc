@@ -16,6 +16,6 @@ transaction(newMax: Int) {
     }
 
     post {
-        FlowYieldVaultsEVM.maxRequestsPerTx == newMax: "maxRequestsPerTx was not updated correctly"
+        FlowYieldVaultsEVM.getMaxRequestsPerTx() == newMax: "maxRequestsPerTx was not updated correctly"
     }
 }
