@@ -226,9 +226,9 @@ Coverage includes:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `isPaused` | false | Pause/resume processing |
-| `baseEffortPerRequest` | 800 | Execution effort per request |
-| `baseOverhead` | 1500 | Base overhead for transactions |
-| `idleExecutionEffort` | 2500 | Max effort cap when idle (max for Low priority) |
+| `baseEffortPerRequest` | 2000 | Execution effort per request |
+| `baseOverhead` | 3000 | Base overhead for transactions |
+| `idleExecutionEffort` | 5000 | Max effort cap when idle (for Medium priority) |
 
 ## Security
 

@@ -154,9 +154,9 @@ access(contract) var thresholdToDelay: {Int: UFix64}  // {11: 3.0, 5: 5.0, 1: 7.
 access(all) let defaultDelay: UFix64  // 30.0
 
 // Execution effort parameters
-access(contract) var baseEffortPerRequest: UInt64  // Default: 800
-access(contract) var baseOverhead: UInt64          // Default: 1500
-access(contract) var idleExecutionEffort: UInt64   // Default: 2500 (max for Low priority)
+access(contract) var baseEffortPerRequest: UInt64  // Default: 2000
+access(contract) var baseOverhead: UInt64          // Default: 3000
+access(contract) var idleExecutionEffort: UInt64   // Default: 5000 (for Medium priority)
 
 // Control
 access(contract) var isPaused: Bool
@@ -453,7 +453,7 @@ access(all) fun calculateExecutionEffortAndPriority(_ requestCount: Int): {Strin
 }
 ```
 
-When idle (no pending requests), the handler uses Low priority to minimize FLOW costs. The execution effort is set to the computed value (based on `maxRequestsPerTx`) but capped at `idleExecutionEffort` (2500, the max for Low priority). This ensures efficient handling of burst arrivals while staying within Low priority limits.
+When idle (no pending requests), the handler uses Medium priority to ensure sufficient computation budget. The execution effort is set to the computed value (based on `maxRequestsPerTx`) but capped at `idleExecutionEffort` (5000, suitable for Medium priority). This ensures efficient handling of burst arrivals while providing adequate computation resources.
 
 ---
 

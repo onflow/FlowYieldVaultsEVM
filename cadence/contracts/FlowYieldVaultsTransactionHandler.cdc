@@ -147,8 +147,8 @@ access(all) contract FlowYieldVaultsTransactionHandler {
 
         /// @notice Updates execution effort calculation parameters
         /// @dev executionEffort = baseEffortPerRequest * maxRequestsPerTx + baseOverhead
-        /// @param baseEffortPerRequest Effort units per request (e.g., 800 for EVM calls)
-        /// @param baseOverhead Fixed overhead regardless of request count (e.g., 1500)
+        /// @param baseEffortPerRequest Effort units per request (e.g., 2000 for EVM calls)
+        /// @param baseOverhead Fixed overhead regardless of request count (e.g., 3000)
         /// @param idleExecutionEffort Minimal effort when no pending requests (e.g., 3000 to handle burst arrivals)
         access(all) fun setExecutionEffortParams(baseEffortPerRequest: UInt64, baseOverhead: UInt64, idleExecutionEffort: UInt64) {
             pre {
@@ -269,15 +269,15 @@ access(all) contract FlowYieldVaultsTransactionHandler {
                 nextExecutionDelaySeconds: nextDelay
             )
 
-            // Use Low priority when idle (no pending requests) to minimize FLOW costs
-            // Use computed effort but cap at idleExecutionEffort (max for Low priority = 2500)
+            // Use Medium priority when idle (no pending requests)
+            // Use computed effort but cap at idleExecutionEffort (5000 for Medium priority)
             if pendingRequests == 0 {
                 let cappedEffort = executionEffort < FlowYieldVaultsTransactionHandler.idleExecutionEffort 
                     ? executionEffort 
                     : FlowYieldVaultsTransactionHandler.idleExecutionEffort
                 self.scheduleNextExecution(
                     nextDelay: nextDelay,
-                    priority: FlowTransactionScheduler.Priority.Low,
+                    priority: FlowTransactionScheduler.Priority.Medium,
                     executionEffort: cappedEffort
                 )
             } else {
@@ -460,16 +460,14 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         
         // Execution effort calculation parameters
         // Formula: baseEffortPerRequest * maxRequestsPerTx + baseOverhead
-        // Default: 800 * 1 + 1500 = 2300 for 1 request
-        //          800 * 3 + 1500 = 3900 for 3 requests
-        //          800 * 5 + 1500 = 5500 for 5 requests
-        self.baseEffortPerRequest = 800
-        self.baseOverhead = 1500
+        // Default: 2000 * 1 + 3000 = 2300 for 1 request
+        //          2000 * 2 + 3000 = 7000 for 2 requests
+        self.baseEffortPerRequest = 2000
+        self.baseOverhead = 3000
         
         // Minimal execution effort for idle polling (no pending requests)
-        // Set to 2500 (max for Low priority) to handle burst arrivals after idle scheduling
-        // Uses Low priority to minimize FLOW costs when just checking status
-        self.idleExecutionEffort = 2500
+        // Set to 5000 for Medium priority to handle burst arrivals after idle scheduling
+        self.idleExecutionEffort = 5000
 
         let admin <- create Admin()
         self.account.storage.save(<-admin, to: self.AdminStoragePath)
