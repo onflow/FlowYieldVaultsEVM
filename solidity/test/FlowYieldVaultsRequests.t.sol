@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "../src/FlowYieldVaultsRequests.sol";
 
 contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
-    constructor(address coaAddress) FlowYieldVaultsRequests(coaAddress) {}
+    constructor(address coaAddress, address wflowAddress) FlowYieldVaultsRequests(coaAddress, wflowAddress) {}
 
     function testRegisterYieldVaultId(uint64 yieldVaultId, address owner) external {
         validYieldVaultIds[yieldVaultId] = true;
@@ -21,6 +21,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     address user2 = makeAddr("user2");
     address coa = makeAddr("coa");
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
+    address constant WFLOW = 0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e;
 
     // Events for testing (from OpenZeppelin Ownable2Step)
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
@@ -36,7 +37,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     function setUp() public {
         vm.deal(user, 100 ether);
         vm.deal(user2, 100 ether);
-        c = new FlowYieldVaultsRequestsTestHelper(coa);
+        c = new FlowYieldVaultsRequestsTestHelper(coa, WFLOW);
         c.testRegisterYieldVaultId(42, user);
     }
 
@@ -564,5 +565,35 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
+    }
+
+    // ============================================
+    // WFLOW SUPPORT
+    // ============================================
+
+    function test_WFLOWConfiguredOnDeployment() public {
+        // WFLOW should be configured as supported token on deployment
+        (bool isSupported, uint256 minBalance, bool isNative) = c.allowedTokens(WFLOW);
+        assertEq(isSupported, true, "WFLOW should be supported");
+        assertEq(minBalance, 1 ether, "WFLOW minimum balance should be 1 ether");
+        assertEq(isNative, false, "WFLOW should not be marked as native");
+    }
+
+    function test_WFLOWImmutableAddress() public {
+        // WFLOW address should be set correctly
+        assertEq(c.WFLOW(), WFLOW);
+    }
+
+    function test_DeployWithZeroWFLOWAddress() public {
+        // Deploy with address(0) for WFLOW - should work but not configure WFLOW
+        FlowYieldVaultsRequestsTestHelper contractNoWflow = new FlowYieldVaultsRequestsTestHelper(coa, address(0));
+
+        // WFLOW at address(0) should NOT be supported
+        (bool isSupported, , ) = contractNoWflow.allowedTokens(address(0));
+        assertEq(isSupported, false, "address(0) should not be supported as WFLOW");
+
+        // Native FLOW should still be supported
+        (bool nativeSupported, , ) = contractNoWflow.allowedTokens(NATIVE_FLOW);
+        assertEq(nativeSupported, true, "Native FLOW should still be supported");
     }
 }

@@ -99,6 +99,10 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     address public constant NATIVE_FLOW =
         0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
+    /// @notice WFLOW (Wrapped FLOW) ERC20 token address
+    /// @dev On Cadence side, WFLOW is automatically unwrapped to native FlowToken by FlowEVMBridge
+    address public immutable WFLOW;
+
     /// @notice Sentinel value for "no yieldvault" (used when CREATE_YIELDVAULT fails before yieldvault is created)
     /// @dev Uses type(uint64).max since valid yieldVaultIds can be 0. Matches FlowYieldVaultsEVM.noYieldVaultId
     uint64 public constant NO_YIELDVAULT_ID = type(uint64).max;
@@ -365,8 +369,10 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice Initializes the contract with COA address and default configuration
     /// @param coaAddress Address of the authorized COA
-    constructor(address coaAddress) Ownable(msg.sender) {
+    /// @param wflowAddress Address of the WFLOW (Wrapped FLOW) ERC20 token
+    constructor(address coaAddress, address wflowAddress) Ownable(msg.sender) {
         authorizedCOA = coaAddress;
+        WFLOW = wflowAddress;
         _requestIdCounter = 1;
         maxPendingRequestsPerUser = 10;
 
@@ -375,6 +381,15 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             minimumBalance: 1 ether,
             isNative: true
         });
+
+        // WFLOW is treated as ERC20 on EVM side, but unwraps to native FlowToken on Cadence
+        if (wflowAddress != address(0)) {
+            allowedTokens[WFLOW] = TokenConfig({
+                isSupported: true,
+                minimumBalance: 1 ether,
+                isNative: false
+            });
+        }
     }
 
     // ============================================

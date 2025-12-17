@@ -124,6 +124,8 @@ echo "COA Address: $COA_ADDRESS"
 
 # Export for Foundry
 export COA_ADDRESS=$COA_ADDRESS
+# WFLOW not available on local emulator - use address(0) to disable
+export WFLOW_ADDRESS="0x0000000000000000000000000000000000000000"
 
 # Verify EVM Gateway one more time before Solidity deployment
 echo "Final EVM Gateway verification before deployment..."

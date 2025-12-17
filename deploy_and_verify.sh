@@ -72,9 +72,13 @@ BYTECODE=$(jq -r '.bytecode.object' "$SCRIPT_DIR/solidity/out/FlowYieldVaultsReq
 # Remove 0x prefix if present
 BYTECODE=${BYTECODE#0x}
 
-# Encode constructor arguments (address coaAddress)
+# WFLOW address on testnet
+WFLOW_ADDRESS="0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e"
+
+# Encode constructor arguments (address coaAddress, address wflowAddress)
 echo "   Constructor arg (COA Address): $COA_ADDRESS"
-CONSTRUCTOR_ARGS=$(cast abi-encode "constructor(address)" "$COA_ADDRESS")
+echo "   Constructor arg (WFLOW Address): $WFLOW_ADDRESS"
+CONSTRUCTOR_ARGS=$(cast abi-encode "constructor(address,address)" "$COA_ADDRESS" "$WFLOW_ADDRESS")
 CONSTRUCTOR_ARGS=${CONSTRUCTOR_ARGS#0x}
 
 # Append constructor args to bytecode
@@ -178,6 +182,7 @@ sleep 60
 
 echo "🔍 Step 7: Verifying Solidity contract..."
 echo "COA Address (constructor arg): $COA_ADDRESS"
+echo "WFLOW Address (constructor arg): $WFLOW_ADDRESS"
 echo ""
 
 forge verify-contract \
@@ -185,7 +190,7 @@ forge verify-contract \
   --rpc-url "$TESTNET_RPC_URL" \
   --verifier blockscout \
   --verifier-url 'https://evm-testnet.flowscan.io/api/' \
-  --constructor-args $(cast abi-encode "constructor(address)" "$COA_ADDRESS") \
+  --constructor-args $(cast abi-encode "constructor(address,address)" "$COA_ADDRESS" "$WFLOW_ADDRESS") \
   --compiler-version 0.8.20 \
   "$DEPLOYED_ADDRESS" \
   src/FlowYieldVaultsRequests.sol:FlowYieldVaultsRequests
