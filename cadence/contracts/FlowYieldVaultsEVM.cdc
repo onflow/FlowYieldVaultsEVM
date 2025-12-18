@@ -405,11 +405,15 @@ access(all) contract FlowYieldVaultsEVM {
                         return false
                     }
                     // Now we can mark as failed - request is in PROCESSING status
+                    // Refund funds since startProcessing moved them to COA
                     if !self.completeProcessing(
                         requestId: request.id,
                         success: false,
                         yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                        message: validationResult.message
+                        message: validationResult.message,
+                        refundAmount: request.amount,
+                        tokenAddress: request.tokenAddress,
+                        requestType: request.requestType
                     ) {
                         emit RequestFailed(
                             requestId: request.id,
@@ -422,16 +426,24 @@ access(all) contract FlowYieldVaultsEVM {
                 }
             }
 
+            // WITHDRAW/CLOSE: Call startProcessing here before the switch statement.
+            // CREATE/DEPOSIT: startProcessing is called inside their respective process functions
+            // (processCreateYieldVault, processDepositToYieldVault) or in the validation block above,
+            // because they need to handle fund withdrawal from COA after startProcessing succeeds.
             let needsStartProcessing = request.requestType == FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue
                 || request.requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue
 
             if needsStartProcessing {
                 if !self.startProcessing(requestId: request.id) {
+                    // WITHDRAW/CLOSE don't escrow deposits, so no refund needed on failure
                     if !self.completeProcessing(
                         requestId: request.id,
                         success: false,
                         yieldVaultId: request.yieldVaultId,
-                        message: "Failed to start processing"
+                        message: "Failed to start processing",
+                        refundAmount: 0,
+                        tokenAddress: request.tokenAddress,
+                        requestType: request.requestType
                     ) {
                         emit RequestFailed(
                             requestId: request.id,
@@ -470,11 +482,16 @@ access(all) contract FlowYieldVaultsEVM {
                     message = "Unknown request type: \(request.requestType) for request ID \(request.id)"
             }
 
+            // Pass refund info - completeProcessing will determine if refund is needed
+            // based on success flag and request type
             if !self.completeProcessing(
                 requestId: request.id,
                 success: success,
                 yieldVaultId: yieldVaultId,
-                message: message
+                message: message,
+                refundAmount: request.amount,
+                tokenAddress: request.tokenAddress,
+                requestType: request.requestType
             ) {
                 emit RequestFailed(
                     requestId: request.id,
@@ -781,7 +798,9 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
-        /// @notice Marks a request as PROCESSING and deducts user balance atomically
+        /// @notice Marks a request as PROCESSING and transfers escrowed funds to COA
+        /// @dev For CREATE/DEPOSIT: deducts user balance and transfers funds to COA for bridging.
+        ///      For WITHDRAW/CLOSE: only updates status (no balance change).
         /// @param requestId The request ID to start processing
         /// @return True if successful, false otherwise
         access(self) fun startProcessing(requestId: UInt256): Bool {
@@ -811,27 +830,78 @@ access(all) contract FlowYieldVaultsEVM {
             return true
         }
 
-        /// @notice Marks a request as COMPLETED or FAILED with refund on failure
+        /// @notice Marks a request as COMPLETED or FAILED, returning escrowed funds on failure
+        /// @dev For failed CREATE/DEPOSIT: returns funds from COA to EVM contract via msg.value (native)
+        ///      or approve+transferFrom (ERC20). For WITHDRAW/CLOSE or success: no refund sent.
         /// @param requestId The request ID to complete
         /// @param success Whether the operation succeeded
         /// @param yieldVaultId The associated YieldVault Id
         /// @param message Status message or error reason
+        /// @param refundAmount Amount to refund (0 if no refund needed)
+        /// @param tokenAddress Token address for refund (used to determine native vs ERC20)
+        /// @param requestType The type of request (needed to determine if refund applies)
         /// @return True if the EVM call succeeded, false otherwise
-        access(self) fun completeProcessing(requestId: UInt256, success: Bool, yieldVaultId: UInt64, message: String): Bool {
-            let status = success
-                ? FlowYieldVaultsEVM.RequestStatus.COMPLETED.rawValue
-                : FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue
-
+        access(self) fun completeProcessing(
+            requestId: UInt256,
+            success: Bool,
+            yieldVaultId: UInt64,
+            message: String,
+            refundAmount: UInt256,
+            tokenAddress: EVM.EVMAddress,
+            requestType: UInt8
+        ): Bool {
             let calldata = EVM.encodeABIWithSignature(
                 "completeProcessing(uint256,bool,uint64,string)",
                 [requestId, success, yieldVaultId, message]
             )
 
-            let result = self.getCOARef().call(
+            // Determine if refund is needed (failed CREATE or DEPOSIT)
+            let needsRefund = !success
+                && refundAmount > 0
+                && (requestType == FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue
+                    || requestType == FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue)
+
+            var refundValue = EVM.Balance(attoflow: 0)
+            let coaRef = self.getCOARef()
+
+            if needsRefund {
+                let isNativeFlow = tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString()
+
+                if isNativeFlow {
+                    // Native FLOW: send with the call
+                    // Convert UInt256 to UFix64 then to EVM.Balance
+                    let refundUFix64 = FlowYieldVaultsEVM.ufix64FromUInt256(refundAmount, tokenAddress: tokenAddress)
+                    refundValue = FlowYieldVaultsEVM.balanceFromUFix64(refundUFix64, tokenAddress: tokenAddress)
+                } else {
+                    // ERC20: approve contract to pull funds
+                    let approveCalldata = EVM.encodeABIWithSignature(
+                        "approve(address,uint256)",
+                        [FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!, refundAmount]
+                    )
+                    let approveResult = coaRef.call(
+                        to: tokenAddress,
+                        data: approveCalldata,
+                        gasLimit: 100_000,
+                        value: EVM.Balance(attoflow: 0)
+                    )
+                    if approveResult.status != EVM.Status.successful {
+                        let errorMsg = FlowYieldVaultsEVM.decodeEVMError(approveResult.data)
+                        emit RequestFailed(
+                            requestId: requestId,
+                            userAddress: "",
+                            requestType: requestType,
+                            reason: "ERC20 approve for refund failed: \(errorMsg)"
+                        )
+                        return false
+                    }
+                }
+            }
+
+            let result = coaRef.call(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
                 data: calldata,
                 gasLimit: 15_000_000,
-                value: EVM.Balance(attoflow: 0)
+                value: refundValue
             )
 
             if result.status != EVM.Status.successful {
@@ -839,7 +909,7 @@ access(all) contract FlowYieldVaultsEVM {
                 emit RequestFailed(
                     requestId: requestId,
                     userAddress: "",
-                    requestType: 0,
+                    requestType: requestType,
                     reason: "completeProcessing failed: \(errorMsg)"
                 )
                 return false

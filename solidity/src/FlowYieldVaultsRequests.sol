@@ -239,6 +239,15 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Contract is paused
     error ContractPaused();
 
+    /// @notice Vault identifier cannot be empty for CREATE_YIELDVAULT
+    error EmptyVaultIdentifier();
+
+    /// @notice Strategy identifier cannot be empty for CREATE_YIELDVAULT
+    error EmptyStrategyIdentifier();
+
+    /// @notice No refund available for the specified token
+    error NoRefundAvailable(address token);
+
     // ============================================
     // Events
     // ============================================
@@ -363,6 +372,16 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestIds Dropped request IDs
     /// @param droppedBy Admin who dropped the requests
     event RequestsDropped(uint256[] requestIds, address indexed droppedBy);
+
+    /// @notice Emitted when a user claims their refund
+    /// @param user User who claimed the refund
+    /// @param tokenAddress Token claimed
+    /// @param amount Amount claimed
+    event RefundClaimed(
+        address indexed user,
+        address indexed tokenAddress,
+        uint256 amount
+    );
 
     // ============================================
     // Modifiers
@@ -687,6 +706,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         nonReentrant
         returns (uint256)
     {
+        // Validate identifiers are not empty (fail fast before escrowing funds)
+        if (bytes(vaultIdentifier).length == 0) revert EmptyVaultIdentifier();
+        if (bytes(strategyIdentifier).length == 0)
+            revert EmptyStrategyIdentifier();
+
         _validateDeposit(tokenAddress, amount);
         _checkPendingRequestLimit(msg.sender);
 
@@ -834,12 +858,31 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         );
     }
 
+    /// @notice Claims all refunded funds for a specific token
+    /// @dev Refunds accumulate in pendingUserBalances when CREATE/DEPOSIT requests fail.
+    ///      This function allows users to withdraw those funds directly.
+    /// @param tokenAddress Token to claim refund for (NATIVE_FLOW or ERC20)
+    function claimRefund(address tokenAddress) external nonReentrant {
+        uint256 balance = pendingUserBalances[msg.sender][tokenAddress];
+        if (balance == 0) revert NoRefundAvailable(tokenAddress);
+
+        pendingUserBalances[msg.sender][tokenAddress] = 0;
+
+        emit BalanceUpdated(msg.sender, tokenAddress, 0);
+
+        _transferFunds(msg.sender, tokenAddress, balance);
+
+        emit RefundClaimed(msg.sender, tokenAddress, balance);
+    }
+
     // ============================================
     // External Functions - COA
     // ============================================
 
-    /// @notice Begins processing a request (atomically deducts user balance)
-    /// @dev Must be called before Cadence-side operations. Deducts balance to prevent double-spend.
+    /// @notice Begins processing a request (transitions to PROCESSING status)
+    /// @dev Must be called before Cadence-side operations. For CREATE/DEPOSIT requests,
+    ///      atomically deducts user balance and transfers funds to COA for bridging.
+    ///      For WITHDRAW/CLOSE requests, only updates status (no balance change).
     /// @param requestId Request ID to start processing
     function startProcessing(uint256 requestId) external onlyAuthorizedCOA {
         Request storage request = requests[requestId];
@@ -888,7 +931,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Completes request processing (marks success/failure, handles refunds)
-    /// @dev Called after Cadence-side operations complete. Refunds user balance on failure.
+    /// @dev Called after Cadence-side operations complete. For failed CREATE/DEPOSIT requests,
+    ///      COA must return escrowed funds: native FLOW via msg.value, ERC20 via prior approval.
+    ///      For WITHDRAW/CLOSE or successful requests, no refund is expected (msg.value must be 0).
     /// @param requestId Request ID to complete
     /// @param success Whether the Cadence operation succeeded
     /// @param yieldVaultId YieldVault Id associated with the request
@@ -898,7 +943,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         bool success,
         uint64 yieldVaultId,
         string calldata message
-    ) external onlyAuthorizedCOA {
+    ) external payable onlyAuthorizedCOA {
         Request storage request = requests[requestId];
         if (request.id != requestId) revert RequestNotFound();
         if (request.status != RequestStatus.PROCESSING)
@@ -916,8 +961,24 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             (request.requestType == RequestType.CREATE_YIELDVAULT ||
                 request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT)
         ) {
+            // COA must return funds when failing CREATE/DEPOSIT requests
+            if (isNativeFlow(request.tokenAddress)) {
+                // Native FLOW: sent with this call
+                if (msg.value != request.amount) revert MsgValueMustEqualAmount();
+            } else {
+                // ERC20: pull from COA (requires prior approval)
+                if (msg.value != 0) revert MsgValueMustBeZero();
+                IERC20(request.tokenAddress).safeTransferFrom(
+                    msg.sender,
+                    address(this),
+                    request.amount
+                );
+            }
             pendingUserBalances[request.user][request.tokenAddress] += request
                 .amount;
+        } else {
+            // No refund expected for success or WITHDRAW/CLOSE
+            if (msg.value != 0) revert MsgValueMustBeZero();
         }
 
         if (success && request.requestType == RequestType.CREATE_YIELDVAULT) {

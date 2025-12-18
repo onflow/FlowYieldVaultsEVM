@@ -130,9 +130,32 @@ echo "📝 Deployed EVM contract address: $DEPLOYED_ADDRESS"
 echo ""
 
 # ==========================================
-# Step 4: Deploy Cadence Contracts
+# Step 4: Approve ERC20 tokens for refunds
 # ==========================================
-echo "📦 Step 4: Deploying Cadence contracts..."
+echo "🔐 Step 4: Approving ERC20 tokens (WFLOW) for COA refunds..."
+echo "   WFLOW Address: $WFLOW_ADDRESS"
+echo "   Spender (Contract): $DEPLOYED_ADDRESS"
+echo "   Amount: max uint256 (unlimited)"
+
+# Max uint256 for unlimited approval
+MAX_UINT256="115792089237316195423570985008687907853269984665640564039457584007913129639935"
+
+flow transactions send "$SCRIPT_DIR/cadence/transactions/approve_erc20_from_coa.cdc" \
+    "$WFLOW_ADDRESS" \
+    "$DEPLOYED_ADDRESS" \
+    "$MAX_UINT256" \
+    --network testnet \
+    --signer testnet-account \
+    --compute-limit 9999
+
+echo ""
+echo "✅ WFLOW approved for contract to pull refunds from COA"
+echo ""
+
+# ==========================================
+# Step 5: Deploy Cadence Contracts
+# ==========================================
+echo "📦 Step 5: Deploying Cadence contracts..."
 
 flow project deploy --update -n testnet
 
@@ -141,9 +164,9 @@ echo "✅ Cadence contracts deployed"
 echo ""
 
 # ==========================================
-# Step 5: Setup FlowYieldVaultsEVM Worker
+# Step 6: Setup FlowYieldVaultsEVM Worker
 # ==========================================
-echo "🔧 Step 5: Setting up FlowYieldVaultsEVM Worker with Badge..."
+echo "🔧 Step 6: Setting up FlowYieldVaultsEVM Worker with Badge..."
 echo "   FlowYieldVaultsRequests address: $DEPLOYED_ADDRESS"
 
 flow transactions send "$SCRIPT_DIR/cadence/transactions/setup_worker_with_badge.cdc" \
@@ -157,9 +180,9 @@ echo "✅ Worker initialized and FlowYieldVaultsRequests address set"
 echo ""
 
 # ==========================================
-# Step 6: Initialize Transaction Handler & Schedule
+# Step 7: Initialize Transaction Handler & Schedule
 # ==========================================
-echo "🔧 Step 6: Initializing FlowYieldVaultsTransactionHandler and scheduling initial execution..."
+echo "🔧 Step 7: Initializing FlowYieldVaultsTransactionHandler and scheduling initial execution..."
 echo "   - Delay: 10 seconds"
 echo "   - Priority: Calculated dynamically based on execution effort"
 echo "   - Execution Effort: Calculated dynamically based on maxRequestsPerTx"
@@ -175,10 +198,10 @@ echo "✅ Transaction Handler initialized and initial execution scheduled"
 echo ""
 
 # ==========================================
-# Step 7: Verify Solidity Contract
+# Step 8: Verify Solidity Contract
 # ==========================================
 
-echo "🔍 Step 7: Verifying Solidity contract..."
+echo "🔍 Step 8: Verifying Solidity contract..."
 echo "COA Address (constructor arg): $COA_ADDRESS"
 echo "WFLOW Address (constructor arg): $WFLOW_ADDRESS"
 echo ""
@@ -198,9 +221,9 @@ echo "✅ Contract verified"
 echo ""
 
 # ==========================================
-# Step 8: Export Artifacts and Update Addresses
+# Step 9: Export Artifacts and Update Addresses
 # ==========================================
-echo "📦 Step 8: Exporting artifacts and updating contract addresses..."
+echo "📦 Step 9: Exporting artifacts and updating contract addresses..."
 
 "$SCRIPT_DIR/scripts/export-artifacts.sh" --network testnet --evm-address "$DEPLOYED_ADDRESS"
 

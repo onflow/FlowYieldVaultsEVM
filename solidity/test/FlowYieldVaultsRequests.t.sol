@@ -29,6 +29,10 @@ contract FlowYieldVaultsRequestsTest is Test {
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
+    // Events for testing (from FlowYieldVaultsRequests)
+    event BalanceUpdated(address indexed user, address indexed tokenAddress, uint256 newBalance);
+    event RefundClaimed(address indexed user, address indexed tokenAddress, uint256 amount);
+
     // Errors from OpenZeppelin Ownable
     error OwnableUnauthorizedAccount(address account);
     error OwnableInvalidOwner(address owner);
@@ -124,6 +128,83 @@ contract FlowYieldVaultsRequestsTest is Test {
     }
 
     // ============================================
+    // CLAIM REFUND
+    // ============================================
+
+    function test_ClaimRefund_Success() public {
+        // 1. User creates request
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
+
+        // 2. COA starts processing (moves funds to COA)
+        vm.prank(coa);
+        c.startProcessing(reqId);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+
+        // 3. COA fails and returns funds
+        vm.prank(coa);
+        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Failed");
+
+        // 4. User has refund in pending balance
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
+
+        // 5. User claims refund
+        uint256 balBefore = user.balance;
+        vm.prank(user);
+        c.claimRefund(NATIVE_FLOW);
+
+        // 6. Verify funds transferred and balance zeroed
+        assertEq(user.balance, balBefore + 1 ether);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+    }
+
+    function test_ClaimRefund_RevertNoRefundAvailable() public {
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.NoRefundAvailable.selector, NATIVE_FLOW));
+        c.claimRefund(NATIVE_FLOW);
+    }
+
+    function test_ClaimRefund_MultipleTokens() public {
+        // User has refunds in multiple tokens (simulated via direct balance manipulation in real scenario)
+        // For this test, we create two requests and have them both fail
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+
+        // Process and fail
+        vm.prank(coa);
+        c.startProcessing(reqId);
+        vm.prank(coa);
+        c.completeProcessing{value: 2 ether}(reqId, false, 0, "Failed");
+
+        // Claim only NATIVE_FLOW
+        uint256 balBefore = user.balance;
+        vm.prank(user);
+        c.claimRefund(NATIVE_FLOW);
+
+        assertEq(user.balance, balBefore + 2 ether);
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+    }
+
+    function test_ClaimRefund_EmitsEvents() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(coa);
+        c.startProcessing(reqId);
+        vm.prank(coa);
+        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Failed");
+
+        vm.prank(user);
+        vm.expectEmit(true, true, false, true);
+        emit BalanceUpdated(user, NATIVE_FLOW, 0);
+        vm.expectEmit(true, true, false, true);
+        emit RefundClaimed(user, NATIVE_FLOW, 1 ether);
+        c.claimRefund(NATIVE_FLOW);
+    }
+
+    // ============================================
     // COA PROCESSING - startProcessing & completeProcessing
     // ============================================
 
@@ -192,7 +273,8 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Balance is now 0
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
 
-        c.completeProcessing(reqId, false, 0, "Cadence error");
+        // COA must return funds when completing with failure
+        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Cadence error");
         vm.stopPrank();
 
         // Balance restored on failure
@@ -442,6 +524,25 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.InvalidYieldVaultId.selector, 999, user));
         c.depositToYieldVault{value: 1 ether}(999, NATIVE_FLOW, 1 ether);
+    }
+
+    function test_CreateYieldVault_RevertEmptyVaultIdentifier() public {
+        vm.prank(user);
+        vm.expectRevert(FlowYieldVaultsRequests.EmptyVaultIdentifier.selector);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, "", STRATEGY_ID);
+    }
+
+    function test_CreateYieldVault_RevertEmptyStrategyIdentifier() public {
+        vm.prank(user);
+        vm.expectRevert(FlowYieldVaultsRequests.EmptyStrategyIdentifier.selector);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, "");
+    }
+
+    function test_CreateYieldVault_RevertBothIdentifiersEmpty() public {
+        vm.prank(user);
+        // Should revert on vaultIdentifier check first
+        vm.expectRevert(FlowYieldVaultsRequests.EmptyVaultIdentifier.selector);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, "", "");
     }
 
     function test_DepositToYieldVault_AnyoneCanDeposit() public {
@@ -1098,7 +1199,8 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Start and fail processing req1
         vm.startPrank(coa);
         c.startProcessing(req1);
-        c.completeProcessing(req1, false, 0, "Failed");
+        // COA must return funds when completing with failure
+        c.completeProcessing{value: 1 ether}(req1, false, 0, "Failed");
         vm.stopPrank();
 
         // req1 should still be removed from pending (it's marked FAILED)

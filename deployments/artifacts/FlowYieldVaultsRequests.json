@@ -238,6 +238,19 @@
   },
   {
     "type": "function",
+    "name": "claimRefund",
+    "inputs": [
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "closeYieldVault",
     "inputs": [
       {
@@ -281,7 +294,7 @@
       }
     ],
     "outputs": [],
-    "stateMutability": "nonpayable"
+    "stateMutability": "payable"
   },
   {
     "type": "function",
@@ -1391,6 +1404,31 @@
   },
   {
     "type": "event",
+    "name": "RefundClaimed",
+    "inputs": [
+      {
+        "name": "user",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "RequestCancelled",
     "inputs": [
       {
@@ -1623,6 +1661,16 @@
   },
   {
     "type": "error",
+    "name": "EmptyStrategyIdentifier",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EmptyVaultIdentifier",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InsufficientBalance",
     "inputs": [
       {
@@ -1672,6 +1720,17 @@
     "type": "error",
     "name": "MsgValueMustEqualAmount",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoRefundAvailable",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
   },
   {
     "type": "error",
