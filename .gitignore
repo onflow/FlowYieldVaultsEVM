@@ -10,3 +10,6 @@ broadcast/
 
 # Build output
 out/
+
+# Local deployment artifacts
+local/.deployed_contract_address

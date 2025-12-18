@@ -100,9 +100,9 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 ### Testnet Deployment
 | Contract | Address |
 |----------|---------|
-| FlowYieldVaultsRequests (EVM) | `0x935936B21B397902B786B55A21d3CB3863C9E814` |
-| FlowYieldVaultsEVM (Cadence) | `3abe2e0cbfd02d25` |
-| FlowYieldVaultsTransactionHandler | `3abe2e0cbfd02d25` |
+| FlowYieldVaultsRequests (EVM) | `0xBA0D3CF51d099163cb5DA56F0E3d80EbF2125A9b` |
+| FlowYieldVaultsEVM (Cadence) | `d5f3a54862af53d3` |
+| FlowYieldVaultsTransactionHandler | `d5f3a54862af53d3` |
 
 ## Dependencies
 

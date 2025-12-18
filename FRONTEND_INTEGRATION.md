@@ -204,14 +204,14 @@ fcl.config({
 });
 
 // Contract addresses
-const FLOW_YIELD_VAULTS_EVM_ADDRESS = '0x3abe2e0cbfd02d25'; // testnet
+const FLOW_YIELD_VAULTS_EVM_ADDRESS = '0xd5f3a54862af53d3'; // testnet
 ```
 
 ### Get User's YieldVault IDs (from Cadence)
 
 ```typescript
 const GET_USER_YIELDVAULTS = `
-import FlowYieldVaultsEVM from 0x3abe2e0cbfd02d25
+import FlowYieldVaultsEVM from 0xd5f3a54862af53d3
 
 access(all) fun main(evmAddress: String): [UInt64] {
     var normalizedAddress = evmAddress.toLower()
@@ -237,7 +237,7 @@ This is **critical** for displaying actual position values. The balance lives on
 
 ```typescript
 const GET_YIELDVAULT_BALANCE = `
-import FlowYieldVaults from 0x3abe2e0cbfd02d25
+import FlowYieldVaults from 0xd5f3a54862af53d3
 
 access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): UFix64? {
     let account = getAccount(managerAddress)
@@ -266,7 +266,7 @@ const balance = await fcl.query({
 
 ```typescript
 const GET_YIELDVAULT_DETAILS = `
-import FlowYieldVaults from 0x3abe2e0cbfd02d25
+import FlowYieldVaults from 0xd5f3a54862af53d3
 
 access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): {String: AnyStruct}? {
     let account = getAccount(managerAddress)
@@ -331,7 +331,7 @@ async function getUserPositions(userEvmAddress: string) {
 
 ```typescript
 const GET_SUPPORTED_STRATEGIES = `
-import FlowYieldVaults from 0x3abe2e0cbfd02d25
+import FlowYieldVaults from 0xd5f3a54862af53d3
 
 access(all) fun main(): [String] {
     let strategies = FlowYieldVaults.getSupportedStrategies()
@@ -351,7 +351,7 @@ const strategies = await fcl.query({ cadence: GET_SUPPORTED_STRATEGIES });
 
 ```typescript
 const CHECK_SYSTEM_STATUS = `
-import FlowYieldVaultsEVM from 0x3abe2e0cbfd02d25
+import FlowYieldVaultsEVM from 0xd5f3a54862af53d3
 
 access(all) fun main(): {String: AnyStruct} {
     return {

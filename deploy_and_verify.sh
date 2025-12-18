@@ -30,7 +30,7 @@ flow transactions send "$SCRIPT_DIR/cadence/transactions/setup_coa.cdc" \
     --compute-limit 9999
 
 # Get the COA address
-COA_ADDRESS=$(flow scripts execute "$SCRIPT_DIR/cadence/scripts/get_coa_address.cdc" 0x3abe2e0cbfd02d25 --network testnet --output json | jq -r '.value')
+COA_ADDRESS=$(flow scripts execute "$SCRIPT_DIR/cadence/scripts/get_coa_address.cdc" 0xd5f3a54862af53d3 --network testnet --output json | jq -r '.value')
 
 if [ -z "$COA_ADDRESS" ] || [ "$COA_ADDRESS" == "null" ]; then
     echo "❌ Error: Could not get COA address"
@@ -177,8 +177,6 @@ echo ""
 # ==========================================
 # Step 7: Verify Solidity Contract
 # ==========================================
-echo "⏳ Waiting 60 seconds for block explorer to index the deployment..."
-sleep 60
 
 echo "🔍 Step 7: Verifying Solidity contract..."
 echo "COA Address (constructor arg): $COA_ADDRESS"
@@ -226,8 +224,8 @@ echo "   https://evm-testnet.flowscan.io/address/$DEPLOYED_ADDRESS"
 echo ""
 echo "🔍 Useful Commands:"
 echo "   - Check pending requests:"
-echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc 0x3abe2e0cbfd02d25 --network testnet"
+echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc 0xd5f3a54862af53d3 --network testnet"
 echo ""
 echo "   - Check handler status:"
-echo "     flow scripts execute cadence/scripts/check_yieldvaultmanager_status.cdc 0x3abe2e0cbfd02d25 --network testnet"
+echo "     flow scripts execute cadence/scripts/check_yieldvaultmanager_status.cdc 0xd5f3a54862af53d3 --network testnet"
 echo ""

@@ -21,7 +21,7 @@
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
-				"testnet": "3abe2e0cbfd02d25"
+				"testnet": "d5f3a54862af53d3"
 			}
 		},
 		"FlowYieldVaultsTransactionHandler": {
@@ -29,7 +29,7 @@
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
-				"testnet": "3abe2e0cbfd02d25"
+				"testnet": "d5f3a54862af53d3"
 			}
 		}
 	},
@@ -482,7 +482,7 @@
 			}
 		},
 		"testnet-account": {
-			"address": "3abe2e0cbfd02d25",
+			"address": "d5f3a54862af53d3",
 			"key": {
 				"type": "google-kms",
 				"hashAlgorithm": "SHA2_256",

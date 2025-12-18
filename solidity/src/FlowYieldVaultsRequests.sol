@@ -866,6 +866,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             pendingUserBalances[request.user][request.tokenAddress] =
                 currentBalance -
                 request.amount;
+
+            // Transfer user's escrowed funds from contract to the COA for bridging
+            if (isNativeFlow(request.tokenAddress)) {
+                (bool success, ) = authorizedCOA.call{value: request.amount}("");
+                if (!success) revert TransferFailed();
+            } else {
+                IERC20(request.tokenAddress).safeTransfer(
+                    authorizedCOA,
+                    request.amount
+                );
+            }
         }
 
         emit RequestProcessed(
