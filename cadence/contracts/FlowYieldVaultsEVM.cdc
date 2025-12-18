@@ -1,7 +1,6 @@
 import "FungibleToken"
 import "FlowToken"
 import "EVM"
-import "Burner"
 
 import "FlowYieldVaults"
 import "FlowYieldVaultsClosedBeta"
@@ -118,6 +117,22 @@ access(all) contract FlowYieldVaultsEVM {
             self.success = success
             self.yieldVaultId = yieldVaultId
             self.message = message
+        }
+    }
+
+    /// @notice Pending requests info for a specific EVM address
+    /// @dev Used to return aggregated pending request data for UI/queries
+    access(all) struct PendingRequestsInfo {
+        access(all) let evmAddress: String
+        access(all) let pendingCount: Int
+        access(all) let pendingBalance: UFix64
+        access(all) let requests: [EVMRequest]
+
+        init(evmAddress: String, pendingCount: Int, pendingBalance: UFix64, requests: [EVMRequest]) {
+            self.evmAddress = evmAddress
+            self.pendingCount = pendingCount
+            self.pendingBalance = pendingBalance
+            self.requests = requests
         }
     }
 
@@ -293,6 +308,7 @@ access(all) contract FlowYieldVaultsEVM {
             pre {
                 coaCap.check(): "COA capability is invalid"
                 yieldVaultManagerCap.check(): "YieldVaultManager capability is invalid"
+                betaBadgeCap.check(): "BetaBadge capability is invalid"
                 feeProviderCap.check(): "Fee provider capability is invalid"
             }
 
@@ -369,6 +385,42 @@ access(all) contract FlowYieldVaultsEVM {
             var success = false
             var yieldVaultId: UInt64 = FlowYieldVaultsEVM.noYieldVaultId
             var message = ""
+
+            // Early validation for CREATE_YIELDVAULT requests
+            // Validate vaultIdentifier and strategyIdentifier before fund withdrawal to prevent panics
+            // Note: Must call startProcessing BEFORE completeProcessing because Solidity requires
+            // request status to be PROCESSING before it can be marked COMPLETED/FAILED
+            if request.requestType == FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue {
+                let validationResult = self.validateCreateYieldVaultParameters(request)
+                if !validationResult.success {
+                    // Start processing first to transition request from PENDING to PROCESSING
+                    // This is required because completeProcessing requires PROCESSING status
+                    if !self.startProcessing(requestId: request.id) {
+                        emit RequestFailed(
+                            requestId: request.id,
+                            userAddress: request.user.toString(),
+                            requestType: request.requestType,
+                            reason: "Validation failed and could not start processing: ".concat(validationResult.message)
+                        )
+                        return false
+                    }
+                    // Now we can mark as failed - request is in PROCESSING status
+                    if !self.completeProcessing(
+                        requestId: request.id,
+                        success: false,
+                        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                        message: validationResult.message
+                    ) {
+                        emit RequestFailed(
+                            requestId: request.id,
+                            userAddress: request.user.toString(),
+                            requestType: request.requestType,
+                            reason: "Validation failed and could not complete processing: ".concat(validationResult.message)
+                        )
+                    }
+                    return false
+                }
+            }
 
             let needsStartProcessing = request.requestType == FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue
                 || request.requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue
@@ -458,6 +510,69 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
+        /// @notice Validates CREATE_YIELDVAULT request parameters before processing
+        /// @dev Validates that vaultIdentifier and strategyIdentifier are valid Cadence types
+        ///      and that the strategy is supported by FlowYieldVaults protocol.
+        ///      This prevents panics during createYieldVault by catching invalid parameters early.
+        ///      Note: Basic string validations (empty checks) should be done on the Solidity side.
+        /// @param request The request to validate
+        /// @return ProcessResult with success=true if valid, or success=false with error message
+        access(self) fun validateCreateYieldVaultParameters(_ request: EVMRequest): ProcessResult {
+            // Validate vaultIdentifier is a valid Cadence type identifier
+            let vaultType = CompositeType(request.vaultIdentifier)
+            if vaultType == nil {
+                return ProcessResult(
+                    success: false,
+                    yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                    message: "Invalid vaultIdentifier: \(request.vaultIdentifier) is not a valid Cadence type"
+                )
+            }
+
+            // Validate strategyIdentifier is a valid Cadence type identifier
+            let strategyType = CompositeType(request.strategyIdentifier)
+            if strategyType == nil {
+                return ProcessResult(
+                    success: false,
+                    yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                    message: "Invalid strategyIdentifier: \(request.strategyIdentifier) is not a valid Cadence type"
+                )
+            }
+
+            // Validate strategy is supported by FlowYieldVaults protocol
+            let supportedStrategies = FlowYieldVaults.getSupportedStrategies()
+            var isStrategySupported = false
+            for supported in supportedStrategies {
+                if supported == strategyType! {
+                    isStrategySupported = true
+                    break
+                }
+            }
+            if !isStrategySupported {
+                return ProcessResult(
+                    success: false,
+                    yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                    message: "Unsupported strategy: \(request.strategyIdentifier) is not supported by FlowYieldVaults"
+                )
+            }
+
+            // Validate vault type is supported for this strategy's initialization
+            let supportedVaults = FlowYieldVaults.getSupportedInitializationVaults(forStrategy: strategyType!)
+            if supportedVaults[vaultType!] != true {
+                return ProcessResult(
+                    success: false,
+                    yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                    message: "Unsupported vault type: \(request.vaultIdentifier) cannot be used to initialize strategy \(request.strategyIdentifier)"
+                )
+            }
+
+            // Validation passed
+            return ProcessResult(
+                success: true,
+                yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                message: "Validation passed"
+            )
+        }
+
         access(self) fun processCreateYieldVault(_ request: EVMRequest): ProcessResult {
             let vaultIdentifier = request.vaultIdentifier
             let strategyIdentifier = request.strategyIdentifier
@@ -497,22 +612,15 @@ access(all) contract FlowYieldVaultsEVM {
                 )
             }
 
-            let strategyType = CompositeType(strategyIdentifier)
-            if strategyType == nil {
-                return self.returnFundsAndFail(
-                    vault: <-vault,
-                    recipient: request.user,
-                    tokenAddress: request.tokenAddress,
-                    errorMessage: "Invalid strategyIdentifier: \(strategyIdentifier)"
-                )
-            }
+            // strategyIdentifier already validated by validateCreateYieldVaultParameters
+            let strategyType = CompositeType(strategyIdentifier)!
 
             let betaRef = self.getBetaReference()
             let yieldVaultManager = self.getYieldVaultManagerRef()
 
             let yieldVaultId = yieldVaultManager.createYieldVault(
                 betaRef: betaRef,
-                strategyType: strategyType!,
+                strategyType: strategyType,
                 withVault: <-vault
             )
 
@@ -641,6 +749,24 @@ access(all) contract FlowYieldVaultsEVM {
 
             let amount = FlowYieldVaultsEVM.ufix64FromUInt256(request.amount, tokenAddress: request.tokenAddress)
 
+            // Pre-validate: Check YieldVault has sufficient balance before attempting withdrawal
+            let yieldVaultRef = self.getYieldVaultManagerRef().borrowYieldVault(id: request.yieldVaultId)
+            if yieldVaultRef == nil {
+                return ProcessResult(
+                    success: false,
+                    yieldVaultId: request.yieldVaultId,
+                    message: "YieldVault Id \(request.yieldVaultId) not found in manager"
+                )
+            }
+            let availableBalance = yieldVaultRef!.getYieldVaultBalance()
+            if amount > availableBalance {
+                return ProcessResult(
+                    success: false,
+                    yieldVaultId: request.yieldVaultId,
+                    message: "Requested withdrawal amount \(amount) exceeds YieldVault balance \(availableBalance)"
+                )
+            }
+
             let vault <- self.getYieldVaultManagerRef().withdrawFromYieldVault(request.yieldVaultId, amount: amount)
 
             let actualAmount = vault.balance
@@ -667,7 +793,7 @@ access(all) contract FlowYieldVaultsEVM {
             let result = self.getCOARef().call(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 200_000,
+                gasLimit: 15_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
 
@@ -704,7 +830,7 @@ access(all) contract FlowYieldVaultsEVM {
             let result = self.getCOARef().call(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 1_000_000,
+                gasLimit: 15_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
 
@@ -951,6 +1077,129 @@ access(all) contract FlowYieldVaultsEVM {
     /// @return The current maxRequestsPerTx value
     access(all) view fun getMaxRequestsPerTx(): Int {
         return self.maxRequestsPerTx
+    }
+
+    /// @notice Gets pending requests for a specific EVM address (public query)
+    /// @dev Uses the contract account's public COA capability at /public/evm for read-only EVM calls.
+    /// @param evmAddressHex The EVM address as a hex string (e.g., "0x1234...")
+    /// @return PendingRequestsInfo containing count, balance, and request details
+    access(all) fun getPendingRequestsForEVMAddress(_ evmAddressHex: String): PendingRequestsInfo {
+        pre {
+            self.flowYieldVaultsRequestsAddress != nil: "FlowYieldVaultsRequests address not set"
+        }
+        let coaRef = self.account.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
+            ?? panic("Could not borrow public COA capability from /public/evm")
+        let evmAddress = EVM.addressFromString(evmAddressHex)
+
+        let calldata = EVM.encodeABIWithSignature(
+            "getPendingRequestsByUserUnpacked(address)",
+            [evmAddress]
+        )
+
+        let callResult = coaRef.dryCall(
+            to: self.flowYieldVaultsRequestsAddress!,
+            data: calldata,
+            gasLimit: 15_000_000,
+            value: EVM.Balance(attoflow: 0)
+        )
+
+        if callResult.status != EVM.Status.successful {
+            let errorMsg = self.decodeEVMError(callResult.data)
+            panic("getPendingRequestsByUserUnpacked call failed: ".concat(errorMsg))
+        }
+
+        let decoded = EVM.decodeABI(
+            types: [
+                Type<[UInt256]>(),        // ids
+                Type<[UInt8]>(),          // requestTypes
+                Type<[UInt8]>(),          // statuses
+                Type<[EVM.EVMAddress]>(), // tokenAddresses
+                Type<[UInt256]>(),        // amounts
+                Type<[UInt64]>(),         // yieldVaultIds
+                Type<[UInt256]>(),        // timestamps
+                Type<[String]>(),         // messages
+                Type<[String]>(),         // vaultIdentifiers
+                Type<[String]>(),         // strategyIdentifiers
+                Type<UInt256>()           // pendingBalance
+            ],
+            data: callResult.data
+        )
+
+        let ids = decoded[0] as! [UInt256]
+        let requestTypes = decoded[1] as! [UInt8]
+        let statuses = decoded[2] as! [UInt8]
+        let tokenAddresses = decoded[3] as! [EVM.EVMAddress]
+        let amounts = decoded[4] as! [UInt256]
+        let yieldVaultIds = decoded[5] as! [UInt64]
+        let timestamps = decoded[6] as! [UInt256]
+        let messages = decoded[7] as! [String]
+        let vaultIdentifiers = decoded[8] as! [String]
+        let strategyIdentifiers = decoded[9] as! [String]
+        let pendingBalanceRaw = decoded[10] as! UInt256
+
+        // Convert pending balance from wei to UFix64
+        let pendingBalance = FlowEVMBridgeUtils.uint256ToUFix64(value: pendingBalanceRaw, decimals: 18)
+
+        // Build request array
+        var requests: [EVMRequest] = []
+        var i = 0
+        while i < ids.length {
+            let request = EVMRequest(
+                id: ids[i],
+                user: evmAddress,
+                requestType: requestTypes[i],
+                status: statuses[i],
+                tokenAddress: tokenAddresses[i],
+                amount: amounts[i],
+                yieldVaultId: yieldVaultIds[i],
+                timestamp: timestamps[i],
+                message: messages[i],
+                vaultIdentifier: vaultIdentifiers[i],
+                strategyIdentifier: strategyIdentifiers[i]
+            )
+            requests.append(request)
+            i = i + 1
+        }
+
+        return PendingRequestsInfo(
+            evmAddress: evmAddressHex,
+            pendingCount: ids.length,
+            pendingBalance: pendingBalance,
+            requests: requests
+        )
+    }
+
+    /// @notice Gets the total count of pending requests (public query)
+    /// @dev Uses the contract account's public COA capability at /public/evm for read-only EVM calls.
+    /// @return The number of pending requests
+    access(all) fun getPendingRequestCount(): Int {
+        pre {
+            self.flowYieldVaultsRequestsAddress != nil: "FlowYieldVaultsRequests address not set"
+        }
+        let coaRef = self.account.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
+            ?? panic("Could not borrow public COA capability from /public/evm")
+
+        let calldata = EVM.encodeABIWithSignature("getPendingRequestCount()", [])
+
+        let callResult = coaRef.dryCall(
+            to: self.flowYieldVaultsRequestsAddress!,
+            data: calldata,
+            gasLimit: 100_000,
+            value: EVM.Balance(attoflow: 0)
+        )
+
+        if callResult.status != EVM.Status.successful {
+            let errorMsg = self.decodeEVMError(callResult.data)
+            panic("getPendingRequestCount call failed: ".concat(errorMsg))
+        }
+
+        let decoded = EVM.decodeABI(
+            types: [Type<UInt256>()],
+            data: callResult.data
+        )
+
+        let count256 = decoded[0] as! UInt256
+        return Int(count256)
     }
 
     // ============================================

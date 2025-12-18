@@ -51,6 +51,7 @@ test_files=(
     "cadence/tests/access_control_test.cdc"
     "cadence/tests/error_handling_test.cdc"
     "cadence/tests/evm_bridge_lifecycle_test.cdc"
+    "cadence/tests/validation_test.cdc"
 )
 
 failed_tests=0

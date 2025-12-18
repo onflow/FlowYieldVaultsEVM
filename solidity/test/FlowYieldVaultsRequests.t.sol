@@ -10,6 +10,8 @@ contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
     function testRegisterYieldVaultId(uint64 yieldVaultId, address owner) external {
         validYieldVaultIds[yieldVaultId] = true;
         yieldVaultOwners[yieldVaultId] = owner;
+        // Track index for O(1) removal (matches _registerYieldVault behavior)
+        _yieldVaultIndexInUserArray[owner][yieldVaultId] = yieldVaultsByUser[owner].length;
         yieldVaultsByUser[owner].push(yieldVaultId);
         userOwnsYieldVault[owner][yieldVaultId] = true;
     }
@@ -595,5 +597,536 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Native FLOW should still be supported
         (bool nativeSupported, , ) = contractNoWflow.allowedTokens(NATIVE_FLOW);
         assertEq(nativeSupported, true, "Native FLOW should still be supported");
+    }
+
+    // ============================================
+    // FIFO QUEUE OPTIMIZATION TESTS
+    // ============================================
+
+    function test_FIFOOrder_MaintainedAfterRemoval() public {
+        // Create 5 requests from different users
+        vm.prank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user2);
+        uint256 req2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user);
+        uint256 req3 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user2);
+        uint256 req4 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user);
+        uint256 req5 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        // Process middle request (req3)
+        vm.startPrank(coa);
+        c.startProcessing(req3);
+        c.completeProcessing(req3, true, 200, "Created");
+        vm.stopPrank();
+
+        // Verify FIFO order is maintained: [req1, req2, req4, req5]
+        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(ids.length, 4, "Should have 4 pending requests");
+        assertEq(ids[0], req1, "First should be req1");
+        assertEq(ids[1], req2, "Second should be req2");
+        assertEq(ids[2], req4, "Third should be req4");
+        assertEq(ids[3], req5, "Fourth should be req5");
+    }
+
+    function test_FIFOOrder_RemoveFirstElement() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        // Remove first element
+        vm.startPrank(coa);
+        c.startProcessing(req1);
+        c.completeProcessing(req1, true, 100, "Created");
+        vm.stopPrank();
+
+        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(ids.length, 2);
+        assertEq(ids[0], req2, "First should now be req2");
+        assertEq(ids[1], req3, "Second should be req3");
+    }
+
+    function test_FIFOOrder_RemoveLastElement() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        // Remove last element
+        vm.startPrank(coa);
+        c.startProcessing(req3);
+        c.completeProcessing(req3, true, 100, "Created");
+        vm.stopPrank();
+
+        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(ids.length, 2);
+        assertEq(ids[0], req1);
+        assertEq(ids[1], req2);
+    }
+
+    function test_FIFOOrder_RemoveAllInOrder() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        // Process in FIFO order
+        vm.startPrank(coa);
+        c.startProcessing(req1);
+        c.completeProcessing(req1, true, 100, "Created");
+
+        c.startProcessing(req2);
+        c.completeProcessing(req2, true, 101, "Created");
+
+        c.startProcessing(req3);
+        c.completeProcessing(req3, true, 102, "Created");
+        vm.stopPrank();
+
+        assertEq(c.getPendingRequestCount(), 0, "All requests should be processed");
+    }
+
+    function test_FIFOOrder_RemoveOutOfOrder() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req4 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        // Process out of order: req2, req4, req1, req3
+        vm.startPrank(coa);
+        c.startProcessing(req2);
+        c.completeProcessing(req2, true, 100, "Created");
+
+        // After removing req2: [req1, req3, req4]
+        (uint256[] memory ids1, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(ids1[0], req1);
+        assertEq(ids1[1], req3);
+        assertEq(ids1[2], req4);
+
+        c.startProcessing(req4);
+        c.completeProcessing(req4, true, 101, "Created");
+
+        // After removing req4: [req1, req3]
+        (uint256[] memory ids2, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(ids2[0], req1);
+        assertEq(ids2[1], req3);
+
+        c.startProcessing(req1);
+        c.completeProcessing(req1, true, 102, "Created");
+
+        // After removing req1: [req3]
+        (uint256[] memory ids3, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(ids3.length, 1);
+        assertEq(ids3[0], req3);
+
+        c.startProcessing(req3);
+        c.completeProcessing(req3, true, 103, "Created");
+        vm.stopPrank();
+
+        assertEq(c.getPendingRequestCount(), 0);
+    }
+
+    // ============================================
+    // PER-USER PENDING REQUESTS TESTS
+    // ============================================
+
+    function test_GetPendingRequestsByUserUnpacked_SingleUser() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.depositToYieldVault{value: 2 ether}(42, NATIVE_FLOW, 2 ether);
+        vm.stopPrank();
+
+        (
+            uint256[] memory ids,
+            uint8[] memory requestTypes,
+            uint8[] memory statuses,
+            address[] memory tokenAddresses,
+            uint256[] memory amounts,
+            uint64[] memory yieldVaultIds,
+            uint256[] memory timestamps,
+            string[] memory messages,
+            string[] memory vaultIdentifiers,
+            string[] memory strategyIdentifiers,
+            uint256 pendingBalance
+        ) = c.getPendingRequestsByUserUnpacked(user);
+
+        assertEq(ids.length, 2, "User should have 2 pending requests");
+        assertEq(ids[0], req1);
+        assertEq(ids[1], req2);
+        assertEq(requestTypes[0], uint8(FlowYieldVaultsRequests.RequestType.CREATE_YIELDVAULT));
+        assertEq(requestTypes[1], uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
+        assertEq(amounts[0], 1 ether);
+        assertEq(amounts[1], 2 ether);
+        assertEq(pendingBalance, 3 ether, "Pending balance should be sum of amounts");
+    }
+
+    function test_GetPendingRequestsByUserUnpacked_MultipleUsers() public {
+        vm.prank(user);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user2);
+        c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user);
+        c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
+
+        // Check user's requests
+        (uint256[] memory userIds, , , , , , , , , , uint256 userBalance) = c.getPendingRequestsByUserUnpacked(user);
+        assertEq(userIds.length, 2, "User should have 2 requests");
+        assertEq(userBalance, 4 ether, "User pending balance should be 4 ether");
+
+        // Check user2's requests
+        (uint256[] memory user2Ids, , , , , , , , , , uint256 user2Balance) = c.getPendingRequestsByUserUnpacked(user2);
+        assertEq(user2Ids.length, 1, "User2 should have 1 request");
+        assertEq(user2Balance, 2 ether, "User2 pending balance should be 2 ether");
+    }
+
+    function test_GetPendingRequestsByUserUnpacked_EmptyForNewUser() public {
+        address newUser = makeAddr("newUser");
+
+        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance) = c.getPendingRequestsByUserUnpacked(newUser);
+
+        assertEq(ids.length, 0, "New user should have no pending requests");
+        assertEq(pendingBalance, 0, "New user should have 0 pending balance");
+    }
+
+    function test_GetPendingRequestsByUserUnpacked_AfterProcessing() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        // Process req2
+        vm.startPrank(coa);
+        c.startProcessing(req2);
+        c.completeProcessing(req2, true, 100, "Created");
+        vm.stopPrank();
+
+        // User should now have req1 and req3
+        (uint256[] memory ids, , , , uint256[] memory amounts, , , , , , uint256 pendingBalance) = c.getPendingRequestsByUserUnpacked(user);
+        assertEq(ids.length, 2, "User should have 2 remaining requests");
+        // Note: Order in user array may change due to swap-and-pop optimization
+        assertTrue(ids[0] == req1 || ids[0] == req3, "Should contain req1 or req3");
+        assertTrue(ids[1] == req1 || ids[1] == req3, "Should contain req1 or req3");
+        assertTrue(ids[0] != ids[1], "Should be different requests");
+        assertEq(pendingBalance, 4 ether, "Pending balance should be 4 ether");
+    }
+
+    function test_GetPendingRequestsByUserUnpacked_AfterCancel() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+
+        // Cancel req1
+        c.cancelRequest(req1);
+        vm.stopPrank();
+
+        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance) = c.getPendingRequestsByUserUnpacked(user);
+        assertEq(ids.length, 1, "User should have 1 remaining request");
+        assertEq(ids[0], req2, "Remaining request should be req2");
+        assertEq(pendingBalance, 2 ether);
+    }
+
+    // ============================================
+    // USER REQUEST INDEX TRACKING TESTS
+    // ============================================
+
+    function test_UserRequestIndex_CorrectAfterMultipleOperations() public {
+        address user3 = makeAddr("user3");
+        vm.deal(user3, 100 ether);
+
+        // Create requests from multiple users interleaved
+        vm.prank(user);
+        uint256 u1r1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user2);
+        uint256 u2r1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user);
+        uint256 u1r2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user3);
+        uint256 u3r1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(user);
+        uint256 u1r3 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        // Remove user's middle request (u1r2)
+        vm.startPrank(coa);
+        c.startProcessing(u1r2);
+        c.completeProcessing(u1r2, true, 100, "Created");
+        vm.stopPrank();
+
+        // Verify user1's remaining requests
+        (uint256[] memory u1Ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        assertEq(u1Ids.length, 2, "User1 should have 2 requests");
+
+        // Verify user2's requests unchanged
+        (uint256[] memory u2Ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user2);
+        assertEq(u2Ids.length, 1, "User2 should have 1 request");
+        assertEq(u2Ids[0], u2r1);
+
+        // Verify user3's requests unchanged
+        (uint256[] memory u3Ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user3);
+        assertEq(u3Ids.length, 1, "User3 should have 1 request");
+        assertEq(u3Ids[0], u3r1);
+    }
+
+    function test_UserRequestIndex_RemoveAllUserRequests() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        vm.startPrank(coa);
+        c.startProcessing(req1);
+        c.completeProcessing(req1, true, 100, "Created");
+        c.startProcessing(req2);
+        c.completeProcessing(req2, true, 101, "Created");
+        vm.stopPrank();
+
+        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance) = c.getPendingRequestsByUserUnpacked(user);
+        assertEq(ids.length, 0, "User should have no pending requests");
+        assertEq(pendingBalance, 0);
+    }
+
+    // ============================================
+    // YIELDVAULT INDEX TRACKING TESTS
+    // ============================================
+
+    function test_YieldVaultIndex_RegisterAndUnregister() public {
+        // Create yieldvault
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 200, "Created");
+        vm.stopPrank();
+
+        // Verify yieldvault is registered
+        assertEq(c.doesUserOwnYieldVault(user, 200), true);
+        uint64[] memory userYieldVaults = c.getYieldVaultIdsForUser(user);
+        assertEq(userYieldVaults.length, 2); // 42 from setUp + 200
+
+        // Close yieldvault
+        vm.prank(user);
+        uint256 closeReqId = c.closeYieldVault(200);
+
+        vm.startPrank(coa);
+        c.startProcessing(closeReqId);
+        c.completeProcessing(closeReqId, true, 200, "Closed");
+        vm.stopPrank();
+
+        // Verify yieldvault is unregistered
+        assertEq(c.doesUserOwnYieldVault(user, 200), false);
+        userYieldVaults = c.getYieldVaultIdsForUser(user);
+        assertEq(userYieldVaults.length, 1); // Only 42 remains
+        assertEq(userYieldVaults[0], 42);
+    }
+
+    function test_YieldVaultIndex_MultipleYieldVaults() public {
+        // Create 3 yieldvaults
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        vm.startPrank(coa);
+        c.startProcessing(req1);
+        c.completeProcessing(req1, true, 100, "Created");
+        c.startProcessing(req2);
+        c.completeProcessing(req2, true, 101, "Created");
+        c.startProcessing(req3);
+        c.completeProcessing(req3, true, 102, "Created");
+        vm.stopPrank();
+
+        // User now has yieldvaults: 42, 100, 101, 102
+        uint64[] memory userYieldVaults = c.getYieldVaultIdsForUser(user);
+        assertEq(userYieldVaults.length, 4);
+
+        // Close middle yieldvault (101)
+        vm.prank(user);
+        uint256 closeReq = c.closeYieldVault(101);
+
+        vm.startPrank(coa);
+        c.startProcessing(closeReq);
+        c.completeProcessing(closeReq, true, 101, "Closed");
+        vm.stopPrank();
+
+        // Verify 101 is removed
+        assertEq(c.doesUserOwnYieldVault(user, 101), false);
+        userYieldVaults = c.getYieldVaultIdsForUser(user);
+        assertEq(userYieldVaults.length, 3);
+
+        // Verify remaining yieldvaults
+        assertEq(c.doesUserOwnYieldVault(user, 42), true);
+        assertEq(c.doesUserOwnYieldVault(user, 100), true);
+        assertEq(c.doesUserOwnYieldVault(user, 102), true);
+    }
+
+    function test_YieldVaultIndex_CloseAllYieldVaults() public {
+        // Close the existing yieldvault from setUp
+        vm.prank(user);
+        uint256 closeReq = c.closeYieldVault(42);
+
+        vm.startPrank(coa);
+        c.startProcessing(closeReq);
+        c.completeProcessing(closeReq, true, 42, "Closed");
+        vm.stopPrank();
+
+        uint64[] memory userYieldVaults = c.getYieldVaultIdsForUser(user);
+        assertEq(userYieldVaults.length, 0, "User should have no yieldvaults");
+        assertEq(c.doesUserOwnYieldVault(user, 42), false);
+    }
+
+    // ============================================
+    // STRESS TESTS FOR GAS OPTIMIZATION
+    // ============================================
+
+    function test_ManyRequests_MaintainsCorrectState() public {
+        uint256 numRequests = 20;
+        uint256[] memory requestIds = new uint256[](numRequests);
+
+        // Increase max pending requests limit
+        vm.prank(c.owner());
+        c.setMaxPendingRequestsPerUser(25);
+
+        // Create many requests
+        vm.startPrank(user);
+        for (uint256 i = 0; i < numRequests; i++) {
+            requestIds[i] = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        }
+        vm.stopPrank();
+
+        assertEq(c.getPendingRequestCount(), numRequests);
+
+        // Process every other request (simulating out-of-order processing)
+        vm.startPrank(coa);
+        for (uint256 i = 1; i < numRequests; i += 2) {
+            c.startProcessing(requestIds[i]);
+            c.completeProcessing(requestIds[i], true, uint64(100 + i), "Created");
+        }
+        vm.stopPrank();
+
+        // Should have 10 remaining
+        assertEq(c.getPendingRequestCount(), numRequests / 2);
+
+        // Verify FIFO order is maintained for remaining requests
+        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(ids.length, numRequests / 2);
+
+        // Even-indexed original requests should remain in order
+        for (uint256 i = 0; i < ids.length; i++) {
+            assertEq(ids[i], requestIds[i * 2], "FIFO order not maintained");
+        }
+    }
+
+    function test_ManyUsers_IndependentTracking() public {
+        address[] memory users = new address[](5);
+        for (uint256 i = 0; i < 5; i++) {
+            users[i] = makeAddr(string(abi.encodePacked("testUser", i)));
+            vm.deal(users[i], 100 ether);
+        }
+
+        // Each user creates 3 requests
+        uint256[][] memory userRequestIds = new uint256[][](5);
+        for (uint256 i = 0; i < 5; i++) {
+            userRequestIds[i] = new uint256[](3);
+            vm.startPrank(users[i]);
+            for (uint256 j = 0; j < 3; j++) {
+                userRequestIds[i][j] = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+            }
+            vm.stopPrank();
+        }
+
+        // Process user[2]'s middle request
+        vm.startPrank(coa);
+        c.startProcessing(userRequestIds[2][1]);
+        c.completeProcessing(userRequestIds[2][1], true, 300, "Created");
+        vm.stopPrank();
+
+        // Verify all other users still have 3 requests
+        for (uint256 i = 0; i < 5; i++) {
+            (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(users[i]);
+            if (i == 2) {
+                assertEq(ids.length, 2, "User 2 should have 2 requests");
+            } else {
+                assertEq(ids.length, 3, "Other users should have 3 requests");
+            }
+        }
+    }
+
+    // ============================================
+    // EDGE CASES
+    // ============================================
+
+    function test_SingleRequest_RemoveCorrectly() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 100, "Created");
+        vm.stopPrank();
+
+        assertEq(c.getPendingRequestCount(), 0);
+
+        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        assertEq(ids.length, 0);
+    }
+
+    function test_FailedProcessing_RestoresUserArray() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        // Start and fail processing req1
+        vm.startPrank(coa);
+        c.startProcessing(req1);
+        c.completeProcessing(req1, false, 0, "Failed");
+        vm.stopPrank();
+
+        // req1 should still be removed from pending (it's marked FAILED)
+        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance) = c.getPendingRequestsByUserUnpacked(user);
+        assertEq(ids.length, 1, "Should have 1 pending request");
+        assertEq(ids[0], req2);
+        // Balance refunded for failed request
+        assertEq(pendingBalance, 3 ether, "Balance should include refunded amount");
+    }
+
+    function test_CancelMiddleRequest_UpdatesIndexCorrectly() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
+
+        // Cancel middle request
+        c.cancelRequest(req2);
+        vm.stopPrank();
+
+        // Verify global FIFO order
+        (uint256[] memory globalIds, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(globalIds.length, 2);
+        assertEq(globalIds[0], req1, "First should be req1");
+        assertEq(globalIds[1], req3, "Second should be req3");
+
+        // Verify user's array
+        (uint256[] memory userIds, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        assertEq(userIds.length, 2);
     }
 }

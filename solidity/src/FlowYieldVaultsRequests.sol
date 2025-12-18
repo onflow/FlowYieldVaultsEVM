@@ -122,6 +122,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Whether blocklist enforcement is active
     bool public blocklistEnabled;
 
+    /// @notice Whether the contract is paused
+    bool public paused;
+
     /// @notice Addresses blocked from creating requests
     mapping(address => bool) public blocklisted;
 
@@ -133,6 +136,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice Count of pending requests per user
     mapping(address => uint256) public userPendingRequestCount;
+
+    /// @notice Pending request IDs per user for O(1) lookup
+    mapping(address => uint256[]) public pendingRequestIdsByUser;
+
+    /// @notice Index of request ID in user's pending array (for O(1) removal)
+    mapping(uint256 => uint256) private _requestIndexInUserArray;
 
     /// @notice Registry of valid YieldVault Ids created through this contract
     mapping(uint64 => bool) public validYieldVaultIds;
@@ -152,8 +161,15 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice All requests indexed by request ID
     mapping(uint256 => Request) public requests;
 
-    /// @notice Array of pending request IDs awaiting processing
+    /// @notice Array of pending request IDs awaiting processing (FIFO order)
     uint256[] public pendingRequestIds;
+
+    /// @notice Index of request ID in global pending array (for O(1) lookup)
+    mapping(uint256 => uint256) private _requestIndexInGlobalArray;
+
+    /// @notice Index of yieldVaultId in user's yieldVaultsByUser array (for O(1) removal)
+    /// @dev Internal visibility allows test helpers to properly initialize state
+    mapping(address => mapping(uint64 => uint256)) internal _yieldVaultIndexInUserArray;
 
     // ============================================
     // Errors
@@ -219,6 +235,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice YieldVault Id is invalid or not owned by user
     error InvalidYieldVaultId(uint64 yieldVaultId, address user);
+
+    /// @notice Contract is paused
+    error ContractPaused();
 
     // ============================================
     // Events
@@ -328,6 +347,14 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param newMax New limit
     event MaxPendingRequestsPerUserUpdated(uint256 oldMax, uint256 newMax);
 
+    /// @notice Emitted when the contract is paused
+    /// @param account Address that paused the contract
+    event Paused(address account);
+
+    /// @notice Emitted when the contract is unpaused
+    /// @param account Address that unpaused the contract
+    event Unpaused(address account);
+
     /// @notice Emitted when a new YieldVault is registered
     /// @param yieldVaultId Newly registered YieldVault Id
     event YieldVaultIdRegistered(uint64 indexed yieldVaultId);
@@ -360,6 +387,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (blocklistEnabled && blocklisted[msg.sender]) {
             revert Blocklisted(msg.sender);
         }
+        _;
+    }
+
+    /// @dev Requires contract to not be paused
+    modifier whenNotPaused() {
+        if (paused) revert ContractPaused();
         _;
     }
 
@@ -533,11 +566,27 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         emit MaxPendingRequestsPerUserUpdated(oldMax, _maxRequests);
     }
 
+    /// @notice Pauses the contract, preventing new request creation
+    function pause() external onlyOwner {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /// @notice Unpauses the contract, allowing new request creation
+    function unpause() external onlyOwner {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
     /// @notice Drops pending requests and refunds users (admin cleanup function)
     /// @param requestIds Request IDs to drop
     function dropRequests(
         uint256[] calldata requestIds
     ) external onlyOwner nonReentrant {
+        // Track actually dropped request IDs
+        uint256[] memory droppedIds = new uint256[](requestIds.length);
+        uint256 droppedCount = 0;
+
         for (uint256 i = 0; i < requestIds.length; ) {
             uint256 requestId = requestIds[i];
             Request storage request = requests[requestId];
@@ -588,6 +637,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                     request.yieldVaultId,
                     "Dropped by admin"
                 );
+
+                droppedIds[droppedCount] = requestId;
+                unchecked {
+                    ++droppedCount;
+                }
             }
 
             unchecked {
@@ -595,7 +649,18 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        emit RequestsDropped(requestIds, msg.sender);
+        // Only emit if any requests were actually dropped
+        if (droppedCount > 0) {
+            // Resize array to actual dropped count
+            uint256[] memory actualDroppedIds = new uint256[](droppedCount);
+            for (uint256 j = 0; j < droppedCount; ) {
+                actualDroppedIds[j] = droppedIds[j];
+                unchecked {
+                    ++j;
+                }
+            }
+            emit RequestsDropped(actualDroppedIds, msg.sender);
+        }
     }
 
     // ============================================
@@ -616,6 +681,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     )
         external
         payable
+        whenNotPaused
         onlyAllowlisted
         notBlocklisted
         nonReentrant
@@ -647,6 +713,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     )
         external
         payable
+        whenNotPaused
         onlyAllowlisted
         notBlocklisted
         nonReentrant
@@ -675,7 +742,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function withdrawFromYieldVault(
         uint64 yieldVaultId,
         uint256 amount
-    ) external onlyAllowlisted notBlocklisted returns (uint256) {
+    ) external whenNotPaused onlyAllowlisted notBlocklisted returns (uint256) {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
         _validateYieldVaultOwnership(yieldVaultId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
@@ -696,7 +763,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return requestId The created request ID
     function closeYieldVault(
         uint64 yieldVaultId
-    ) external onlyAllowlisted notBlocklisted returns (uint256) {
+    ) external whenNotPaused onlyAllowlisted notBlocklisted returns (uint256) {
         _validateYieldVaultOwnership(yieldVaultId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
 
@@ -1026,6 +1093,77 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         return userOwnsYieldVault[user][yieldVaultId];
     }
 
+    /// @notice Gets pending requests for a specific user in unpacked format
+    /// @dev Uses pendingRequestIdsByUser mapping for O(n) where n = user's pending requests (not all requests)
+    /// @param user User address to filter by
+    /// @return ids Request IDs
+    /// @return requestTypes Request types
+    /// @return statuses Request statuses
+    /// @return tokenAddresses Token addresses
+    /// @return amounts Amounts
+    /// @return yieldVaultIds YieldVault Ids
+    /// @return timestamps Timestamps
+    /// @return messages Messages
+    /// @return vaultIdentifiers Vault identifiers
+    /// @return strategyIdentifiers Strategy identifiers
+    /// @return pendingBalance Total pending balance for this user (native FLOW only)
+    function getPendingRequestsByUserUnpacked(
+        address user
+    )
+        external
+        view
+        returns (
+            uint256[] memory ids,
+            uint8[] memory requestTypes,
+            uint8[] memory statuses,
+            address[] memory tokenAddresses,
+            uint256[] memory amounts,
+            uint64[] memory yieldVaultIds,
+            uint256[] memory timestamps,
+            string[] memory messages,
+            string[] memory vaultIdentifiers,
+            string[] memory strategyIdentifiers,
+            uint256 pendingBalance
+        )
+    {
+        // Use the user's pending request IDs directly (O(1) lookup)
+        uint256[] storage userPendingIds = pendingRequestIdsByUser[user];
+        uint256 count = userPendingIds.length;
+
+        // Initialize arrays
+        ids = new uint256[](count);
+        requestTypes = new uint8[](count);
+        statuses = new uint8[](count);
+        tokenAddresses = new address[](count);
+        amounts = new uint256[](count);
+        yieldVaultIds = new uint64[](count);
+        timestamps = new uint256[](count);
+        messages = new string[](count);
+        vaultIdentifiers = new string[](count);
+        strategyIdentifiers = new string[](count);
+
+        // Fill arrays - only iterate through user's requests
+        for (uint256 i = 0; i < count; ) {
+            Request storage req = requests[userPendingIds[i]];
+            ids[i] = req.id;
+            requestTypes[i] = uint8(req.requestType);
+            statuses[i] = uint8(req.status);
+            tokenAddresses[i] = req.tokenAddress;
+            amounts[i] = req.amount;
+            yieldVaultIds[i] = req.yieldVaultId;
+            timestamps[i] = req.timestamp;
+            messages[i] = req.message;
+            vaultIdentifiers[i] = req.vaultIdentifier;
+            strategyIdentifiers[i] = req.strategyIdentifier;
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Get pending balance for native FLOW
+        pendingBalance = pendingUserBalances[user][NATIVE_FLOW];
+    }
+
     // ============================================
     // Internal Functions
     // ============================================
@@ -1103,25 +1241,33 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function _registerYieldVault(uint64 yieldVaultId, address user) internal {
         validYieldVaultIds[yieldVaultId] = true;
         yieldVaultOwners[yieldVaultId] = user;
+        // Track index for O(1) removal later
+        _yieldVaultIndexInUserArray[user][yieldVaultId] = yieldVaultsByUser[user].length;
         yieldVaultsByUser[user].push(yieldVaultId);
         userOwnsYieldVault[user][yieldVaultId] = true;
         emit YieldVaultIdRegistered(yieldVaultId);
     }
 
     /// @dev Unregisters a YieldVault and removes ownership tracking
+    /// @dev Uses swap-and-pop for O(1) removal (order doesn't matter for ownership tracking)
     function _unregisterYieldVault(uint64 yieldVaultId, address user) internal {
         uint64[] storage userYieldVaults = yieldVaultsByUser[user];
-        for (uint256 i = 0; i < userYieldVaults.length; ) {
-            if (userYieldVaults[i] == yieldVaultId) {
-                userYieldVaults[i] = userYieldVaults[
-                    userYieldVaults.length - 1
-                ];
-                userYieldVaults.pop();
-                break;
+        uint256 indexToRemove = _yieldVaultIndexInUserArray[user][yieldVaultId];
+
+        // IMPORTANT: Verify the element at index matches to prevent removing wrong yieldvault
+        if (userYieldVaults.length > 0 && indexToRemove < userYieldVaults.length && userYieldVaults[indexToRemove] == yieldVaultId) {
+            // Get the last element
+            uint64 lastYieldVaultId = userYieldVaults[userYieldVaults.length - 1];
+
+            // Move last element to the position being removed (if not already last)
+            if (indexToRemove != userYieldVaults.length - 1) {
+                userYieldVaults[indexToRemove] = lastYieldVaultId;
+                _yieldVaultIndexInUserArray[user][lastYieldVaultId] = indexToRemove;
             }
-            unchecked {
-                ++i;
-            }
+
+            // Remove the last element
+            userYieldVaults.pop();
+            delete _yieldVaultIndexInUserArray[user][yieldVaultId];
         }
 
         userOwnsYieldVault[user][yieldVaultId] = false;
@@ -1154,8 +1300,14 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             strategyIdentifier: strategyIdentifier
         });
 
+        // Track in global pending array with index mapping
+        _requestIndexInGlobalArray[requestId] = pendingRequestIds.length;
         pendingRequestIds.push(requestId);
         userPendingRequestCount[msg.sender]++;
+
+        // Track request in user's pending array for O(1) lookup
+        _requestIndexInUserArray[requestId] = pendingRequestIdsByUser[msg.sender].length;
+        pendingRequestIdsByUser[msg.sender].push(requestId);
 
         if (
             requestType == RequestType.CREATE_YIELDVAULT ||
@@ -1182,21 +1334,46 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /// @dev Removes a request from the pending queue (preserves history in requests mapping)
+    /// @dev Maintains FIFO order in global array (O(1) find + O(n) shift for order preservation)
     function _removePendingRequest(uint256 requestId) internal {
-        for (uint256 i = 0; i < pendingRequestIds.length; ) {
-            if (pendingRequestIds[i] == requestId) {
-                for (uint256 j = i; j < pendingRequestIds.length - 1; ) {
-                    pendingRequestIds[j] = pendingRequestIds[j + 1];
-                    unchecked {
-                        ++j;
-                    }
+        // Remove from global pending array - O(1) find using index mapping
+        uint256 indexInGlobal = _requestIndexInGlobalArray[requestId];
+        uint256 globalLength = pendingRequestIds.length;
+
+        if (globalLength > 0 && indexInGlobal < globalLength && pendingRequestIds[indexInGlobal] == requestId) {
+            // Shift elements to maintain FIFO order (required for DeFi processing order)
+            for (uint256 j = indexInGlobal; j < globalLength - 1; ) {
+                pendingRequestIds[j] = pendingRequestIds[j + 1];
+                // Update index mapping for shifted element
+                _requestIndexInGlobalArray[pendingRequestIds[j]] = j;
+                unchecked {
+                    ++j;
                 }
-                pendingRequestIds.pop();
-                break;
             }
-            unchecked {
-                ++i;
+            pendingRequestIds.pop();
+            delete _requestIndexInGlobalArray[requestId];
+        }
+
+        // Remove from user's pending array using swap-and-pop (O(1))
+        // Note: User array order doesn't affect FIFO processing (global array determines order)
+        address user = requests[requestId].user;
+        uint256[] storage userPendingIds = pendingRequestIdsByUser[user];
+        uint256 indexToRemove = _requestIndexInUserArray[requestId];
+
+        // IMPORTANT: Verify the element at index matches to prevent removing wrong request
+        if (userPendingIds.length > 0 && indexToRemove < userPendingIds.length && userPendingIds[indexToRemove] == requestId) {
+            // Get the last element
+            uint256 lastRequestId = userPendingIds[userPendingIds.length - 1];
+
+            // Move last element to the position being removed (if not already last)
+            if (indexToRemove != userPendingIds.length - 1) {
+                userPendingIds[indexToRemove] = lastRequestId;
+                _requestIndexInUserArray[lastRequestId] = indexToRemove;
             }
+
+            // Remove the last element
+            userPendingIds.pop();
+            delete _requestIndexInUserArray[requestId];
         }
     }
 }

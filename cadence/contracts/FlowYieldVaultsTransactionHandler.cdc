@@ -272,20 +272,21 @@ access(all) contract FlowYieldVaultsTransactionHandler {
             // Use Medium priority when idle (no pending requests)
             // Use computed effort but cap at idleExecutionEffort (5000 for Medium priority)
             if pendingRequests == 0 {
-                let cappedEffort = executionEffort < FlowYieldVaultsTransactionHandler.idleExecutionEffort 
-                    ? executionEffort 
+                let cappedEffort = executionEffort < FlowYieldVaultsTransactionHandler.idleExecutionEffort
+                    ? executionEffort
                     : FlowYieldVaultsTransactionHandler.idleExecutionEffort
                 self.scheduleNextExecution(
                     nextDelay: nextDelay,
                     priority: FlowTransactionScheduler.Priority.Medium,
-                    executionEffort: cappedEffort
+                    executionEffort: cappedEffort,
+                    pendingRequests: pendingRequests
                 )
             } else {
-                self.scheduleNextExecution(nextDelay: nextDelay, priority: priority, executionEffort: executionEffort)
+                self.scheduleNextExecution(nextDelay: nextDelay, priority: priority, executionEffort: executionEffort, pendingRequests: pendingRequests)
             }
         }
 
-        access(self) fun scheduleNextExecution(nextDelay: UFix64, priority: FlowTransactionScheduler.Priority, executionEffort: UInt64) {
+        access(self) fun scheduleNextExecution(nextDelay: UFix64, priority: FlowTransactionScheduler.Priority, executionEffort: UInt64, pendingRequests: Int) {
             let future = getCurrentBlock().timestamp + nextDelay
 
             let manager = FlowYieldVaultsTransactionHandler.account.storage
@@ -323,7 +324,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
                 transactionId: transactionId,
                 scheduledFor: future,
                 delaySeconds: nextDelay,
-                pendingRequests: 0
+                pendingRequests: pendingRequests
             )
         }
 
