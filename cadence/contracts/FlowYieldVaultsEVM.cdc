@@ -79,14 +79,14 @@ access(all) contract FlowYieldVaultsEVM {
             pre {
                 requestType >= FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue &&
                 requestType <= FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue:
-                    "Invalid request type: must be between 0 (CREATE_YIELDVAULT) and 3 (CLOSE_YIELDVAULT)"
+                    "Invalid request type: expected 0 (CREATE_YIELDVAULT) to 3 (CLOSE_YIELDVAULT) but got \(requestType)"
 
                 status >= FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue &&
                 status <= FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue:
-                    "Invalid status: must be between 0 (PENDING) and 3 (FAILED)"
+                    "Invalid status: expected 0 (PENDING) to 3 (FAILED) but got \(status)"
 
                 requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue || amount > 0:
-                    "Amount must be greater than 0 for CREATE_YIELDVAULT, DEPOSIT_TO_YIELDVAULT, and WITHDRAW_FROM_YIELDVAULT operations"
+                    "Amount must be greater than 0 for requestType \(requestType) but got amount \(amount)"
             }
             self.id = id
             self.user = user
@@ -240,7 +240,8 @@ access(all) contract FlowYieldVaultsEVM {
         /// @param address The EVM address of the FlowYieldVaultsRequests contract
         access(all) fun setFlowYieldVaultsRequestsAddress(_ address: EVM.EVMAddress) {
             pre {
-                FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress == nil: "FlowYieldVaultsRequests address already set"
+                FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress == nil:
+                    "FlowYieldVaultsRequests address already set to \(FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!.toString())"
             }
             FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress = address
             emit FlowYieldVaultsRequestsAddressSet(address: address.toString())
@@ -257,8 +258,8 @@ access(all) contract FlowYieldVaultsEVM {
         /// @param newMax The new maximum (must be 1-100)
         access(all) fun updateMaxRequestsPerTx(_ newMax: Int) {
             pre {
-                newMax > 0: "maxRequestsPerTx must be greater than 0"
-                newMax <= 100: "maxRequestsPerTx should not exceed 100 for gas safety"
+                newMax > 0: "maxRequestsPerTx must be greater than 0 but got \(newMax)"
+                newMax <= 100: "maxRequestsPerTx must not exceed 100 for gas safety but got \(newMax)"
             }
 
             let oldMax = FlowYieldVaultsEVM.maxRequestsPerTx
@@ -306,10 +307,10 @@ access(all) contract FlowYieldVaultsEVM {
             feeProviderCap: Capability<auth(FungibleToken.Withdraw) &{FungibleToken.Provider}>
         ) {
             pre {
-                coaCap.check(): "COA capability is invalid"
-                yieldVaultManagerCap.check(): "YieldVaultManager capability is invalid"
-                betaBadgeCap.check(): "BetaBadge capability is invalid"
-                feeProviderCap.check(): "Fee provider capability is invalid"
+                coaCap.check(): "COA capability is invalid (id: \(coaCap.id))"
+                yieldVaultManagerCap.check(): "YieldVaultManager capability is invalid (id: \(yieldVaultManagerCap.id))"
+                betaBadgeCap.check(): "BetaBadge capability is invalid (id: \(betaBadgeCap.id))"
+                feeProviderCap.check(): "Fee provider capability is invalid (id: \(feeProviderCap.id))"
             }
 
             self.coaCap = coaCap
@@ -320,17 +321,17 @@ access(all) contract FlowYieldVaultsEVM {
 
         access(self) view fun getCOARef(): auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount {
             return self.coaCap.borrow()
-                ?? panic("Could not borrow COA capability")
+                ?? panic("Could not borrow COA capability (id: \(self.coaCap.id))")
         }
 
         access(self) fun getYieldVaultManagerRef(): auth(FungibleToken.Withdraw) &FlowYieldVaults.YieldVaultManager {
             return self.yieldVaultManagerCap.borrow()
-                ?? panic("Could not borrow YieldVaultManager capability")
+                ?? panic("Could not borrow YieldVaultManager capability (id: \(self.yieldVaultManagerCap.id))")
         }
 
         access(self) view fun getBetaReference(): auth(FlowYieldVaultsClosedBeta.Beta) &FlowYieldVaultsClosedBeta.BetaBadge {
             return self.betaBadgeCap.borrow()
-                ?? panic("Could not borrow beta badge capability")
+                ?? panic("Could not borrow beta badge capability (id: \(self.betaBadgeCap.id))")
         }
 
         /// @notice Returns the COA address as a string
@@ -346,7 +347,8 @@ access(all) contract FlowYieldVaultsEVM {
         /// @param count The number of requests to fetch
         access(all) fun processRequests(startIndex: Int, count: Int) {
             pre {
-                FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress != nil: "FlowYieldVaultsRequests address not set"
+                FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress != nil:
+                    "FlowYieldVaultsRequests address not set - call Admin.setFlowYieldVaultsRequestsAddress() first"
             }
 
             let totalPending = self.getPendingRequestCountFromEVM()
@@ -379,8 +381,10 @@ access(all) contract FlowYieldVaultsEVM {
 
         access(self) fun processRequestSafely(_ request: EVMRequest): Bool {
             pre {
-                request.amount > 0 || request.requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue: "Request amount must be greater than 0 for non-close operations"
-                request.status == FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue: "Request must be in PENDING status"
+                request.amount > 0 || request.requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue:
+                    "Request amount must be greater than 0 for requestType \(request.requestType) but got amount \(request.amount) (requestId: \(request.id))"
+                request.status == FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue:
+                    "Request must be in PENDING (0) status but got \(request.status) (requestId: \(request.id))"
             }
             var success = false
             var yieldVaultId: UInt64 = FlowYieldVaultsEVM.noYieldVaultId
@@ -966,11 +970,11 @@ access(all) contract FlowYieldVaultsEVM {
             amount: UInt256
         ): @{FungibleToken.Vault} {
             let vaultType = FlowEVMBridgeConfig.getTypeAssociated(with: tokenAddress)
-                ?? panic("ERC20 token at \(tokenAddress.toString()) is not onboarded to the FlowEVMBridge")
+                ?? panic("ERC20 token at \(tokenAddress.toString()) is not onboarded to the FlowEVMBridge - amount: \(amount)")
 
             let coaRef = self.getCOARef()
             let feeProvider = self.feeProviderCap.borrow()
-                ?? panic("Could not borrow fee provider capability")
+                ?? panic("Could not borrow fee provider capability (id: \(self.feeProviderCap.id))")
 
             let vault <- coaRef.withdrawTokens(
                 type: vaultType,
@@ -990,7 +994,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             let coaRef = self.getCOARef()
             let feeProvider = self.feeProviderCap.borrow()
-                ?? panic("Could not borrow fee provider capability")
+                ?? panic("Could not borrow fee provider capability (id: \(self.feeProviderCap.id))")
 
             coaRef.depositTokens(
                 vault: <-vault,
@@ -1155,10 +1159,11 @@ access(all) contract FlowYieldVaultsEVM {
     /// @return PendingRequestsInfo containing count, balance, and request details
     access(all) fun getPendingRequestsForEVMAddress(_ evmAddressHex: String): PendingRequestsInfo {
         pre {
-            self.flowYieldVaultsRequestsAddress != nil: "FlowYieldVaultsRequests address not set"
+            self.flowYieldVaultsRequestsAddress != nil:
+                "FlowYieldVaultsRequests address not set - call Admin.setFlowYieldVaultsRequestsAddress() first"
         }
         let coaRef = self.account.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
-            ?? panic("Could not borrow public COA capability from /public/evm")
+            ?? panic("Could not borrow public COA capability from /public/evm for contract account \(self.account.address)")
         let evmAddress = EVM.addressFromString(evmAddressHex)
 
         let calldata = EVM.encodeABIWithSignature(
@@ -1175,7 +1180,7 @@ access(all) contract FlowYieldVaultsEVM {
 
         if callResult.status != EVM.Status.successful {
             let errorMsg = self.decodeEVMError(callResult.data)
-            panic("getPendingRequestsByUserUnpacked call failed: ".concat(errorMsg))
+            panic("getPendingRequestsByUserUnpacked call failed for user \(evmAddressHex): \(errorMsg)")
         }
 
         let decoded = EVM.decodeABI(
@@ -1244,10 +1249,11 @@ access(all) contract FlowYieldVaultsEVM {
     /// @return The number of pending requests
     access(all) fun getPendingRequestCount(): Int {
         pre {
-            self.flowYieldVaultsRequestsAddress != nil: "FlowYieldVaultsRequests address not set"
+            self.flowYieldVaultsRequestsAddress != nil:
+                "FlowYieldVaultsRequests address not set - call Admin.setFlowYieldVaultsRequestsAddress() first"
         }
         let coaRef = self.account.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
-            ?? panic("Could not borrow public COA capability from /public/evm")
+            ?? panic("Could not borrow public COA capability from /public/evm for contract account \(self.account.address)")
 
         let calldata = EVM.encodeABIWithSignature("getPendingRequestCount()", [])
 
@@ -1260,7 +1266,7 @@ access(all) contract FlowYieldVaultsEVM {
 
         if callResult.status != EVM.Status.successful {
             let errorMsg = self.decodeEVMError(callResult.data)
-            panic("getPendingRequestCount call failed: ".concat(errorMsg))
+            panic("getPendingRequestCount call failed on contract \(self.flowYieldVaultsRequestsAddress!.toString()): \(errorMsg)")
         }
 
         let decoded = EVM.decodeABI(
@@ -1293,7 +1299,7 @@ access(all) contract FlowYieldVaultsEVM {
     access(self) fun balanceFromUFix64(_ value: UFix64, tokenAddress: EVM.EVMAddress): EVM.Balance {
         assert(
             tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString(),
-            message: "balanceFromUFix64 should only be called for native FLOW, not ERC20 tokens"
+            message: "balanceFromUFix64 requires native FLOW address (\(FlowYieldVaultsEVM.nativeFlowEVMAddress.toString())) but got \(tokenAddress.toString()) for value \(value)"
         )
 
         let bal = EVM.Balance(attoflow: 0)

@@ -139,7 +139,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         /// @param newThresholds The new mapping of pending request thresholds to delays
         access(all) fun setThresholdToDelay(newThresholds: {Int: UFix64}) {
             pre {
-                newThresholds.length > 0: "Thresholds mapping cannot be empty"
+                newThresholds.length > 0: "Thresholds mapping cannot be empty (got length: \(newThresholds.length))"
             }
             FlowYieldVaultsTransactionHandler.thresholdToDelay = newThresholds
             emit ThresholdToDelayUpdated(newThresholds: newThresholds)
@@ -152,8 +152,8 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         /// @param idleExecutionEffort Minimal effort when no pending requests (e.g., 3000 to handle burst arrivals)
         access(all) fun setExecutionEffortParams(baseEffortPerRequest: UInt64, baseOverhead: UInt64, idleExecutionEffort: UInt64) {
             pre {
-                baseEffortPerRequest > 0: "baseEffortPerRequest must be greater than 0"
-                idleExecutionEffort > 0: "idleExecutionEffort must be greater than 0"
+                baseEffortPerRequest > 0: "baseEffortPerRequest must be greater than 0 but got \(baseEffortPerRequest)"
+                idleExecutionEffort > 0: "idleExecutionEffort must be greater than 0 but got \(idleExecutionEffort)"
             }
             FlowYieldVaultsTransactionHandler.baseEffortPerRequest = baseEffortPerRequest
             FlowYieldVaultsTransactionHandler.baseOverhead = baseOverhead
@@ -192,7 +192,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
             // Get vault to deposit refunds
             let vaultRef = FlowYieldVaultsTransactionHandler.account.storage
                 .borrow<&FlowToken.Vault>(from: /storage/flowTokenVault)
-                ?? panic("Could not borrow FlowToken vault")
+                ?? panic("Could not borrow FlowToken vault from /storage/flowTokenVault for contract account")
 
             // Cancel each scheduled transaction
             for id in transactionIds {
@@ -220,6 +220,9 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         access(self) var lastExecutionTime: UFix64?
 
         init(workerCap: Capability<&FlowYieldVaultsEVM.Worker>) {
+            pre {
+                workerCap.check(): "Worker capability is invalid (id: \(workerCap.id))"
+            }
             self.workerCap = workerCap
             self.executionCount = 0
             self.lastExecutionTime = nil
@@ -239,7 +242,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
 
             let worker = self.workerCap.borrow()
             if worker == nil {
-                emit ExecutionSkipped(transactionId: id, reason: "Could not borrow Worker capability")
+                emit ExecutionSkipped(transactionId: id, reason: "Could not borrow Worker capability (id: \(self.workerCap.id))")
                 return
             }
 
@@ -293,15 +296,15 @@ access(all) contract FlowYieldVaultsTransactionHandler {
                 .borrow<auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}>(
                     from: FlowTransactionSchedulerUtils.managerStoragePath
                 )
-                ?? panic("Could not borrow Manager reference from contract account")
+                ?? panic("Could not borrow Manager reference from \(FlowTransactionSchedulerUtils.managerStoragePath) for contract account")
 
             let handlerTypeIdentifiers = manager.getHandlerTypeIdentifiers()
-            assert(handlerTypeIdentifiers.keys.length > 0, message: "No handler types found in manager")
+            assert(handlerTypeIdentifiers.keys.length > 0, message: "No handler types found in manager (registered handlers count: \(handlerTypeIdentifiers.keys.length))")
             let handlerTypeIdentifier = handlerTypeIdentifiers.keys[0]
 
             let vaultRef = FlowYieldVaultsTransactionHandler.account.storage
                 .borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
-                ?? panic("missing FlowToken vault on contract account")
+                ?? panic("Could not borrow FlowToken vault from /storage/flowTokenVault for contract account")
 
             let estimate = FlowTransactionScheduler.estimate(
                 data: [],
@@ -337,7 +340,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         /// @notice Resolves a view for this handler
         /// @param view The view type to resolve
         /// @return The resolved view value or nil
-        access(all) fun resolveView(_ view: Type): AnyStruct? {
+        access(all) view fun resolveView(_ view: Type): AnyStruct? {
             switch view {
                 case Type<StoragePath>():
                     return FlowYieldVaultsTransactionHandler.HandlerStoragePath
@@ -354,7 +357,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
 
         /// @notice Returns handler execution statistics
         /// @return Dictionary with executionCount and lastExecutionTime
-        access(all) fun getStats(): {String: AnyStruct} {
+        access(all) view fun getStats(): {String: AnyStruct} {
             return {
                 "executionCount": self.executionCount,
                 "lastExecutionTime": self.lastExecutionTime
@@ -399,7 +402,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
     /// @dev Finds the highest threshold that pendingCount meets or exceeds
     /// @param pendingCount The current number of pending requests
     /// @return The delay in seconds for the next execution
-    access(all) fun getDelayForPendingCount(_ pendingCount: Int): UFix64 {
+    access(all) view fun getDelayForPendingCount(_ pendingCount: Int): UFix64 {
         var bestThreshold: Int? = nil
 
         for threshold in self.thresholdToDelay.keys {
@@ -423,7 +426,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
     ///      Otherwise uses Medium priority (max 7500)
     /// @param requestCount The number of requests to process (typically maxRequestsPerTx)
     /// @return Dictionary with "effort" (UInt64) and "priority" (UInt8: 0=High, 1=Medium)
-    access(all) fun calculateExecutionEffortAndPriority(_ requestCount: Int): {String: AnyStruct} {
+    access(all) view fun calculateExecutionEffortAndPriority(_ requestCount: Int): {String: AnyStruct} {
         let calculated = self.baseEffortPerRequest * UInt64(requestCount) + self.baseOverhead
         
         // If calculated > 7500, need High priority (max 9999)
