@@ -38,7 +38,7 @@ transaction(tokenAddressHex: String, spenderAddressHex: String, amount: UInt256)
 
         assert(
             result.status == EVM.Status.successful,
-            message: "ERC20 approve failed: ".concat(result.errorMessage)
+            message: "ERC20 approve failed: \(result.errorMessage)"
         )
     }
 }

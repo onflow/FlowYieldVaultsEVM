@@ -172,7 +172,17 @@ access(all) contract FlowYieldVaultsEVM {
 
     /// @notice Emitted when a Worker is initialized
     /// @param coaAddress The COA address associated with the Worker
-    access(all) event WorkerInitialized(coaAddress: String)
+    /// @param coaCapId The capability ID for the COA
+    /// @param yieldVaultManagerCapId The capability ID for the YieldVaultManager
+    /// @param betaBadgeCapId The capability ID for the BetaBadge
+    /// @param feeProviderCapId The capability ID for the fee provider
+    access(all) event WorkerInitialized(
+        coaAddress: String,
+        coaCapId: UInt64,
+        yieldVaultManagerCapId: UInt64,
+        betaBadgeCapId: UInt64,
+        feeProviderCapId: UInt64
+    )
 
     /// @notice Emitted when the FlowYieldVaultsRequests address is set
     /// @param address The EVM address of the FlowYieldVaultsRequests contract
@@ -185,36 +195,84 @@ access(all) contract FlowYieldVaultsEVM {
     access(all) event RequestsProcessed(count: Int, successful: Int, failed: Int)
 
     /// @notice Emitted when a new YieldVault is created for an EVM user
+    /// @param requestId The EVM request ID that triggered this operation
     /// @param evmAddress The EVM address of the user
     /// @param yieldVaultId The newly created YieldVault Id
     /// @param amount The initial deposit amount
-    access(all) event YieldVaultCreatedForEVMUser(evmAddress: String, yieldVaultId: UInt64, amount: UFix64)
+    /// @param tokenAddress The token address used for the deposit
+    /// @param vaultIdentifier The Cadence vault type identifier
+    /// @param strategyIdentifier The Cadence strategy type identifier
+    access(all) event YieldVaultCreatedForEVMUser(
+        requestId: UInt256,
+        evmAddress: String,
+        yieldVaultId: UInt64,
+        amount: UFix64,
+        tokenAddress: String,
+        vaultIdentifier: String,
+        strategyIdentifier: String
+    )
 
     /// @notice Emitted when funds are deposited to an existing YieldVault
+    /// @param requestId The EVM request ID that triggered this operation
     /// @param evmAddress The EVM address of the user
     /// @param yieldVaultId The YieldVault Id receiving the deposit
     /// @param amount The deposited amount
+    /// @param tokenAddress The token address used for the deposit
     /// @param isYieldVaultOwner Whether the depositor is the yieldvault owner
-    access(all) event YieldVaultDepositedForEVMUser(evmAddress: String, yieldVaultId: UInt64, amount: UFix64, isYieldVaultOwner: Bool)
+    access(all) event YieldVaultDepositedForEVMUser(
+        requestId: UInt256,
+        evmAddress: String,
+        yieldVaultId: UInt64,
+        amount: UFix64,
+        tokenAddress: String,
+        isYieldVaultOwner: Bool
+    )
 
     /// @notice Emitted when funds are withdrawn from a YieldVault
+    /// @param requestId The EVM request ID that triggered this operation
     /// @param evmAddress The EVM address of the user
     /// @param yieldVaultId The YieldVault Id being withdrawn from
     /// @param amount The withdrawn amount
-    access(all) event YieldVaultWithdrawnForEVMUser(evmAddress: String, yieldVaultId: UInt64, amount: UFix64)
+    /// @param tokenAddress The token address for the withdrawal
+    access(all) event YieldVaultWithdrawnForEVMUser(
+        requestId: UInt256,
+        evmAddress: String,
+        yieldVaultId: UInt64,
+        amount: UFix64,
+        tokenAddress: String
+    )
 
     /// @notice Emitted when a YieldVault is closed
+    /// @param requestId The EVM request ID that triggered this operation
     /// @param evmAddress The EVM address of the user
     /// @param yieldVaultId The closed YieldVault Id
     /// @param amountReturned The total amount returned to the user
-    access(all) event YieldVaultClosedForEVMUser(evmAddress: String, yieldVaultId: UInt64, amountReturned: UFix64)
+    /// @param tokenAddress The token address for the returned funds
+    access(all) event YieldVaultClosedForEVMUser(
+        requestId: UInt256,
+        evmAddress: String,
+        yieldVaultId: UInt64,
+        amountReturned: UFix64,
+        tokenAddress: String
+    )
 
     /// @notice Emitted when a request fails during processing
     /// @param requestId The failed request ID
     /// @param userAddress The EVM address of the user
     /// @param requestType The type of request that failed
+    /// @param tokenAddress The token address involved in the request
+    /// @param amount The amount involved in the request (in wei/smallest unit)
+    /// @param yieldVaultId The YieldVault ID if applicable (UInt64.max if not applicable)
     /// @param reason The failure reason
-    access(all) event RequestFailed(requestId: UInt256, userAddress: String, requestType: UInt8, reason: String)
+    access(all) event RequestFailed(
+        requestId: UInt256,
+        userAddress: String,
+        requestType: UInt8,
+        tokenAddress: String,
+        amount: UInt256,
+        yieldVaultId: UInt64,
+        reason: String
+    )
 
     /// @notice Emitted when maxRequestsPerTx is updated
     /// @param oldValue The previous value
@@ -286,7 +344,13 @@ access(all) contract FlowYieldVaultsEVM {
                 betaBadgeCap: betaBadgeCap,
                 feeProviderCap: feeProviderCap
             )
-            emit WorkerInitialized(coaAddress: worker.getCOAAddressString())
+            emit WorkerInitialized(
+                coaAddress: worker.getCOAAddressString(),
+                coaCapId: coaCap.id,
+                yieldVaultManagerCapId: yieldVaultManagerCap.id,
+                betaBadgeCapId: betaBadgeCap.id,
+                feeProviderCapId: feeProviderCap.id
+            )
             return <-worker
         }
     }
@@ -300,6 +364,13 @@ access(all) contract FlowYieldVaultsEVM {
         access(self) let betaBadgeCap: Capability<auth(FlowYieldVaultsClosedBeta.Beta) &FlowYieldVaultsClosedBeta.BetaBadge>
         access(self) let feeProviderCap: Capability<auth(FungibleToken.Withdraw) &{FungibleToken.Provider}>
 
+        /// @notice Initializes the Worker with required capabilities
+        /// @dev All capabilities are validated on initialization to ensure they can be borrowed.
+        ///      The Worker stores capability references rather than resources for better composability.
+        /// @param coaCap Capability to COA with Call, Withdraw, and Bridge entitlements for EVM interaction
+        /// @param yieldVaultManagerCap Capability to YieldVaultManager with Withdraw entitlement for vault operations
+        /// @param betaBadgeCap Capability to BetaBadge for Flow YieldVaults closed beta access
+        /// @param feeProviderCap Capability to fee provider for paying bridge fees
         init(
             coaCap: Capability<auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount>,
             yieldVaultManagerCap: Capability<auth(FungibleToken.Withdraw) &FlowYieldVaults.YieldVaultManager>,
@@ -319,16 +390,25 @@ access(all) contract FlowYieldVaultsEVM {
             self.feeProviderCap = feeProviderCap
         }
 
+        /// @notice Borrows the COA reference from the stored capability
+        /// @dev Used internally for all EVM interactions (calls, withdrawals, bridging)
+        /// @return Authenticated reference to the CadenceOwnedAccount with full entitlements
         access(self) view fun getCOARef(): auth(EVM.Call, EVM.Withdraw, EVM.Bridge) &EVM.CadenceOwnedAccount {
             return self.coaCap.borrow()
                 ?? panic("Could not borrow COA capability (id: \(self.coaCap.id))")
         }
 
+        /// @notice Borrows the YieldVaultManager reference from the stored capability
+        /// @dev Used for creating, depositing to, withdrawing from, and closing YieldVaults
+        /// @return Authenticated reference to YieldVaultManager with Withdraw entitlement
         access(self) fun getYieldVaultManagerRef(): auth(FungibleToken.Withdraw) &FlowYieldVaults.YieldVaultManager {
             return self.yieldVaultManagerCap.borrow()
                 ?? panic("Could not borrow YieldVaultManager capability (id: \(self.yieldVaultManagerCap.id))")
         }
 
+        /// @notice Borrows the BetaBadge reference from the stored capability
+        /// @dev Required for closed beta access to Flow YieldVaults protocol operations
+        /// @return Authenticated reference to BetaBadge with Beta entitlement
         access(self) view fun getBetaReference(): auth(FlowYieldVaultsClosedBeta.Beta) &FlowYieldVaultsClosedBeta.BetaBadge {
             return self.betaBadgeCap.borrow()
                 ?? panic("Could not borrow beta badge capability (id: \(self.betaBadgeCap.id))")
@@ -379,6 +459,15 @@ access(all) contract FlowYieldVaultsEVM {
             emit RequestsProcessed(count: batchSize, successful: successCount, failed: failCount)
         }
 
+        /// @notice Safely processes a single request with error handling and status updates
+        /// @dev This is the main dispatcher that:
+        ///      1. Validates request preconditions (amount, status)
+        ///      2. For CREATE requests: validates vault/strategy parameters before fund withdrawal
+        ///      3. For WITHDRAW/CLOSE: calls startProcessing before the operation
+        ///      4. Dispatches to the appropriate process function based on request type
+        ///      5. Calls completeProcessing to update final status (with refund on failure for CREATE/DEPOSIT)
+        /// @param request The EVM request to process
+        /// @return True if the request was processed successfully, false otherwise
         access(self) fun processRequestSafely(_ request: EVMRequest): Bool {
             pre {
                 request.amount > 0 || request.requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue:
@@ -404,7 +493,10 @@ access(all) contract FlowYieldVaultsEVM {
                             requestId: request.id,
                             userAddress: request.user.toString(),
                             requestType: request.requestType,
-                            reason: "Validation failed and could not start processing: ".concat(validationResult.message)
+                            tokenAddress: request.tokenAddress.toString(),
+                            amount: request.amount,
+                            yieldVaultId: request.yieldVaultId,
+                            reason: "Validation failed and could not start processing: \(validationResult.message)"
                         )
                         return false
                     }
@@ -423,7 +515,10 @@ access(all) contract FlowYieldVaultsEVM {
                             requestId: request.id,
                             userAddress: request.user.toString(),
                             requestType: request.requestType,
-                            reason: "Validation failed and could not complete processing: ".concat(validationResult.message)
+                            tokenAddress: request.tokenAddress.toString(),
+                            amount: request.amount,
+                            yieldVaultId: request.yieldVaultId,
+                            reason: "Validation failed and could not complete processing: \(validationResult.message)"
                         )
                     }
                     return false
@@ -444,7 +539,7 @@ access(all) contract FlowYieldVaultsEVM {
                         requestId: request.id,
                         success: false,
                         yieldVaultId: request.yieldVaultId,
-                        message: "Failed to start processing",
+                        message: "Failed to start processing request \(request.id)",
                         refundAmount: 0,
                         tokenAddress: request.tokenAddress,
                         requestType: request.requestType
@@ -453,7 +548,10 @@ access(all) contract FlowYieldVaultsEVM {
                             requestId: request.id,
                             userAddress: request.user.toString(),
                             requestType: request.requestType,
-                            reason: "Failed to start processing and complete processing"
+                            tokenAddress: request.tokenAddress.toString(),
+                            amount: request.amount,
+                            yieldVaultId: request.yieldVaultId,
+                            reason: "Failed to start processing and complete processing for request \(request.id)"
                         )
                     }
                     return false
@@ -501,6 +599,9 @@ access(all) contract FlowYieldVaultsEVM {
                     requestId: request.id,
                     userAddress: request.user.toString(),
                     requestType: request.requestType,
+                    tokenAddress: request.tokenAddress.toString(),
+                    amount: request.amount,
+                    yieldVaultId: yieldVaultId,
                     reason: "Processing completed but failed to update status: \(message)"
                 )
             }
@@ -510,6 +611,9 @@ access(all) contract FlowYieldVaultsEVM {
                     requestId: request.id,
                     userAddress: request.user.toString(),
                     requestType: request.requestType,
+                    tokenAddress: request.tokenAddress.toString(),
+                    amount: request.amount,
+                    yieldVaultId: yieldVaultId,
                     reason: message
                 )
             }
@@ -517,6 +621,14 @@ access(all) contract FlowYieldVaultsEVM {
             return success
         }
 
+        /// @notice Helper function to return funds to user and create a failure result
+        /// @dev Used when an operation fails after funds have already been withdrawn from COA.
+        ///      Bridges the vault contents back to the user's EVM address before returning.
+        /// @param vault The vault containing funds to return (will be consumed)
+        /// @param recipient The EVM address to send funds back to
+        /// @param tokenAddress The token address (native FLOW or ERC20) for bridging
+        /// @param errorMessage The error message to include in the result
+        /// @return ProcessResult with success=false and the error message appended with "Funds returned to user"
         access(self) fun returnFundsAndFail(
             vault: @{FungibleToken.Vault},
             recipient: EVM.EVMAddress,
@@ -527,7 +639,7 @@ access(all) contract FlowYieldVaultsEVM {
             return ProcessResult(
                 success: false,
                 yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                message: errorMessage.concat(". Funds returned to user.")
+                message: "\(errorMessage). Funds returned to user."
             )
         }
 
@@ -594,19 +706,31 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
+        /// @notice Processes a CREATE_YIELDVAULT request
+        /// @dev Creates a new YieldVault for the EVM user with the specified vault type and strategy.
+        ///      Flow:
+        ///      1. Calls startProcessing to mark request as PROCESSING and transfer funds to COA
+        ///      2. Withdraws funds from COA (bridging ERC20 if needed)
+        ///      3. Validates vault type matches the requested vaultIdentifier
+        ///      4. Creates YieldVault via YieldVaultManager
+        ///      5. Records ownership in yieldVaultsByEVMAddress and yieldVaultOwnershipLookup
+        /// @param request The CREATE_YIELDVAULT request containing vault/strategy identifiers and amount
+        /// @return ProcessResult with success status, created yieldVaultId, and status message
         access(self) fun processCreateYieldVault(_ request: EVMRequest): ProcessResult {
             let vaultIdentifier = request.vaultIdentifier
             let strategyIdentifier = request.strategyIdentifier
             let amount = FlowYieldVaultsEVM.ufix64FromUInt256(request.amount, tokenAddress: request.tokenAddress)
 
+            // Phase 1: Mark request as PROCESSING and transfer escrowed funds to COA
             if !self.startProcessing(requestId: request.id) {
                 return ProcessResult(
                     success: false,
                     yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                    message: "Failed to start processing - request may already be processing or completed"
+                    message: "Failed to start processing request \(request.id) - request may already be processing or completed"
                 )
             }
 
+            // Phase 2: Withdraw funds from COA (bridges ERC20 to Cadence vault if needed)
             let vaultOptional <- self.withdrawFundsFromCOA(
                 amount: amount,
                 tokenAddress: request.tokenAddress
@@ -617,12 +741,13 @@ access(all) contract FlowYieldVaultsEVM {
                 return ProcessResult(
                     success: false,
                     yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                    message: "Failed to withdraw funds from COA"
+                    message: "Failed to withdraw \(amount) from COA for request \(request.id) (token: \(request.tokenAddress.toString()))"
                 )
             }
 
             let vault <- vaultOptional!
 
+            // Phase 3: Validate vault type matches the requested identifier
             let vaultType = vault.getType()
             if vaultType.identifier != vaultIdentifier {
                 return self.returnFundsAndFail(
@@ -633,7 +758,8 @@ access(all) contract FlowYieldVaultsEVM {
                 )
             }
 
-            // strategyIdentifier already validated by validateCreateYieldVaultParameters
+            // Phase 4: Create the YieldVault with the specified strategy
+            // Note: strategyIdentifier already validated by validateCreateYieldVaultParameters
             let strategyType = CompositeType(strategyIdentifier)!
 
             let betaRef = self.getBetaReference()
@@ -645,19 +771,30 @@ access(all) contract FlowYieldVaultsEVM {
                 withVault: <-vault
             )
 
+            // Phase 5: Record ownership in contract state for O(1) lookups
             let evmAddr = request.user.toString()
 
+            // Initialize array for this address if needed
             if FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddr] == nil {
                 FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddr] = []
             }
             FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddr]!.append(yieldVaultId)
 
+            // Initialize ownership map for this address if needed
             if FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] == nil {
                 FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] = {}
             }
             FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.insert(key: yieldVaultId, true)
 
-            emit YieldVaultCreatedForEVMUser(evmAddress: evmAddr, yieldVaultId: yieldVaultId, amount: amount)
+            emit YieldVaultCreatedForEVMUser(
+                requestId: request.id,
+                evmAddress: evmAddr,
+                yieldVaultId: yieldVaultId,
+                amount: amount,
+                tokenAddress: request.tokenAddress.toString(),
+                vaultIdentifier: vaultIdentifier,
+                strategyIdentifier: strategyIdentifier
+            )
 
             return ProcessResult(
                 success: true,
@@ -666,9 +803,19 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
+        /// @notice Processes a CLOSE_YIELDVAULT request
+        /// @dev Closes an existing YieldVault and returns all funds to the EVM user.
+        ///      Flow:
+        ///      1. Validates the user owns the specified YieldVault
+        ///      2. Closes the YieldVault via YieldVaultManager (returns vault with all funds)
+        ///      3. Bridges funds back to user's EVM address
+        ///      4. Removes yieldVaultId from ownership tracking
+        /// @param request The CLOSE_YIELDVAULT request containing the yieldVaultId to close
+        /// @return ProcessResult with success status, the closed yieldVaultId, and amount returned
         access(self) fun processCloseYieldVault(_ request: EVMRequest): ProcessResult {
             let evmAddr = request.user.toString()
 
+            // Step 1: Validate user ownership of the YieldVault
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
                 if ownershipMap[request.yieldVaultId] != true {
                     return ProcessResult(
@@ -685,17 +832,26 @@ access(all) contract FlowYieldVaultsEVM {
                 )
             }
 
+            // Step 2: Close YieldVault and retrieve all funds
             let vault <- self.getYieldVaultManagerRef().closeYieldVault(request.yieldVaultId)
             let amount = vault.balance
 
+            // Step 3: Bridge funds back to user's EVM address
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user, tokenAddress: request.tokenAddress)
 
+            // Step 4: Remove yieldVaultId from ownership tracking
             if let index = FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddr]!.firstIndex(of: request.yieldVaultId) {
                 let _ = FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddr]!.remove(at: index)
             }
             FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.remove(key: request.yieldVaultId)
 
-            emit YieldVaultClosedForEVMUser(evmAddress: evmAddr, yieldVaultId: request.yieldVaultId, amountReturned: amount)
+            emit YieldVaultClosedForEVMUser(
+                requestId: request.id,
+                evmAddress: evmAddr,
+                yieldVaultId: request.yieldVaultId,
+                amountReturned: amount,
+                tokenAddress: request.tokenAddress.toString()
+            )
 
             return ProcessResult(
                 success: true,
@@ -704,19 +860,30 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
+        /// @notice Processes a DEPOSIT_TO_YIELDVAULT request
+        /// @dev Deposits additional funds into an existing YieldVault.
+        ///      Note: Unlike CLOSE/WITHDRAW, anyone can deposit to any YieldVault (no ownership check).
+        ///      Flow:
+        ///      1. Calls startProcessing to mark request as PROCESSING and transfer funds to COA
+        ///      2. Withdraws funds from COA (bridging ERC20 if needed)
+        ///      3. Deposits to YieldVault via YieldVaultManager
+        /// @param request The DEPOSIT_TO_YIELDVAULT request containing yieldVaultId and amount
+        /// @return ProcessResult with success status, the yieldVaultId, and deposited amount
         access(self) fun processDepositToYieldVault(_ request: EVMRequest): ProcessResult {
             let evmAddr = request.user.toString()
 
+            // Step 1: Mark request as PROCESSING and transfer escrowed funds to COA
             if !self.startProcessing(requestId: request.id) {
                 return ProcessResult(
                     success: false,
                     yieldVaultId: request.yieldVaultId,
-                    message: "Failed to start processing - request may already be processing or completed"
+                    message: "Failed to start processing request \(request.id) - request may already be processing or completed"
                 )
             }
 
             let amount = FlowYieldVaultsEVM.ufix64FromUInt256(request.amount, tokenAddress: request.tokenAddress)
 
+            // Step 2: Withdraw funds from COA (bridges ERC20 to Cadence vault if needed)
             let vaultOptional <- self.withdrawFundsFromCOA(
                 amount: amount,
                 tokenAddress: request.tokenAddress
@@ -727,20 +894,29 @@ access(all) contract FlowYieldVaultsEVM {
                 return ProcessResult(
                     success: false,
                     yieldVaultId: request.yieldVaultId,
-                    message: "Failed to withdraw funds from COA"
+                    message: "Failed to withdraw \(amount) from COA for request \(request.id) (token: \(request.tokenAddress.toString()))"
                 )
             }
 
             let vault <- vaultOptional!
 
+            // Step 3: Deposit to YieldVault via YieldVaultManager
             let betaRef = self.getBetaReference()
             self.getYieldVaultManagerRef().depositToYieldVault(betaRef: betaRef, request.yieldVaultId, from: <-vault)
 
+            // Check if depositor is the owner for event emission
             var isYieldVaultOwner = false
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
                 isYieldVaultOwner = ownershipMap[request.yieldVaultId] ?? false
             }
-            emit YieldVaultDepositedForEVMUser(evmAddress: evmAddr, yieldVaultId: request.yieldVaultId, amount: amount, isYieldVaultOwner: isYieldVaultOwner)
+            emit YieldVaultDepositedForEVMUser(
+                requestId: request.id,
+                evmAddress: evmAddr,
+                yieldVaultId: request.yieldVaultId,
+                amount: amount,
+                tokenAddress: request.tokenAddress.toString(),
+                isYieldVaultOwner: isYieldVaultOwner
+            )
 
             return ProcessResult(
                 success: true,
@@ -749,9 +925,19 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
+        /// @notice Processes a WITHDRAW_FROM_YIELDVAULT request
+        /// @dev Withdraws a specified amount from an existing YieldVault and sends to user.
+        ///      Flow:
+        ///      1. Validates the user owns the specified YieldVault
+        ///      2. Validates YieldVault has sufficient balance for the withdrawal
+        ///      3. Withdraws funds from YieldVault via YieldVaultManager
+        ///      4. Bridges funds back to user's EVM address
+        /// @param request The WITHDRAW_FROM_YIELDVAULT request containing yieldVaultId and amount
+        /// @return ProcessResult with success status, the yieldVaultId, and withdrawn amount
         access(self) fun processWithdrawFromYieldVault(_ request: EVMRequest): ProcessResult {
             let evmAddr = request.user.toString()
 
+            // Step 1: Validate user ownership of the YieldVault
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
                 if ownershipMap[request.yieldVaultId] != true {
                     return ProcessResult(
@@ -770,7 +956,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             let amount = FlowYieldVaultsEVM.ufix64FromUInt256(request.amount, tokenAddress: request.tokenAddress)
 
-            // Pre-validate: Check YieldVault has sufficient balance before attempting withdrawal
+            // Step 2: Pre-validate YieldVault exists and has sufficient balance
             let yieldVaultRef = self.getYieldVaultManagerRef().borrowYieldVault(id: request.yieldVaultId)
             if yieldVaultRef == nil {
                 return ProcessResult(
@@ -788,12 +974,20 @@ access(all) contract FlowYieldVaultsEVM {
                 )
             }
 
+            // Step 3: Withdraw funds from YieldVault
             let vault <- self.getYieldVaultManagerRef().withdrawFromYieldVault(request.yieldVaultId, amount: amount)
 
+            // Step 4: Bridge funds back to user's EVM address
             let actualAmount = vault.balance
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user, tokenAddress: request.tokenAddress)
 
-            emit YieldVaultWithdrawnForEVMUser(evmAddress: evmAddr, yieldVaultId: request.yieldVaultId, amount: actualAmount)
+            emit YieldVaultWithdrawnForEVMUser(
+                requestId: request.id,
+                evmAddress: evmAddr,
+                yieldVaultId: request.yieldVaultId,
+                amount: actualAmount,
+                tokenAddress: request.tokenAddress.toString()
+            )
 
             return ProcessResult(
                 success: true,
@@ -894,6 +1088,9 @@ access(all) contract FlowYieldVaultsEVM {
                             requestId: requestId,
                             userAddress: "",
                             requestType: requestType,
+                            tokenAddress: tokenAddress.toString(),
+                            amount: refundAmount,
+                            yieldVaultId: yieldVaultId,
                             reason: "ERC20 approve for refund failed: \(errorMsg)"
                         )
                         return false
@@ -914,6 +1111,9 @@ access(all) contract FlowYieldVaultsEVM {
                     requestId: requestId,
                     userAddress: "",
                     requestType: requestType,
+                    tokenAddress: tokenAddress.toString(),
+                    amount: refundAmount,
+                    yieldVaultId: yieldVaultId,
                     reason: "completeProcessing failed: \(errorMsg)"
                 )
                 return false
@@ -922,6 +1122,12 @@ access(all) contract FlowYieldVaultsEVM {
             return true
         }
 
+        /// @notice Withdraws funds from the COA, handling both native FLOW and ERC20 tokens
+        /// @dev For native FLOW: Uses COA.withdraw() to get FlowToken.Vault directly
+        ///      For ERC20: Uses FlowEVMBridge to bridge tokens to Cadence vault
+        /// @param amount The amount to withdraw in UFix64 format
+        /// @param tokenAddress The token address (NATIVE_FLOW sentinel or ERC20 address)
+        /// @return Optional vault containing the withdrawn funds, or nil if withdrawal failed
         access(self) fun withdrawFundsFromCOA(amount: UFix64, tokenAddress: EVM.EVMAddress): @{FungibleToken.Vault}? {
             if tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString() {
                 let balance = FlowYieldVaultsEVM.balanceFromUFix64(amount, tokenAddress: tokenAddress)
@@ -949,6 +1155,12 @@ access(all) contract FlowYieldVaultsEVM {
             }
         }
 
+        /// @notice Bridges funds from a Cadence vault to an EVM user address
+        /// @dev For native FLOW: Deposits to COA, then withdraws and deposits to recipient
+        ///      For ERC20: Uses FlowEVMBridge to bridge, then transfers via ERC20.transfer()
+        /// @param vault The Cadence vault containing funds to send (will be consumed)
+        /// @param recipient The EVM address to receive the funds
+        /// @param tokenAddress The token address (NATIVE_FLOW sentinel or ERC20 address)
         access(self) fun bridgeFundsToEVMUser(vault: @{FungibleToken.Vault}, recipient: EVM.EVMAddress, tokenAddress: EVM.EVMAddress) {
             let amount = vault.balance
 
@@ -965,6 +1177,12 @@ access(all) contract FlowYieldVaultsEVM {
             }
         }
 
+        /// @notice Bridges ERC20 tokens from EVM to Cadence using FlowEVMBridge
+        /// @dev Looks up the Cadence vault type associated with the ERC20 address,
+        ///      then uses COA.withdrawTokens() to bridge the tokens.
+        /// @param tokenAddress The ERC20 token address on EVM
+        /// @param amount The amount to bridge in wei/smallest unit (UInt256)
+        /// @return Cadence vault containing the bridged tokens
         access(self) fun bridgeERC20FromEVM(
             tokenAddress: EVM.EVMAddress,
             amount: UInt256
@@ -985,6 +1203,12 @@ access(all) contract FlowYieldVaultsEVM {
             return <-vault
         }
 
+        /// @notice Bridges a Cadence vault to ERC20 tokens on EVM and transfers to recipient
+        /// @dev Uses COA.depositTokens() to bridge tokens to EVM, then calls ERC20.transfer()
+        ///      to send the tokens to the recipient address.
+        /// @param vault The Cadence vault containing tokens to bridge (will be consumed)
+        /// @param recipient The EVM address to receive the tokens
+        /// @param tokenAddress The ERC20 token address on EVM
         access(self) fun bridgeERC20ToEVM(
             vault: @{FungibleToken.Vault},
             recipient: EVM.EVMAddress,
@@ -1282,6 +1506,12 @@ access(all) contract FlowYieldVaultsEVM {
     // Internal Functions
     // ============================================
 
+    /// @notice Converts a UInt256 amount from EVM to UFix64 for Cadence
+    /// @dev For native FLOW: Uses 18 decimals (attoflow to FLOW conversion)
+    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals
+    /// @param value The amount in wei/smallest unit (UInt256)
+    /// @param tokenAddress The token address to determine decimal conversion
+    /// @return The converted amount in UFix64 format
     access(self) fun ufix64FromUInt256(_ value: UInt256, tokenAddress: EVM.EVMAddress): UFix64 {
         if tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString() {
             return FlowEVMBridgeUtils.uint256ToUFix64(value: value, decimals: 18)
@@ -1289,6 +1519,12 @@ access(all) contract FlowYieldVaultsEVM {
         return FlowEVMBridgeUtils.convertERC20AmountToCadenceAmount(value, erc20Address: tokenAddress)
     }
 
+    /// @notice Converts a UFix64 amount from Cadence to UInt256 for EVM
+    /// @dev For native FLOW: Uses 18 decimals (FLOW to attoflow conversion)
+    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals
+    /// @param value The amount in UFix64 format
+    /// @param tokenAddress The token address to determine decimal conversion
+    /// @return The converted amount in wei/smallest unit (UInt256)
     access(self) fun uint256FromUFix64(_ value: UFix64, tokenAddress: EVM.EVMAddress): UInt256 {
         if tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString() {
             return FlowEVMBridgeUtils.ufix64ToUInt256(value: value, decimals: 18)
@@ -1296,6 +1532,12 @@ access(all) contract FlowYieldVaultsEVM {
         return FlowEVMBridgeUtils.convertCadenceAmountToERC20Amount(value, erc20Address: tokenAddress)
     }
 
+    /// @notice Creates an EVM.Balance from a UFix64 amount (native FLOW only)
+    /// @dev Only valid for native FLOW token. Asserts if called with ERC20 address.
+    ///      Uses EVM.Balance.setFLOW() for proper attoflow conversion.
+    /// @param value The amount in UFix64 format
+    /// @param tokenAddress Must be the NATIVE_FLOW sentinel address
+    /// @return EVM.Balance representing the amount in attoflow
     access(self) fun balanceFromUFix64(_ value: UFix64, tokenAddress: EVM.EVMAddress): EVM.Balance {
         assert(
             tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString(),
@@ -1307,6 +1549,11 @@ access(all) contract FlowYieldVaultsEVM {
         return bal
     }
 
+    /// @notice Decodes an EVM revert error message from raw bytes
+    /// @dev Attempts to decode standard Solidity Error(string) format (selector 0x08c379a0).
+    ///      Falls back to hex-encoded raw data if decoding fails.
+    /// @param data The raw bytes from EVM call result.data
+    /// @return Human-readable error message or hex-encoded revert data
     access(self) fun decodeEVMError(_ data: [UInt8]): String {
         if data.length >= 4 {
             let selector = (UInt32(data[0]) << 24) | (UInt32(data[1]) << 16) | (UInt32(data[2]) << 8) | UInt32(data[3])

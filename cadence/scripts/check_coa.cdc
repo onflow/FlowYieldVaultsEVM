@@ -13,5 +13,5 @@ access(all) fun main(address: Address): String {
         return "No COA found at /storage/evm"
     }
 
-    return "COA exists at /storage/evm with type: ".concat(coaType!.identifier)
+    return "COA exists at /storage/evm with type: \(coaType!.identifier)"
 }

@@ -70,7 +70,7 @@ transaction(
 
         if est.timestamp == nil && pr != FlowTransactionScheduler.Priority.Low {
             let errorMsg = est.error ?? "estimation failed"
-            panic("Fee estimation failed: ".concat(errorMsg))
+            panic("Fee estimation failed: \(errorMsg)")
         }
 
         let vaultRef = signer.storage

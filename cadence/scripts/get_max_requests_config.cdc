@@ -32,7 +32,7 @@ access(all) fun main(): {String: AnyStruct} {
 access(all) fun calculateGasRange(_ batchSize: Int): String {
     let lowGas = batchSize * 100_000
     let highGas = batchSize * 500_000
-    return lowGas.toString().concat(" - ").concat(highGas.toString()).concat(" gas")
+    return "\(lowGas) - \(highGas) gas"
 }
 
 access(all) fun getRecommendations(_ current: Int): [String] {

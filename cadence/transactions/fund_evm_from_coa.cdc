@@ -40,7 +40,7 @@ transaction(evmAddressHex: String, amount: UFix64) {
 
         assert(
             result.status == EVM.Status.successful,
-            message: "Transfer failed: ".concat(result.errorMessage)
+            message: "Transfer failed: \(result.errorMessage)"
         )
     }
 }

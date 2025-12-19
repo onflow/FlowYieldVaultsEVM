@@ -8,7 +8,7 @@ access(all) fun main(address: Address): [String] {
     var paths: [String] = []
 
     account.storage.forEachStored(fun (path: StoragePath, type: Type): Bool {
-        paths.append(path.toString().concat(" -> ").concat(type.identifier))
+        paths.append("\(path) -> \(type.identifier)")
         return true
     })
 
