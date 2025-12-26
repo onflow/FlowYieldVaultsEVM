@@ -5,7 +5,7 @@ import "FlowYieldVaultsTransactionHandler"
 /// @dev Requires Admin resource. Each threshold maps to a delay in seconds.
 ///      Higher pending counts should map to shorter delays for faster processing.
 ///
-/// @param newThresholds New mapping of thresholds to delays (e.g., {50: 5.0, 20: 15.0, 10: 30.0, 5: 45.0, 0: 60.0})
+/// @param newThresholds New mapping of thresholds to delays (e.g., {11: 3.0, 5: 5.0, 1: 7.0, 0: 30.0})
 ///
 transaction(newThresholds: {Int: UFix64}) {
     prepare(signer: auth(BorrowValue) &Account) {

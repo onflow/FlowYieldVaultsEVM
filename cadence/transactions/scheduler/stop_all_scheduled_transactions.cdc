@@ -14,10 +14,6 @@ transaction() {
             from: FlowYieldVaultsTransactionHandler.AdminStoragePath
         ) ?? panic("Could not borrow Admin resource")
 
-        let result = admin.stopAll()
-
-        log("Stopped all scheduled transactions")
-        log("Cancelled IDs: ".concat((result["cancelledIds"]! as! [UInt64]).length.toString()))
-        log("Total refunded: ".concat((result["totalRefunded"]! as! UFix64).toString()))
+        admin.stopAll()
     }
 }

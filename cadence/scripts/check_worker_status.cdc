@@ -71,7 +71,7 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
         result["status"] = "NOT INITIALIZED"
         var issues: [String] = []
         if !workerExists {
-            issues.append("Worker resource not found at ".concat(FlowYieldVaultsEVM.WorkerStoragePath.toString()))
+            issues.append("Worker resource not found at \(FlowYieldVaultsEVM.WorkerStoragePath)")
         }
         if flowYieldVaultsRequestsAddress == nil {
             issues.append("FlowYieldVaultsRequests EVM address not configured")

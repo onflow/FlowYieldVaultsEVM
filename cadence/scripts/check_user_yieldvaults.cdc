@@ -12,7 +12,7 @@ access(all) fun main(evmAddress: String): [UInt64] {
     }
 
     while normalizedAddress.length < 40 {
-        normalizedAddress = "0".concat(normalizedAddress)
+        normalizedAddress = "0\(normalizedAddress)"
     }
 
     return FlowYieldVaultsEVM.getYieldVaultIdsForEVMAddress(normalizedAddress)

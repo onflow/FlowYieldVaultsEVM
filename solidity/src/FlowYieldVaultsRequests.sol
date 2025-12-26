@@ -99,6 +99,10 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     address public constant NATIVE_FLOW =
         0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
+    /// @notice WFLOW (Wrapped FLOW) ERC20 token address
+    /// @dev On Cadence side, WFLOW is automatically unwrapped to native FlowToken by FlowEVMBridge
+    address public immutable WFLOW;
+
     /// @notice Sentinel value for "no yieldvault" (used when CREATE_YIELDVAULT fails before yieldvault is created)
     /// @dev Uses type(uint64).max since valid yieldVaultIds can be 0. Matches FlowYieldVaultsEVM.noYieldVaultId
     uint64 public constant NO_YIELDVAULT_ID = type(uint64).max;
@@ -118,6 +122,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Whether blocklist enforcement is active
     bool public blocklistEnabled;
 
+    /// @notice Whether the contract is paused
+    bool public paused;
+
     /// @notice Addresses blocked from creating requests
     mapping(address => bool) public blocklisted;
 
@@ -129,6 +136,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice Count of pending requests per user
     mapping(address => uint256) public userPendingRequestCount;
+
+    /// @notice Pending request IDs per user for O(1) lookup
+    mapping(address => uint256[]) public pendingRequestIdsByUser;
+
+    /// @notice Index of request ID in user's pending array (for O(1) removal)
+    mapping(uint256 => uint256) private _requestIndexInUserArray;
 
     /// @notice Registry of valid YieldVault Ids created through this contract
     mapping(uint64 => bool) public validYieldVaultIds;
@@ -148,8 +161,15 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice All requests indexed by request ID
     mapping(uint256 => Request) public requests;
 
-    /// @notice Array of pending request IDs awaiting processing
+    /// @notice Array of pending request IDs awaiting processing (FIFO order)
     uint256[] public pendingRequestIds;
+
+    /// @notice Index of request ID in global pending array (for O(1) lookup)
+    mapping(uint256 => uint256) private _requestIndexInGlobalArray;
+
+    /// @notice Index of yieldVaultId in user's yieldVaultsByUser array (for O(1) removal)
+    /// @dev Internal visibility allows test helpers to properly initialize state
+    mapping(address => mapping(uint64 => uint256)) internal _yieldVaultIndexInUserArray;
 
     // ============================================
     // Errors
@@ -216,6 +236,18 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice YieldVault Id is invalid or not owned by user
     error InvalidYieldVaultId(uint64 yieldVaultId, address user);
 
+    /// @notice Contract is paused
+    error ContractPaused();
+
+    /// @notice Vault identifier cannot be empty for CREATE_YIELDVAULT
+    error EmptyVaultIdentifier();
+
+    /// @notice Strategy identifier cannot be empty for CREATE_YIELDVAULT
+    error EmptyStrategyIdentifier();
+
+    /// @notice No refund available for the specified token
+    error NoRefundAvailable(address token);
+
     // ============================================
     // Events
     // ============================================
@@ -226,23 +258,33 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestType Type of operation requested
     /// @param tokenAddress Token involved in the request
     /// @param amount Amount of tokens
-    /// @param yieldVaultId Associated YieldVault Id (0 for new yieldvaults)
+    /// @param yieldVaultId Associated YieldVault Id (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until assigned by Cadence)
+    /// @param timestamp Block timestamp when request was created
+    /// @param vaultIdentifier Cadence vault type identifier (for CREATE_YIELDVAULT)
+    /// @param strategyIdentifier Cadence strategy type identifier (for CREATE_YIELDVAULT)
     event RequestCreated(
         uint256 indexed requestId,
         address indexed user,
         RequestType requestType,
         address indexed tokenAddress,
         uint256 amount,
-        uint64 yieldVaultId
+        uint64 yieldVaultId,
+        uint256 timestamp,
+        string vaultIdentifier,
+        string strategyIdentifier
     );
 
     /// @notice Emitted when a request status changes
     /// @param requestId Request being updated
+    /// @param user Address of the user who owns the request
+    /// @param requestType Type of operation being processed
     /// @param status New status
     /// @param yieldVaultId Associated YieldVault Id
     /// @param message Status message or error reason
     event RequestProcessed(
         uint256 indexed requestId,
+        address indexed user,
+        RequestType requestType,
         RequestStatus status,
         uint64 yieldVaultId,
         string message
@@ -251,10 +293,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Emitted when a user cancels their request
     /// @param requestId Cancelled request ID
     /// @param user User who cancelled
+    /// @param tokenAddress Token being refunded
     /// @param refundAmount Amount refunded to user
     event RequestCancelled(
         uint256 indexed requestId,
         address indexed user,
+        address indexed tokenAddress,
         uint256 refundAmount
     );
 
@@ -285,53 +329,88 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice Emitted when allowlist status changes
     /// @param enabled New status
-    event AllowlistEnabled(bool enabled);
+    /// @param changedBy Admin who changed the status
+    event AllowlistEnabled(bool enabled, address indexed changedBy);
 
     /// @notice Emitted when addresses are added to allowlist
     /// @param addresses Addresses added
-    event AddressesAddedToAllowlist(address[] addresses);
+    /// @param addedBy Admin who added the addresses
+    event AddressesAddedToAllowlist(address[] addresses, address indexed addedBy);
 
     /// @notice Emitted when addresses are removed from allowlist
     /// @param addresses Addresses removed
-    event AddressesRemovedFromAllowlist(address[] addresses);
+    /// @param removedBy Admin who removed the addresses
+    event AddressesRemovedFromAllowlist(address[] addresses, address indexed removedBy);
 
     /// @notice Emitted when blocklist status changes
     /// @param enabled New status
-    event BlocklistEnabled(bool enabled);
+    /// @param changedBy Admin who changed the status
+    event BlocklistEnabled(bool enabled, address indexed changedBy);
 
     /// @notice Emitted when addresses are added to blocklist
     /// @param addresses Addresses added
-    event AddressesAddedToBlocklist(address[] addresses);
+    /// @param addedBy Admin who added the addresses
+    event AddressesAddedToBlocklist(address[] addresses, address indexed addedBy);
 
     /// @notice Emitted when addresses are removed from blocklist
     /// @param addresses Addresses removed
-    event AddressesRemovedFromBlocklist(address[] addresses);
+    /// @param removedBy Admin who removed the addresses
+    event AddressesRemovedFromBlocklist(address[] addresses, address indexed removedBy);
 
     /// @notice Emitted when token configuration changes
     /// @param token Token address
     /// @param isSupported Whether token is supported
     /// @param minimumBalance Minimum deposit amount
     /// @param isNative Whether token is native $FLOW
+    /// @param configuredBy Admin who configured the token
     event TokenConfigured(
         address indexed token,
         bool isSupported,
         uint256 minimumBalance,
-        bool isNative
+        bool isNative,
+        address indexed configuredBy
     );
 
     /// @notice Emitted when max pending requests limit changes
     /// @param oldMax Previous limit
     /// @param newMax New limit
-    event MaxPendingRequestsPerUserUpdated(uint256 oldMax, uint256 newMax);
+    /// @param updatedBy Admin who updated the limit
+    event MaxPendingRequestsPerUserUpdated(uint256 oldMax, uint256 newMax, address indexed updatedBy);
+
+    /// @notice Emitted when the contract is paused
+    /// @param account Address that paused the contract
+    event Paused(address account);
+
+    /// @notice Emitted when the contract is unpaused
+    /// @param account Address that unpaused the contract
+    event Unpaused(address account);
 
     /// @notice Emitted when a new YieldVault is registered
     /// @param yieldVaultId Newly registered YieldVault Id
-    event YieldVaultIdRegistered(uint64 indexed yieldVaultId);
+    /// @param owner Address of the YieldVault owner
+    /// @param requestId Request ID that created this YieldVault
+    event YieldVaultIdRegistered(uint64 indexed yieldVaultId, address indexed owner, uint256 indexed requestId);
+
+    /// @notice Emitted when a YieldVault is unregistered (closed)
+    /// @param yieldVaultId Unregistered YieldVault Id
+    /// @param owner Address of the former YieldVault owner
+    /// @param requestId Request ID that closed this YieldVault
+    event YieldVaultIdUnregistered(uint64 indexed yieldVaultId, address indexed owner, uint256 indexed requestId);
 
     /// @notice Emitted when requests are dropped by admin
     /// @param requestIds Dropped request IDs
     /// @param droppedBy Admin who dropped the requests
     event RequestsDropped(uint256[] requestIds, address indexed droppedBy);
+
+    /// @notice Emitted when a user claims their refund
+    /// @param user User who claimed the refund
+    /// @param tokenAddress Token claimed
+    /// @param amount Amount claimed
+    event RefundClaimed(
+        address indexed user,
+        address indexed tokenAddress,
+        uint256 amount
+    );
 
     // ============================================
     // Modifiers
@@ -359,14 +438,22 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         _;
     }
 
+    /// @dev Requires contract to not be paused
+    modifier whenNotPaused() {
+        if (paused) revert ContractPaused();
+        _;
+    }
+
     // ============================================
     // Constructor
     // ============================================
 
     /// @notice Initializes the contract with COA address and default configuration
     /// @param coaAddress Address of the authorized COA
-    constructor(address coaAddress) Ownable(msg.sender) {
+    /// @param wflowAddress Address of the WFLOW (Wrapped FLOW) ERC20 token
+    constructor(address coaAddress, address wflowAddress) Ownable(msg.sender) {
         authorizedCOA = coaAddress;
+        WFLOW = wflowAddress;
         _requestIdCounter = 1;
         maxPendingRequestsPerUser = 10;
 
@@ -375,6 +462,15 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             minimumBalance: 1 ether,
             isNative: true
         });
+
+        // WFLOW is treated as ERC20 on EVM side, but unwraps to native FlowToken on Cadence
+        if (wflowAddress != address(0)) {
+            allowedTokens[WFLOW] = TokenConfig({
+                isSupported: true,
+                minimumBalance: 1 ether,
+                isNative: false
+            });
+        }
     }
 
     // ============================================
@@ -401,7 +497,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param _enabled True to enable, false to disable
     function setAllowlistEnabled(bool _enabled) external onlyOwner {
         allowlistEnabled = _enabled;
-        emit AllowlistEnabled(_enabled);
+        emit AllowlistEnabled(_enabled, msg.sender);
     }
 
     /// @notice Adds multiple addresses to the allowlist
@@ -420,7 +516,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        emit AddressesAddedToAllowlist(_addresses);
+        emit AddressesAddedToAllowlist(_addresses, msg.sender);
     }
 
     /// @notice Removes multiple addresses from the allowlist
@@ -437,14 +533,14 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        emit AddressesRemovedFromAllowlist(_addresses);
+        emit AddressesRemovedFromAllowlist(_addresses, msg.sender);
     }
 
     /// @notice Enables or disables blocklist enforcement
     /// @param _enabled True to enable, false to disable
     function setBlocklistEnabled(bool _enabled) external onlyOwner {
         blocklistEnabled = _enabled;
-        emit BlocklistEnabled(_enabled);
+        emit BlocklistEnabled(_enabled, msg.sender);
     }
 
     /// @notice Adds multiple addresses to the blocklist
@@ -463,7 +559,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        emit AddressesAddedToBlocklist(_addresses);
+        emit AddressesAddedToBlocklist(_addresses, msg.sender);
     }
 
     /// @notice Removes multiple addresses from the blocklist
@@ -480,7 +576,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        emit AddressesRemovedFromBlocklist(_addresses);
+        emit AddressesRemovedFromBlocklist(_addresses, msg.sender);
     }
 
     /// @notice Configures token support and requirements
@@ -504,7 +600,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             tokenAddress,
             isSupported,
             minimumBalance,
-            isNative
+            isNative,
+            msg.sender
         );
     }
 
@@ -515,30 +612,59 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     ) external onlyOwner {
         uint256 oldMax = maxPendingRequestsPerUser;
         maxPendingRequestsPerUser = _maxRequests;
-        emit MaxPendingRequestsPerUserUpdated(oldMax, _maxRequests);
+        emit MaxPendingRequestsPerUserUpdated(oldMax, _maxRequests, msg.sender);
     }
 
-    /// @notice Drops pending requests and refunds users (admin cleanup function)
-    /// @param requestIds Request IDs to drop
+    /// @notice Pauses the contract, preventing new request creation
+    function pause() external onlyOwner {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /// @notice Unpauses the contract, allowing new request creation
+    function unpause() external onlyOwner {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
+    /**
+     * @notice Drops pending requests and refunds escrowed funds to users.
+     * @dev Admin-only cleanup function for removing stuck or problematic requests.
+     *      Silently skips requests that don't exist or aren't in PENDING status.
+     *      For CREATE/DEPOSIT requests, immediately refunds escrowed funds to users.
+     *      WITHDRAW/CLOSE requests have no escrowed funds, so only status is updated.
+     * @param requestIds Array of request IDs to drop. Invalid/non-pending IDs are skipped.
+     */
     function dropRequests(
         uint256[] calldata requestIds
     ) external onlyOwner nonReentrant {
+        // Pre-allocate array for tracking successfully dropped request IDs
+        uint256[] memory droppedIds = new uint256[](requestIds.length);
+        uint256 droppedCount = 0;
+
+        // Process each request ID in the input array
         for (uint256 i = 0; i < requestIds.length; ) {
             uint256 requestId = requestIds[i];
             Request storage request = requests[requestId];
 
+            // Only process valid requests that are still in PENDING status
+            // This check prevents double-processing and handles invalid IDs gracefully
             if (
                 request.id == requestId &&
                 request.status == RequestStatus.PENDING
             ) {
+                // Mark request as failed with admin message
                 request.status = RequestStatus.FAILED;
                 request.message = "Dropped by admin";
 
+                // Refund escrowed funds for CREATE/DEPOSIT requests
+                // WITHDRAW/CLOSE requests don't escrow funds, so no refund needed
                 if (
                     (request.requestType == RequestType.CREATE_YIELDVAULT ||
                         request.requestType ==
                         RequestType.DEPOSIT_TO_YIELDVAULT) && request.amount > 0
                 ) {
+                    // Deduct from escrowed balance tracking
                     pendingUserBalances[request.user][
                         request.tokenAddress
                     ] -= request.amount;
@@ -548,6 +674,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                         pendingUserBalances[request.user][request.tokenAddress]
                     );
 
+                    // Transfer escrowed funds back to user
                     _transferFunds(
                         request.user,
                         request.tokenAddress,
@@ -561,18 +688,28 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                     );
                 }
 
+                // Update user's pending request count
                 if (userPendingRequestCount[request.user] > 0) {
                     userPendingRequestCount[request.user]--;
                 }
 
+                // Remove from pending queues (both global and user-specific)
                 _removePendingRequest(requestId);
 
                 emit RequestProcessed(
                     requestId,
+                    request.user,
+                    request.requestType,
                     RequestStatus.FAILED,
                     request.yieldVaultId,
                     "Dropped by admin"
                 );
+
+                // Track this request as successfully dropped
+                droppedIds[droppedCount] = requestId;
+                unchecked {
+                    ++droppedCount;
+                }
             }
 
             unchecked {
@@ -580,7 +717,18 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        emit RequestsDropped(requestIds, msg.sender);
+        // Emit batch event only if requests were actually dropped
+        if (droppedCount > 0) {
+            // Create properly-sized array for the event
+            uint256[] memory actualDroppedIds = new uint256[](droppedCount);
+            for (uint256 j = 0; j < droppedCount; ) {
+                actualDroppedIds[j] = droppedIds[j];
+                unchecked {
+                    ++j;
+                }
+            }
+            emit RequestsDropped(actualDroppedIds, msg.sender);
+        }
     }
 
     // ============================================
@@ -601,11 +749,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     )
         external
         payable
+        whenNotPaused
         onlyAllowlisted
         notBlocklisted
         nonReentrant
         returns (uint256)
     {
+        // Validate identifiers are not empty (fail fast before escrowing funds)
+        if (bytes(vaultIdentifier).length == 0) revert EmptyVaultIdentifier();
+        if (bytes(strategyIdentifier).length == 0)
+            revert EmptyStrategyIdentifier();
+
         _validateDeposit(tokenAddress, amount);
         _checkPendingRequestLimit(msg.sender);
 
@@ -632,6 +786,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     )
         external
         payable
+        whenNotPaused
         onlyAllowlisted
         notBlocklisted
         nonReentrant
@@ -660,7 +815,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function withdrawFromYieldVault(
         uint64 yieldVaultId,
         uint256 amount
-    ) external onlyAllowlisted notBlocklisted returns (uint256) {
+    ) external whenNotPaused onlyAllowlisted notBlocklisted returns (uint256) {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
         _validateYieldVaultOwnership(yieldVaultId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
@@ -681,7 +836,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return requestId The created request ID
     function closeYieldVault(
         uint64 yieldVaultId
-    ) external onlyAllowlisted notBlocklisted returns (uint256) {
+    ) external whenNotPaused onlyAllowlisted notBlocklisted returns (uint256) {
         _validateYieldVaultOwnership(yieldVaultId, msg.sender);
         _checkPendingRequestLimit(msg.sender);
 
@@ -696,29 +851,43 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             );
     }
 
-    /// @notice Cancels a pending request and refunds deposited funds
-    /// @param requestId Request ID to cancel
+    /**
+     * @notice Cancels a pending request and refunds any escrowed funds.
+     * @dev Can be called by the request owner or the contract owner (admin).
+     *      Only PENDING requests can be cancelled. Requests already in PROCESSING,
+     *      COMPLETED, or FAILED status cannot be cancelled.
+     *      For CREATE/DEPOSIT requests, escrowed funds are immediately returned.
+     *      For WITHDRAW/CLOSE requests, no funds are escrowed, so no refund occurs.
+     * @param requestId The unique identifier of the request to cancel.
+     */
     function cancelRequest(uint256 requestId) external nonReentrant {
         Request storage request = requests[requestId];
 
+        // === VALIDATION ===
+        // Verify request exists (id field matches means request was properly initialized)
         if (request.id != requestId) revert RequestNotFound();
+        // Only request owner or contract owner can cancel
         if (request.user != msg.sender && msg.sender != owner())
             revert NotRequestOwner();
+        // Only PENDING requests can be cancelled (not PROCESSING/COMPLETED/FAILED)
         if (request.status != RequestStatus.PENDING)
             revert CanOnlyCancelPending();
 
+        // === UPDATE REQUEST STATUS ===
         request.status = RequestStatus.FAILED;
+        // Set appropriate message based on who cancelled
         string memory cancelMessage = msg.sender == request.user
             ? "Cancelled by user"
             : "Cancelled by admin";
         request.message = cancelMessage;
 
+        // === UPDATE PENDING COUNTS AND QUEUES ===
         if (userPendingRequestCount[request.user] > 0) {
             userPendingRequestCount[request.user]--;
         }
-
         _removePendingRequest(requestId);
 
+        // === REFUND ESCROWED FUNDS (for CREATE/DEPOSIT requests only) ===
         uint256 refundAmount = 0;
         if (
             (request.requestType == RequestType.CREATE_YIELDVAULT ||
@@ -726,6 +895,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             request.amount > 0
         ) {
             refundAmount = request.amount;
+            // Deduct from escrowed balance tracking
             pendingUserBalances[request.user][request.tokenAddress] -= request
                 .amount;
             emit BalanceUpdated(
@@ -734,6 +904,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 pendingUserBalances[request.user][request.tokenAddress]
             );
 
+            // Transfer escrowed funds back to user
             _transferFunds(request.user, request.tokenAddress, request.amount);
 
             emit FundsWithdrawn(
@@ -743,34 +914,75 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             );
         }
 
-        emit RequestCancelled(requestId, msg.sender, refundAmount);
+        // === EMIT EVENTS ===
+        emit RequestCancelled(requestId, msg.sender, request.tokenAddress, refundAmount);
         emit RequestProcessed(
             requestId,
+            request.user,
+            request.requestType,
             RequestStatus.FAILED,
             request.yieldVaultId,
             cancelMessage
         );
     }
 
+    /// @notice Claims all refunded funds for a specific token
+    /// @dev Refunds accumulate in pendingUserBalances when CREATE/DEPOSIT requests fail.
+    ///      This function allows users to withdraw those funds directly.
+    /// @param tokenAddress Token to claim refund for (NATIVE_FLOW or ERC20)
+    function claimRefund(address tokenAddress) external nonReentrant {
+        uint256 balance = pendingUserBalances[msg.sender][tokenAddress];
+        if (balance == 0) revert NoRefundAvailable(tokenAddress);
+
+        pendingUserBalances[msg.sender][tokenAddress] = 0;
+
+        emit BalanceUpdated(msg.sender, tokenAddress, 0);
+
+        _transferFunds(msg.sender, tokenAddress, balance);
+
+        emit RefundClaimed(msg.sender, tokenAddress, balance);
+    }
+
     // ============================================
     // External Functions - COA
     // ============================================
 
-    /// @notice Begins processing a request (atomically deducts user balance)
-    /// @dev Must be called before Cadence-side operations. Deducts balance to prevent double-spend.
-    /// @param requestId Request ID to start processing
+    /**
+     * @notice Begins processing a request by transitioning it to PROCESSING status.
+     * @dev This is the first phase of the two-phase commit pattern. Must be called by the
+     *      authorized COA before executing Cadence-side operations.
+     *
+     *      For CREATE/DEPOSIT requests:
+     *      - Validates sufficient escrowed balance exists
+     *      - Atomically deducts user's escrowed balance
+     *      - Transfers funds to the COA for bridging to Cadence
+     *
+     *      For WITHDRAW/CLOSE requests:
+     *      - Only transitions status (no fund movement on EVM side)
+     *      - Funds will be bridged back from Cadence in completeProcessing
+     *
+     *      The PROCESSING status prevents request cancellation and double-processing.
+     * @param requestId The unique identifier of the request to start processing.
+     */
     function startProcessing(uint256 requestId) external onlyAuthorizedCOA {
         Request storage request = requests[requestId];
+
+        // === VALIDATION ===
         if (request.id != requestId) revert RequestNotFound();
         if (request.status != RequestStatus.PENDING)
             revert RequestAlreadyFinalized();
 
+        // === TRANSITION TO PROCESSING ===
+        // This prevents cancellation and ensures atomicity with completeProcessing
         request.status = RequestStatus.PROCESSING;
 
+        // === HANDLE FUND TRANSFER FOR CREATE/DEPOSIT ===
+        // WITHDRAW/CLOSE don't have escrowed funds on EVM side
         if (
             request.requestType == RequestType.CREATE_YIELDVAULT ||
             request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT
         ) {
+            // Verify sufficient escrowed balance
             uint256 currentBalance = pendingUserBalances[request.user][
                 request.tokenAddress
             ];
@@ -781,36 +993,71 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                     currentBalance
                 );
             }
+
+            // Deduct from user's escrowed balance
             pendingUserBalances[request.user][request.tokenAddress] =
                 currentBalance -
                 request.amount;
+
+            // Transfer escrowed funds to COA for bridging to Cadence
+            if (isNativeFlow(request.tokenAddress)) {
+                // Native FLOW: send via low-level call
+                (bool success, ) = authorizedCOA.call{value: request.amount}("");
+                if (!success) revert TransferFailed();
+            } else {
+                // ERC20: use SafeERC20 transfer
+                IERC20(request.tokenAddress).safeTransfer(
+                    authorizedCOA,
+                    request.amount
+                );
+            }
         }
 
         emit RequestProcessed(
             requestId,
+            request.user,
+            request.requestType,
             RequestStatus.PROCESSING,
             request.yieldVaultId,
             "Processing started"
         );
     }
 
-    /// @notice Completes request processing (marks success/failure, handles refunds)
-    /// @dev Called after Cadence-side operations complete. Refunds user balance on failure.
-    /// @param requestId Request ID to complete
-    /// @param success Whether the Cadence operation succeeded
-    /// @param yieldVaultId YieldVault Id associated with the request
-    /// @param message Status message or error description
+    /**
+     * @notice Completes request processing by marking success/failure and handling refunds.
+     * @dev This is the second phase of the two-phase commit pattern. Must be called by the
+     *      authorized COA after Cadence-side operations complete.
+     *
+     *      Refund handling (for failed CREATE/DEPOSIT requests only):
+     *      - Native FLOW: COA must send exact amount via msg.value
+     *      - ERC20: COA must approve this contract, funds are pulled via safeTransferFrom
+     *      - Refunded funds are credited to user's pendingUserBalances for later claim
+     *
+     *      YieldVault registration:
+     *      - Successful CREATE: Registers new YieldVault ownership
+     *      - Successful CLOSE: Unregisters YieldVault ownership
+     *
+     *      For all other cases (success, WITHDRAW/CLOSE), msg.value must be 0.
+     * @param requestId The unique identifier of the request to complete.
+     * @param success True if the Cadence operation succeeded, false otherwise.
+     * @param yieldVaultId The YieldVault Id from Cadence (for CREATE: newly assigned; for others: existing).
+     * @param message Human-readable status message or error description.
+     */
     function completeProcessing(
         uint256 requestId,
         bool success,
         uint64 yieldVaultId,
         string calldata message
-    ) external onlyAuthorizedCOA {
+    ) external payable onlyAuthorizedCOA {
         Request storage request = requests[requestId];
+
+        // === VALIDATION ===
         if (request.id != requestId) revert RequestNotFound();
+        // Only PROCESSING requests can be completed (must call startProcessing first)
         if (request.status != RequestStatus.PROCESSING)
             revert RequestAlreadyFinalized();
 
+        // === UPDATE REQUEST STATUS ===
         RequestStatus newStatus = success
             ? RequestStatus.COMPLETED
             : RequestStatus.FAILED;
@@ -818,29 +1065,50 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         request.message = message;
         request.yieldVaultId = yieldVaultId;
 
+        // === HANDLE REFUNDS FOR FAILED CREATE/DEPOSIT ===
+        // COA must return the funds that were transferred in startProcessing
         if (
             !success &&
             (request.requestType == RequestType.CREATE_YIELDVAULT ||
                 request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT)
         ) {
+            if (isNativeFlow(request.tokenAddress)) {
+                // Native FLOW: must be sent with this transaction
+                if (msg.value != request.amount) revert MsgValueMustEqualAmount();
+            } else {
+                // ERC20: pull from COA (requires prior approval)
+                if (msg.value != 0) revert MsgValueMustBeZero();
+                IERC20(request.tokenAddress).safeTransferFrom(
+                    msg.sender,
+                    address(this),
+                    request.amount
+                );
+            }
+            // Credit refunded funds to user's pending balance for later claim
             pendingUserBalances[request.user][request.tokenAddress] += request
                 .amount;
+        } else {
+            // No refund expected for: successful requests OR WITHDRAW/CLOSE requests
+            if (msg.value != 0) revert MsgValueMustBeZero();
         }
 
+        // === UPDATE YIELDVAULT REGISTRY ===
+        // Register new YieldVault on successful CREATE
         if (success && request.requestType == RequestType.CREATE_YIELDVAULT) {
-            _registerYieldVault(yieldVaultId, request.user);
+            _registerYieldVault(yieldVaultId, request.user, requestId);
         }
-
+        // Unregister YieldVault on successful CLOSE
         if (success && request.requestType == RequestType.CLOSE_YIELDVAULT) {
-            _unregisterYieldVault(yieldVaultId, request.user);
+            _unregisterYieldVault(yieldVaultId, request.user, requestId);
         }
 
+        // === CLEANUP PENDING STATE ===
         if (userPendingRequestCount[request.user] > 0) {
             userPendingRequestCount[request.user]--;
         }
         _removePendingRequest(requestId);
 
-        emit RequestProcessed(requestId, newStatus, yieldVaultId, message);
+        emit RequestProcessed(requestId, request.user, request.requestType, newStatus, yieldVaultId, message);
     }
 
     // ============================================
@@ -1011,17 +1279,98 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         return userOwnsYieldVault[user][yieldVaultId];
     }
 
+    /// @notice Gets pending requests for a specific user in unpacked format
+    /// @dev Uses pendingRequestIdsByUser mapping for O(n) where n = user's pending requests (not all requests)
+    /// @param user User address to filter by
+    /// @return ids Request IDs
+    /// @return requestTypes Request types
+    /// @return statuses Request statuses
+    /// @return tokenAddresses Token addresses
+    /// @return amounts Amounts
+    /// @return yieldVaultIds YieldVault Ids
+    /// @return timestamps Timestamps
+    /// @return messages Messages
+    /// @return vaultIdentifiers Vault identifiers
+    /// @return strategyIdentifiers Strategy identifiers
+    /// @return pendingBalance Total pending balance for this user (native FLOW only)
+    function getPendingRequestsByUserUnpacked(
+        address user
+    )
+        external
+        view
+        returns (
+            uint256[] memory ids,
+            uint8[] memory requestTypes,
+            uint8[] memory statuses,
+            address[] memory tokenAddresses,
+            uint256[] memory amounts,
+            uint64[] memory yieldVaultIds,
+            uint256[] memory timestamps,
+            string[] memory messages,
+            string[] memory vaultIdentifiers,
+            string[] memory strategyIdentifiers,
+            uint256 pendingBalance
+        )
+    {
+        // Use the user's pending request IDs directly (O(1) lookup)
+        uint256[] storage userPendingIds = pendingRequestIdsByUser[user];
+        uint256 count = userPendingIds.length;
+
+        // Initialize arrays
+        ids = new uint256[](count);
+        requestTypes = new uint8[](count);
+        statuses = new uint8[](count);
+        tokenAddresses = new address[](count);
+        amounts = new uint256[](count);
+        yieldVaultIds = new uint64[](count);
+        timestamps = new uint256[](count);
+        messages = new string[](count);
+        vaultIdentifiers = new string[](count);
+        strategyIdentifiers = new string[](count);
+
+        // Fill arrays - only iterate through user's requests
+        for (uint256 i = 0; i < count; ) {
+            Request storage req = requests[userPendingIds[i]];
+            ids[i] = req.id;
+            requestTypes[i] = uint8(req.requestType);
+            statuses[i] = uint8(req.status);
+            tokenAddresses[i] = req.tokenAddress;
+            amounts[i] = req.amount;
+            yieldVaultIds[i] = req.yieldVaultId;
+            timestamps[i] = req.timestamp;
+            messages[i] = req.message;
+            vaultIdentifiers[i] = req.vaultIdentifier;
+            strategyIdentifiers[i] = req.strategyIdentifier;
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Get pending balance for native FLOW
+        pendingBalance = pendingUserBalances[user][NATIVE_FLOW];
+    }
+
     // ============================================
     // Internal Functions
     // ============================================
 
-    /// @dev Validates deposit parameters and transfers tokens
+    /**
+     * @dev Validates deposit parameters and transfers tokens to this contract for escrow.
+     *      Performs comprehensive validation including amount, token support, and minimum balance checks.
+     *      For native FLOW, validates msg.value matches amount.
+     *      For ERC20 tokens, pulls tokens from caller using safeTransferFrom (requires prior approval).
+     * @param tokenAddress The token being deposited. Use NATIVE_FLOW sentinel for native $FLOW deposits.
+     * @param amount The amount of tokens to deposit (in wei). Must be greater than zero and meet minimum requirements.
+     */
     function _validateDeposit(address tokenAddress, uint256 amount) internal {
+        // Validate amount is non-zero
         if (amount == 0) revert AmountMustBeGreaterThanZero();
 
+        // Load token configuration to check if supported and get requirements
         TokenConfig memory config = allowedTokens[tokenAddress];
         if (!config.isSupported) revert TokenNotSupported(tokenAddress);
 
+        // Enforce minimum balance requirement if configured
         if (config.minimumBalance > 0 && amount < config.minimumBalance) {
             revert BelowMinimumBalance(
                 tokenAddress,
@@ -1030,9 +1379,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             );
         }
 
+        // Handle token transfer based on token type
         if (config.isNative) {
+            // Native FLOW: validate msg.value matches the deposit amount
             if (msg.value != amount) revert MsgValueMustEqualAmount();
         } else {
+            // ERC20: ensure no native value sent, then pull tokens from caller
             if (msg.value != 0) revert MsgValueMustBeZero();
             IERC20(tokenAddress).safeTransferFrom(
                 msg.sender,
@@ -1042,11 +1394,18 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
     }
 
-    /// @dev Validates that user owns the specified YieldVault
+    /**
+     * @dev Validates that the specified user owns the given YieldVault.
+     *      Checks both that the YieldVault exists (validYieldVaultIds) and that
+     *      the user is the registered owner (yieldVaultOwners).
+     * @param yieldVaultId The YieldVault Id to validate ownership for.
+     * @param user The address that should own the YieldVault.
+     */
     function _validateYieldVaultOwnership(
         uint64 yieldVaultId,
         address user
     ) internal view {
+        // Check both validity and ownership in a single condition for gas efficiency
         if (
             !validYieldVaultIds[yieldVaultId] ||
             yieldVaultOwners[yieldVaultId] != user
@@ -1055,8 +1414,14 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
     }
 
-    /// @dev Checks if user has reached pending request limit
+    /**
+     * @dev Checks if the user has reached the maximum allowed pending requests.
+     *      When maxPendingRequestsPerUser is 0, there is no limit.
+     *      Reverts with TooManyPendingRequests if limit is reached.
+     * @param user The address to check the pending request count for.
+     */
     function _checkPendingRequestLimit(address user) internal view {
+        // Skip check if limit is disabled (maxPendingRequestsPerUser == 0)
         if (
             maxPendingRequestsPerUser > 0 &&
             userPendingRequestCount[user] >= maxPendingRequestsPerUser
@@ -1065,56 +1430,122 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
     }
 
-    /// @dev Checks if token is native $FLOW
+    /**
+     * @dev Checks if the specified token address is configured as native $FLOW.
+     *      Used internally to determine transfer method (native vs ERC20).
+     * @param tokenAddress The token address to check.
+     * @return True if the token is configured as native $FLOW, false otherwise.
+     */
     function _isNativeToken(address tokenAddress) internal view returns (bool) {
         return allowedTokens[tokenAddress].isNative;
     }
 
-    /// @dev Transfers funds to recipient (native or ERC20)
+    /**
+     * @dev Transfers funds to a recipient, handling both native $FLOW and ERC20 tokens.
+     *      For native tokens, uses low-level call with value.
+     *      For ERC20 tokens, uses SafeERC20's safeTransfer.
+     * @param to The recipient address to transfer funds to.
+     * @param tokenAddress The token to transfer. Use NATIVE_FLOW for native $FLOW.
+     * @param amount The amount of tokens to transfer (in wei).
+     */
     function _transferFunds(
         address to,
         address tokenAddress,
         uint256 amount
     ) internal {
         if (_isNativeToken(tokenAddress)) {
+            // Native FLOW: use low-level call to transfer ETH/FLOW
             (bool success, ) = to.call{value: amount}("");
             if (!success) revert TransferFailed();
         } else {
+            // ERC20: use SafeERC20 for safe token transfer
             IERC20(tokenAddress).safeTransfer(to, amount);
         }
     }
 
-    /// @dev Registers a new YieldVault with ownership tracking
-    function _registerYieldVault(uint64 yieldVaultId, address user) internal {
+    /**
+     * @dev Registers a new YieldVault with comprehensive ownership tracking.
+     *      Updates multiple mappings to enable O(1) lookups for:
+     *      - Validity checks (validYieldVaultIds)
+     *      - Owner lookups (yieldVaultOwners)
+     *      - User's YieldVault list (yieldVaultsByUser)
+     *      - Ownership verification (userOwnsYieldVault)
+     *      Also tracks array index for O(1) removal when YieldVault is closed.
+     * @param yieldVaultId The unique YieldVault Id assigned by the Cadence protocol.
+     * @param user The address that will own this YieldVault.
+     * @param requestId The CREATE_YIELDVAULT request ID that created this YieldVault.
+     */
+    function _registerYieldVault(uint64 yieldVaultId, address user, uint256 requestId) internal {
+        // Mark YieldVault as valid and set owner
         validYieldVaultIds[yieldVaultId] = true;
         yieldVaultOwners[yieldVaultId] = user;
+
+        // Track index in user's array for O(1) removal later
+        _yieldVaultIndexInUserArray[user][yieldVaultId] = yieldVaultsByUser[user].length;
         yieldVaultsByUser[user].push(yieldVaultId);
+
+        // Set ownership flag for O(1) ownership verification
         userOwnsYieldVault[user][yieldVaultId] = true;
-        emit YieldVaultIdRegistered(yieldVaultId);
+
+        emit YieldVaultIdRegistered(yieldVaultId, user, requestId);
     }
 
-    /// @dev Unregisters a YieldVault and removes ownership tracking
-    function _unregisterYieldVault(uint64 yieldVaultId, address user) internal {
+    /**
+     * @dev Unregisters a YieldVault and removes all ownership tracking.
+     *      Uses swap-and-pop pattern for O(1) removal from user's YieldVault array.
+     *      Order in yieldVaultsByUser doesn't affect protocol behavior, only enumeration.
+     *      Cleans up all related mappings to properly invalidate the YieldVault.
+     * @param yieldVaultId The YieldVault Id to unregister.
+     * @param user The address that owns this YieldVault.
+     * @param requestId The CLOSE_YIELDVAULT request ID that closed this YieldVault.
+     */
+    function _unregisterYieldVault(uint64 yieldVaultId, address user, uint256 requestId) internal {
         uint64[] storage userYieldVaults = yieldVaultsByUser[user];
-        for (uint256 i = 0; i < userYieldVaults.length; ) {
-            if (userYieldVaults[i] == yieldVaultId) {
-                userYieldVaults[i] = userYieldVaults[
-                    userYieldVaults.length - 1
-                ];
-                userYieldVaults.pop();
-                break;
+        uint256 indexToRemove = _yieldVaultIndexInUserArray[user][yieldVaultId];
+
+        // Safety check: verify the element at index matches to prevent removing wrong YieldVault
+        // This guards against index mapping corruption
+        if (userYieldVaults.length > 0 && indexToRemove < userYieldVaults.length && userYieldVaults[indexToRemove] == yieldVaultId) {
+            // Get the last element for swap-and-pop
+            uint64 lastYieldVaultId = userYieldVaults[userYieldVaults.length - 1];
+
+            // Move last element to the position being removed (skip if already last)
+            if (indexToRemove != userYieldVaults.length - 1) {
+                userYieldVaults[indexToRemove] = lastYieldVaultId;
+                // Update index mapping for the moved element
+                _yieldVaultIndexInUserArray[user][lastYieldVaultId] = indexToRemove;
             }
-            unchecked {
-                ++i;
-            }
+
+            // Pop the last element (now duplicated or the one to remove)
+            userYieldVaults.pop();
+            // Clean up index mapping for removed YieldVault
+            delete _yieldVaultIndexInUserArray[user][yieldVaultId];
         }
 
+        // Clear all ownership-related state
         userOwnsYieldVault[user][yieldVaultId] = false;
         validYieldVaultIds[yieldVaultId] = false;
         delete yieldVaultOwners[yieldVaultId];
+
+        emit YieldVaultIdUnregistered(yieldVaultId, user, requestId);
     }
 
-    /// @dev Creates a new request and updates state
+    /**
+     * @dev Creates a new request and updates all related state.
+     *      This function handles the core request creation logic shared by all request types:
+     *      1. Generates unique request ID and stores request data
+     *      2. Adds to global pending queue (FIFO order for processing)
+     *      3. Adds to user's pending requests (for user-specific queries)
+     *      4. Updates escrowed balance for CREATE/DEPOSIT requests
+     *      5. Emits RequestCreated event for indexing
+     * @param requestType The type of request (CREATE, DEPOSIT, WITHDRAW, CLOSE).
+     * @param tokenAddress The token involved in this request.
+     * @param amount The amount of tokens involved (0 for CLOSE requests).
+     * @param yieldVaultId The YieldVault Id (NO_YIELDVAULT_ID for CREATE until assigned by Cadence).
+     * @param vaultIdentifier Cadence vault type identifier (only for CREATE requests).
+     * @param strategyIdentifier Cadence strategy type identifier (only for CREATE requests).
+     * @return The newly created request ID.
+     */
     function _createRequest(
         RequestType requestType,
         address tokenAddress,
@@ -1123,8 +1554,10 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         string memory vaultIdentifier,
         string memory strategyIdentifier
     ) internal returns (uint256) {
+        // Generate unique request ID using auto-incrementing counter
         uint256 requestId = _requestIdCounter++;
 
+        // Store the complete request data
         requests[requestId] = Request({
             id: requestId,
             user: msg.sender,
@@ -1139,9 +1572,16 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             strategyIdentifier: strategyIdentifier
         });
 
+        // Add to global pending queue with index tracking for O(1) lookup
+        _requestIndexInGlobalArray[requestId] = pendingRequestIds.length;
         pendingRequestIds.push(requestId);
         userPendingRequestCount[msg.sender]++;
 
+        // Add to user's pending array with index tracking for O(1) removal
+        _requestIndexInUserArray[requestId] = pendingRequestIdsByUser[msg.sender].length;
+        pendingRequestIdsByUser[msg.sender].push(requestId);
+
+        // Update escrowed balance for requests that involve incoming funds
         if (
             requestType == RequestType.CREATE_YIELDVAULT ||
             requestType == RequestType.DEPOSIT_TO_YIELDVAULT
@@ -1160,28 +1600,69 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             requestType,
             tokenAddress,
             amount,
-            yieldVaultId
+            yieldVaultId,
+            block.timestamp,
+            vaultIdentifier,
+            strategyIdentifier
         );
 
         return requestId;
     }
 
-    /// @dev Removes a request from the pending queue (preserves history in requests mapping)
+    /**
+     * @dev Removes a request from all pending queues while preserving request history.
+     *      Uses two different removal strategies:
+     *      - Global array: Shift elements to maintain FIFO order (O(n) but necessary for fair processing)
+     *      - User array: Swap-and-pop for O(1) removal (order doesn't affect processing)
+     *
+     *      The request data remains in the `requests` mapping for historical queries;
+     *      this function only removes it from the pending queues.
+     * @param requestId The request ID to remove from pending queues.
+     */
     function _removePendingRequest(uint256 requestId) internal {
-        for (uint256 i = 0; i < pendingRequestIds.length; ) {
-            if (pendingRequestIds[i] == requestId) {
-                for (uint256 j = i; j < pendingRequestIds.length - 1; ) {
-                    pendingRequestIds[j] = pendingRequestIds[j + 1];
-                    unchecked {
-                        ++j;
-                    }
+        // === GLOBAL PENDING ARRAY REMOVAL ===
+        // Uses O(1) lookup + O(n) shift to maintain FIFO order
+        // FIFO order is critical for DeFi fairness - requests must be processed in submission order
+        uint256 indexInGlobal = _requestIndexInGlobalArray[requestId];
+        uint256 globalLength = pendingRequestIds.length;
+
+        // Safety check: verify element exists at expected index
+        if (globalLength > 0 && indexInGlobal < globalLength && pendingRequestIds[indexInGlobal] == requestId) {
+            // Shift all subsequent elements left to maintain FIFO order
+            for (uint256 j = indexInGlobal; j < globalLength - 1; ) {
+                pendingRequestIds[j] = pendingRequestIds[j + 1];
+                // Update index mapping for each shifted element
+                _requestIndexInGlobalArray[pendingRequestIds[j]] = j;
+                unchecked {
+                    ++j;
                 }
-                pendingRequestIds.pop();
-                break;
             }
-            unchecked {
-                ++i;
+            // Remove the last element (now duplicated or the one to remove)
+            pendingRequestIds.pop();
+            // Clean up index mapping
+            delete _requestIndexInGlobalArray[requestId];
+        }
+
+        // === USER PENDING ARRAY REMOVAL ===
+        // Uses swap-and-pop for O(1) removal (order doesn't affect FIFO processing)
+        address user = requests[requestId].user;
+        uint256[] storage userPendingIds = pendingRequestIdsByUser[user];
+        uint256 indexToRemove = _requestIndexInUserArray[requestId];
+
+        // IMPORTANT: Verify the element at index matches to prevent removing wrong request
+        if (userPendingIds.length > 0 && indexToRemove < userPendingIds.length && userPendingIds[indexToRemove] == requestId) {
+            // Get the last element
+            uint256 lastRequestId = userPendingIds[userPendingIds.length - 1];
+
+            // Move last element to the position being removed (if not already last)
+            if (indexToRemove != userPendingIds.length - 1) {
+                userPendingIds[indexToRemove] = lastRequestId;
+                _requestIndexInUserArray[lastRequestId] = indexToRemove;
             }
+
+            // Remove the last element
+            userPendingIds.pop();
+            delete _requestIndexInUserArray[requestId];
         }
     }
 }

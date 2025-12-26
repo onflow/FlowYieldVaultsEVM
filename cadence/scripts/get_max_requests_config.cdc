@@ -5,14 +5,14 @@ import "FlowYieldVaultsEVM"
 /// @return Dictionary with current config and throughput calculations
 ///
 access(all) fun main(): {String: AnyStruct} {
-    let maxRequestsPerTx = FlowYieldVaultsEVM.maxRequestsPerTx
+    let maxRequestsPerTx = FlowYieldVaultsEVM.getMaxRequestsPerTx()
 
-    let executionsPerHourAt5s = 720
-    let executionsPerHourAt60s = 60
+    let executionsPerHourAt3s = 1200   // High load: >10 pending
+    let executionsPerHourAt30s = 120   // Idle: 0 pending
 
     let throughput: {String: Int} = {
-        "at5sDelay": maxRequestsPerTx * executionsPerHourAt5s,
-        "at60sDelay": maxRequestsPerTx * executionsPerHourAt60s
+        "atHighLoad": maxRequestsPerTx * executionsPerHourAt3s,
+        "atIdle": maxRequestsPerTx * executionsPerHourAt30s
     }
 
     let gasEstimate: {String: String} = {
@@ -32,7 +32,7 @@ access(all) fun main(): {String: AnyStruct} {
 access(all) fun calculateGasRange(_ batchSize: Int): String {
     let lowGas = batchSize * 100_000
     let highGas = batchSize * 500_000
-    return lowGas.toString().concat(" - ").concat(highGas.toString()).concat(" gas")
+    return "\(lowGas) - \(highGas) gas"
 }
 
 access(all) fun getRecommendations(_ current: Int): [String] {

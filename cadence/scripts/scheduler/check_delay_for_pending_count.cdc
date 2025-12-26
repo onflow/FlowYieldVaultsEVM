@@ -21,9 +21,9 @@ access(all) fun main(pendingRequests: Int): {String: AnyStruct} {
 }
 
 access(all) fun getLoadCategory(_ delay: UFix64): String {
-    if delay <= 15.0 {
+    if delay <= 5.0 {
         return "HIGH"
-    } else if delay <= 45.0 {
+    } else if delay <= 10.0 {
         return "MEDIUM"
     } else {
         return "LOW"

@@ -124,6 +124,8 @@ echo "COA Address: $COA_ADDRESS"
 
 # Export for Foundry
 export COA_ADDRESS=$COA_ADDRESS
+# WFLOW not available on local emulator - use address(0) to disable
+export WFLOW_ADDRESS="0x0000000000000000000000000000000000000000"
 
 # Verify EVM Gateway one more time before Solidity deployment
 echo "Final EVM Gateway verification before deployment..."
@@ -182,6 +184,9 @@ flow transactions send ./cadence/transactions/setup_worker_with_badge.cdc \
 
 echo "✓ Project initialization complete"
 
+# Save contract address to file for other scripts
+echo "$FLOW_VAULTS_REQUESTS_CONTRACT" > ./local/.deployed_contract_address
+
 echo ""
 echo "========================================="
 echo "✓ Full stack deployment complete!"
@@ -189,5 +194,5 @@ echo "========================================="
 echo ""
 echo "FlowYieldVaultsRequests Contract: $FLOW_VAULTS_REQUESTS_CONTRACT"
 echo ""
-echo "Export this for use in other scripts:"
-echo "export FLOW_VAULTS_REQUESTS_CONTRACT=$FLOW_VAULTS_REQUESTS_CONTRACT"
+echo "Contract address saved to ./local/.deployed_contract_address"
+echo "You can now run: ./local/run_e2e_tests.sh"

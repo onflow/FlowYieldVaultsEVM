@@ -31,7 +31,7 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
         totalYieldVaultsMapped = totalYieldVaultsMapped + yieldVaults.length
 
         evmDetails.append({
-            "evmAddress": "0x".concat(evmAddr),
+            "evmAddress": "0x\(evmAddr)",
             "yieldVaultCount": yieldVaults.length,
             "yieldVaultIds": yieldVaults
         })
@@ -65,7 +65,7 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
 
     let storagePaths: [String] = []
     account.storage.forEachStored(fun (path: StoragePath, type: Type): Bool {
-        storagePaths.append(path.toString().concat(" -> ").concat(type.identifier))
+        storagePaths.append("\(path) -> \(type.identifier)")
         return true
     })
     result["storagePaths"] = storagePaths
@@ -80,7 +80,7 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     }
 
     if strategies.length > 0 {
-        healthChecks["strategies"] = strategies.length.toString().concat(" available")
+        healthChecks["strategies"] = "\(strategies.length) available"
     } else {
         healthChecks["strategies"] = "NO STRATEGIES"
     }
@@ -94,8 +94,8 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     }
 
     healthChecks["worker"] = workerExists ? "EXISTS" : "NOT FOUND"
-    healthChecks["evmUsers"] = yieldVaultsByEVM.keys.length > 0 ? yieldVaultsByEVM.keys.length.toString().concat(" registered") : "NO USERS"
-    healthChecks["yieldVaults"] = totalYieldVaultsMapped > 0 ? totalYieldVaultsMapped.toString().concat(" created") : "NO YIELDVAULTS"
+    healthChecks["evmUsers"] = yieldVaultsByEVM.keys.length > 0 ? "\(yieldVaultsByEVM.keys.length) registered" : "NO USERS"
+    healthChecks["yieldVaults"] = totalYieldVaultsMapped > 0 ? "\(totalYieldVaultsMapped) created" : "NO YIELDVAULTS"
 
     result["healthChecks"] = healthChecks
 

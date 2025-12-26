@@ -218,16 +218,17 @@ Coverage includes:
 
 | Pending Requests | Delay | Description |
 |------------------|-------|-------------|
-| ≥50 | 5s | High load |
-| ≥20 | 15s | Medium-high load |
-| ≥10 | 30s | Medium load |
-| ≥5 | 45s | Low load |
-| 0 | 60s | Idle |
+| ≥11 | 3s | High load |
+| ≥5 | 5s | Medium load |
+| ≥1 | 7s | Low load |
+| 0 | 30s | Idle |
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `maxParallelTransactions` | 1 | Max parallel scheduled transactions |
 | `isPaused` | false | Pause/resume processing |
+| `baseEffortPerRequest` | 2000 | Execution effort per request |
+| `baseOverhead` | 3000 | Base overhead for transactions |
+| `idleExecutionEffort` | 5000 | Max effort cap when idle (for Medium priority) |
 
 ## Security
 
@@ -252,7 +253,7 @@ Coverage includes:
 ## Documentation
 
 - [Frontend Integration](./FRONTEND_INTEGRATION.md) - Guide for frontend developers
-- [Architecture Design](./FLOW_VAULTS_EVM_BRIDGE_DESIGN.md) - Detailed bridge design and data flows
+- [Architecture Design](./FLOW_YIELD_VAULTS_EVM_BRIDGE_DESIGN.md) - Detailed bridge design and data flows
 - [Testing](./TESTING.md) - Test suite documentation
 
 ## License
