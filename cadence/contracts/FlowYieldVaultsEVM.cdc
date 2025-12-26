@@ -18,13 +18,13 @@ import "FlowEVMBridgeConfig"
 ///      Key architecture:
 ///      - Worker resource: Holds COA capability and YieldVaultManager, processes requests
 ///      - Admin resource: Manages contract configuration (requests address, batch size)
-///      - Two-phase commit: Uses startProcessing() and completeProcessing() for atomic state management
+///      - Two-phase processing: Uses startProcessing() and completeProcessing() to coordinate EVM and Cadence state
 ///
 ///      Request flow:
 ///      1. Worker fetches pending requests from FlowYieldVaultsRequests (EVM)
-///      2. For each request, calls startProcessing() to mark as PROCESSING and deduct balance
+///      2. For each request, calls startProcessing() to mark as PROCESSING (deducts escrow for CREATE/DEPOSIT)
 ///      3. Executes Cadence-side operation (create/deposit/withdraw/close YieldVault)
-///      4. Calls completeProcessing() to mark as COMPLETED or FAILED (with refund on failure)
+///      4. Calls completeProcessing() to mark as COMPLETED or FAILED (refunds escrow for CREATE/DEPOSIT failures)
 access(all) contract FlowYieldVaultsEVM {
 
     // ============================================
@@ -366,7 +366,7 @@ access(all) contract FlowYieldVaultsEVM {
 
         /// @notice Processes pending requests from the EVM contract
         /// @dev Fetches up to count pending requests and processes each one.
-        ///      Uses two-phase commit pattern with startProcessing() and completeProcessing().
+        ///      Uses two-phase processing (startProcessing → completeProcessing) to sync request status.
         /// @param startIndex The index to start fetching requests from
         /// @param count The number of requests to fetch
         access(all) fun processRequests(startIndex: Int, count: Int) {
@@ -374,7 +374,6 @@ access(all) contract FlowYieldVaultsEVM {
                 FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress != nil: "FlowYieldVaultsRequests address not set"
             }
 
-            let totalPending = self.getPendingRequestCountFromEVM()
             let requestsToProcess = self.getPendingRequestsFromEVM(startIndex: startIndex, count: count)
             let batchSize = requestsToProcess.length
 
@@ -696,7 +695,7 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
-        /// @notice Marks a request as PROCESSING and deducts user balance atomically
+        /// @notice Marks a request as PROCESSING on EVM and deducts escrow for CREATE/DEPOSIT
         /// @param requestId The request ID to start processing
         /// @return True if successful, false otherwise
         access(self) fun startProcessing(requestId: UInt256): Bool {
@@ -726,17 +725,13 @@ access(all) contract FlowYieldVaultsEVM {
             return true
         }
 
-        /// @notice Marks a request as COMPLETED or FAILED with refund on failure
+        /// @notice Marks a request as COMPLETED or FAILED and refunds escrow on CREATE/DEPOSIT failures
         /// @param requestId The request ID to complete
         /// @param success Whether the operation succeeded
         /// @param yieldVaultId The associated YieldVault Id
         /// @param message Status message or error reason
         /// @return True if the EVM call succeeded, false otherwise
         access(self) fun completeProcessing(requestId: UInt256, success: Bool, yieldVaultId: UInt64, message: String): Bool {
-            let status = success
-                ? FlowYieldVaultsEVM.RequestStatus.COMPLETED.rawValue
-                : FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue
-
             let calldata = EVM.encodeABIWithSignature(
                 "completeProcessing(uint256,bool,uint64,string)",
                 [requestId, success, yieldVaultId, message]

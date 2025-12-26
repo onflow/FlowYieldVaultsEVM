@@ -1,4 +1,3 @@
-import "FlowYieldVaultsEVM"
 import "EVM"
 
 /// @title Get Token Config
