@@ -54,8 +54,8 @@
 # --------------------------------------------
 # When vaultIdentifier and strategyIdentifier are valid Cadence types:
 #
-#   ./scripts/testnet-e2e.sh create-flow 1.2
-#   ./scripts/testnet-e2e.sh create-wflow 1.3
+#   ./local/testnet-e2e.sh create-flow 1.2
+#   ./local/testnet-e2e.sh create-wflow 1.3
 #
 # Expected behavior:
 #   1. Request created with status PENDING
@@ -77,10 +77,10 @@
 # When vaultIdentifier or strategyIdentifier are invalid:
 #
 #   # Invalid vault, correct strategy
-#   ./scripts/testnet-e2e.sh create-flow 1.5 "InvalidVault" "A.d2580caf2ef07c2f.FlowYieldVaultsStrategies.mUSDCStrategy"
+#   ./local/testnet-e2e.sh create-flow 1.5 "InvalidVault" "A.d2580caf2ef07c2f.FlowYieldVaultsStrategies.mUSDCStrategy"
 #
 #   # Correct vault, invalid strategy
-#   ./scripts/testnet-e2e.sh create-flow 1.7 "A.7e60df042a9c0868.FlowToken.Vault" "InvalidStrategy"
+#   ./local/testnet-e2e.sh create-flow 1.7 "A.7e60df042a9c0868.FlowToken.Vault" "InvalidStrategy"
 #
 # Expected behavior:
 #   1. Request created with status PENDING (EVM contract doesn't validate identifiers)
@@ -113,21 +113,21 @@
 # TYPICAL TEST FLOW
 # =============================================================================
 #
-# 1. Check initial state:        ./scripts/testnet-e2e.sh state
-# 2. Send test transaction:      ./scripts/testnet-e2e.sh create-flow 1.2
+# 1. Check initial state:        ./local/testnet-e2e.sh state
+# 2. Send test transaction:      ./local/testnet-e2e.sh create-flow 1.2
 # 3. Wait for processing (~5-30s depending on pending queue)
-# 4. Check request status:       ./scripts/testnet-e2e.sh request <id>
-# 5. Verify final state:         ./scripts/testnet-e2e.sh state
-# 6. Check YieldVault balances:  ./scripts/testnet-e2e.sh user-yieldvaults
+# 4. Check request status:       ./local/testnet-e2e.sh request <id>
+# 5. Verify final state:         ./local/testnet-e2e.sh state
+# 6. Check YieldVault balances:  ./local/testnet-e2e.sh user-yieldvaults
 #
 # =============================================================================
 # Usage:
-#   ./scripts/testnet-e2e.sh state              # Check current state
-#   ./scripts/testnet-e2e.sh create-flow <amount> [vault] [strategy]
-#   ./scripts/testnet-e2e.sh create-wflow <amount> [vault] [strategy]
-#   ./scripts/testnet-e2e.sh request <id>       # Get request details
-#   ./scripts/testnet-e2e.sh yieldvault <id>    # Get YieldVault balance
-#   ./scripts/testnet-e2e.sh user-yieldvaults   # List user's YieldVaults
+#   ./local/testnet-e2e.sh state              # Check current state
+#   ./local/testnet-e2e.sh create-flow <amount> [vault] [strategy]
+#   ./local/testnet-e2e.sh create-wflow <amount> [vault] [strategy]
+#   ./local/testnet-e2e.sh request <id>       # Get request details
+#   ./local/testnet-e2e.sh yieldvault <id>    # Get YieldVault balance
+#   ./local/testnet-e2e.sh user-yieldvaults   # List user's YieldVaults
 # =============================================================================
 
 set -e
