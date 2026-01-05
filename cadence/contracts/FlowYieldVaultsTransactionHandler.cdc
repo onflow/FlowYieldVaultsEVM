@@ -17,7 +17,7 @@ import "FungibleToken"
 ///      - Pausable execution for maintenance
 ///
 ///      Delay thresholds:
-///      - > 10 pending: 3s delay (high load)
+///      - >= 11 pending: 3s delay (high load)
 ///      - >= 5 pending: 5s delay (medium load)
 ///      - >= 1 pending: 7s delay (low load)
 ///      - 0 pending: 30s delay (idle)

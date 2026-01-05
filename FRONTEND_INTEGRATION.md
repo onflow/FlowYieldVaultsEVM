@@ -154,12 +154,12 @@ const userRequests = ids.filter((_, i) => users[i].toLowerCase() === userAddress
 
 ### Listen for Request Status Updates
 ```typescript
-contract.on('RequestCreated', (requestId, user, requestType, tokenAddress, amount, yieldVaultId) => {
+contract.on('RequestCreated', (requestId, user, requestType, tokenAddress, amount, yieldVaultId, timestamp, vaultIdentifier, strategyIdentifier) => {
   console.log('New request created:', requestId.toString());
   // Add to pending requests UI
 });
 
-contract.on('RequestProcessed', (requestId, status, yieldVaultId, message) => {
+contract.on('RequestProcessed', (requestId, user, requestType, status, yieldVaultId, message) => {
   console.log('Request processed:', requestId.toString(), 'status:', status);
 
   if (status === 2) { // COMPLETED
@@ -171,7 +171,7 @@ contract.on('RequestProcessed', (requestId, status, yieldVaultId, message) => {
   }
 });
 
-contract.on('RequestCancelled', (requestId, user, refundAmount) => {
+contract.on('RequestCancelled', (requestId, user, tokenAddress, refundAmount) => {
   console.log('Request cancelled, refunded:', ethers.formatEther(refundAmount));
 });
 ```

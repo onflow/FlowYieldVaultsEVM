@@ -388,7 +388,8 @@ access(all) let REQUEST_TYPE_DEPOSIT: UInt8 = 1
 access(all) let REQUEST_TYPE_WITHDRAW: UInt8 = 2
 access(all) let REQUEST_TYPE_CLOSE: UInt8 = 3
 
-// Request status constants
+// Request status constants (must match FlowYieldVaultsEVM.RequestStatus enum order)
 access(all) let REQUEST_STATUS_PENDING: UInt8 = 0
-access(all) let REQUEST_STATUS_COMPLETED: UInt8 = 1
-access(all) let REQUEST_STATUS_FAILED: UInt8 = 2
+access(all) let REQUEST_STATUS_PROCESSING: UInt8 = 1
+access(all) let REQUEST_STATUS_COMPLETED: UInt8 = 2
+access(all) let REQUEST_STATUS_FAILED: UInt8 = 3

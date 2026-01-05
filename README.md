@@ -65,7 +65,7 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 5. **For each request**, two-phase commit:
    - `startProcessing()`: Marks request as PROCESSING, deducts user balance (for CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT)
    - Execute Cadence operation (create/deposit/withdraw/close YieldVault)
-   - `completeProcessing()`: Marks as COMPLETED or FAILED (refunds on failure)
+   - `completeProcessing()`: Marks as COMPLETED or FAILED (on failure, credits pending balance; user claims via `claimRefund`)
 6. **Funds bridged** to user on withdrawal/close operations
 
 ## Quick Start
@@ -91,6 +91,35 @@ forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYie
 # 3. Process requests (triggers Worker)
 flow transactions send ./cadence/transactions/process_requests.cdc 0 10 --signer emulator-flow-yield-vaults --compute-limit 9999
 ```
+
+### Local Scripts and Sequence (Emulator)
+
+Recommended sequence (run from repo root):
+
+1. `./local/setup_and_run_emulator.sh`
+2. `./local/deploy_full_stack.sh`
+3. `./local/run_e2e_tests.sh`
+4. `./local/run_admin_e2e_tests.sh`
+
+Notes:
+- These scripts expect `flow`, `forge`, `cast`, `curl`, `bc`, `lsof`, and `git` on PATH.
+- `./local/deploy_full_stack.sh` writes the deployed EVM contract address to `./local/.deployed_contract_address`.
+- The E2E scripts read `./local/.deployed_contract_address` or use `FLOW_VAULTS_REQUESTS_CONTRACT` if set.
+
+Local script reference:
+- `./local/setup_and_run_emulator.sh`: Initializes submodules, clears `./db` and `./imports`, kills processes on ports 8080/8545/3569/8888, starts Flow emulator + EVM gateway, and sets up FlowYieldVaults dependencies.
+- `./local/deploy_full_stack.sh`: Funds local EVM EOAs, deploys `FlowYieldVaultsRequests` to the local EVM, deploys Cadence contracts, sets up the Worker, and writes `./local/.deployed_contract_address`.
+- `./local/run_e2e_tests.sh`: Runs end-to-end user flows (create/deposit/withdraw/close/cancel). Requires emulator/gateway running and a deployed contract address.
+- `./local/run_admin_e2e_tests.sh`: Runs end-to-end admin flows (allowlist/blocklist, token config, max requests, admin cancel/drop). Requires emulator/gateway running and a deployed contract address.
+- `./local/run_cadence_tests.sh`: Runs Cadence tests with `flow test`. Cleans `./db` and `./imports` first (stop emulator if you need to preserve state).
+- `./local/run_solidity_tests.sh`: Runs Solidity tests with `forge test`.
+- `./local/testnet-e2e.sh`: Testnet CLI for state checks and user/admin actions. Run `./local/testnet-e2e.sh --help` for commands. Uses `PRIVATE_KEY` and `TESTNET_RPC_URL` if set; admin commands require `testnet-account` in `flow.json`. Update the hardcoded `CONTRACT` address in the script when deploying a new version.
+- `./local/deploy_and_verify.sh`: Testnet deploy/verify flow using COA and KMS. Requires a `.env` file (see the script header for required values) and a configured `testnet-account` signer.
+
+Testnet sequence (optional):
+1. Create `.env` with the variables expected by `./local/deploy_and_verify.sh` (KMS/signing config, RPCs, etc).
+2. Run `./local/deploy_and_verify.sh` to deploy and capture the EVM contract address.
+3. Update the `CONTRACT` value in `./local/testnet-e2e.sh` and use `./local/testnet-e2e.sh --help` to drive actions.
 
 ### EVM Operations
 
@@ -198,6 +227,14 @@ Coverage includes:
 - Error handling and edge cases
 - YieldVault ownership verification
 
+### E2E Tests (Emulator)
+
+```bash
+./local/setup_and_run_emulator.sh && ./local/deploy_full_stack.sh
+./local/run_e2e_tests.sh
+./local/run_admin_e2e_tests.sh
+```
+
 ## Configuration
 
 ### FlowYieldVaultsRequests (Solidity)
@@ -236,14 +273,13 @@ Coverage includes:
 
 - **FlowYieldVaultsRequests**: Only authorized COA can process requests and withdraw funds
 - **FlowYieldVaultsEVM**: Worker holds capabilities for COA, YieldVaultManager, and BetaBadge
-- **YieldVault Ownership**: YieldVaults are tagged to EVM addresses and verified on every operation
+- **YieldVault Ownership**: Verified for CREATE/WITHDRAW/CLOSE; deposits are permissionless to allow gifts/protocol deposits
 
 ### Fund Safety
 
-- Funds remain escrowed until successful processing
-- Two-phase commit ensures atomic balance updates
-- Failed operations trigger automatic refunds
-- Request cancellation returns deposited funds
+- Funds are escrowed until processing begins; failed CREATE/DEPOSIT credit refunds to `pendingUserBalances` (user calls `claimRefund`)
+- Two-phase commit keeps EVM-side balance updates consistent; cross-VM flow is not atomic
+- Request cancellation and admin drop return escrowed funds immediately
 
 ### Access Lists
 
