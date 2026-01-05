@@ -929,10 +929,12 @@ if [ -n "$USER_B_VAULT_ID" ]; then
 
   # Balance should have increased by 1 FLOW
   EXPECTED_BALANCE=$(echo "$USER_B_VAULT_BALANCE_BEFORE + 1" | bc)
-  if [ "$USER_B_VAULT_BALANCE_AFTER" = "$EXPECTED_BALANCE.00000000" ]; then
+  EXPECTED_BALANCE_CLEAN=$(echo "$EXPECTED_BALANCE" | sed 's/\.0*$//')
+  USER_B_VAULT_BALANCE_AFTER_CLEAN=$(echo "$USER_B_VAULT_BALANCE_AFTER" | sed 's/\.0*$//')
+  if [ "$USER_B_VAULT_BALANCE_AFTER_CLEAN" = "$EXPECTED_BALANCE_CLEAN" ]; then
     log_success "Cross-user deposit succeeded - User B's vault increased by 1 FLOW"
   else
-    log_fail "Cross-user deposit balance mismatch (expected: $EXPECTED_BALANCE, got: $USER_B_VAULT_BALANCE_AFTER)"
+    log_fail "Cross-user deposit balance mismatch (expected: $EXPECTED_BALANCE_CLEAN, got: $USER_B_VAULT_BALANCE_AFTER)"
   fi
 
   # Cross-user CLOSE should fail - only owner can close

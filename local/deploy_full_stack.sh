@@ -120,6 +120,12 @@ if [ -z "$COA_ADDRESS" ]; then
   exit 1
 fi
 
+# Normalize COA address for consistent logs and cast usage
+COA_ADDRESS=$(echo "$COA_ADDRESS" | tr -d '[:space:]')
+if [[ "$COA_ADDRESS" != 0x* && "$COA_ADDRESS" != 0X* ]]; then
+  COA_ADDRESS="0x$COA_ADDRESS"
+fi
+
 echo "COA Address: $COA_ADDRESS"
 
 # Export for Foundry
@@ -160,6 +166,30 @@ if [ -z "$FLOW_VAULTS_REQUESTS_CONTRACT" ]; then
 fi
 
 echo "✓ FlowYieldVaultsRequests contract deployed at: $FLOW_VAULTS_REQUESTS_CONTRACT"
+echo ""
+
+# ============================================
+# TRANSFER OWNERSHIP TO COA
+# ============================================
+echo "=== Transferring ownership to COA ==="
+
+# Transfer ownership from deployer (private key 0x2) to COA
+echo "Initiating ownership transfer to COA ($COA_ADDRESS)..."
+cast send "$FLOW_VAULTS_REQUESTS_CONTRACT" \
+  "transferOwnership(address)" \
+  "$COA_ADDRESS" \
+  --private-key 0x0000000000000000000000000000000000000000000000000000000000000002 \
+  --rpc-url "http://$RPC_URL" > /dev/null
+
+# Accept ownership via Cadence transaction
+echo "Accepting ownership via Cadence..."
+flow transactions send ./cadence/transactions/admin/accept_ownership.cdc \
+  "$FLOW_VAULTS_REQUESTS_CONTRACT" \
+  --signer emulator-flow-yield-vaults --compute-limit 9999
+
+# Verify ownership transfer
+NEW_OWNER=$(cast call "$FLOW_VAULTS_REQUESTS_CONTRACT" "owner()(address)" --rpc-url "http://$RPC_URL")
+echo "✓ Contract owner is now: $NEW_OWNER"
 echo ""
 
 # ============================================
