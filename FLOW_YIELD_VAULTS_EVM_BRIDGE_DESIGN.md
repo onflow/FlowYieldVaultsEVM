@@ -67,7 +67,7 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │  │  - Implements FlowTransactionScheduler.TransactionHandler           │   │
 │  │  - Auto-schedules next execution after each run                     │   │
 │  │  - Adaptive delay based on pending request count                    │   │
-│  │  - Supports parallel transaction scheduling                         │   │
+│  │  - Single scheduled execution (parallel scheduling planned)         │   │
 │  │  - Pausable via Admin resource                                      │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
@@ -85,7 +85,7 @@ Request queue and fund escrow contract.
 - Escrow deposited funds until processing
 - Track user balances and pending request counts
 - Enforce access control (allowlist/blocklist)
-- Two-phase commit for atomic processing
+- Two-phase commit to coordinate cross-VM processing (non-atomic across VMs)
 
 **Key State:**
 ```solidity
@@ -128,9 +128,9 @@ Worker contract that processes EVM requests and manages YieldVault positions.
 access(all) let yieldVaultsByEVMAddress: {String: [UInt64]}
 access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
 
-// Configuration
-access(all) var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
-access(all) var maxRequestsPerTx: Int  // Default: 1, max: 100
+// Configuration (stored as contract-only vars; exposed via getters)
+var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
+var maxRequestsPerTx: Int  // Default: 1, max: 100
 
 // Constants
 access(all) let nativeFlowEVMAddress: EVM.EVMAddress  // 0xFFfF...FfFFFfF
@@ -206,13 +206,13 @@ enum RequestStatus {
     PENDING,     // 0 - Awaiting processing
     PROCESSING,  // 1 - Being processed (balance deducted)
     COMPLETED,   // 2 - Successfully processed
-    FAILED       // 3 - Failed (balance refunded)
+    FAILED       // 3 - Failed (refund credited; user must claim)
 }
 
 struct TokenConfig {
     bool isSupported;      // Whether the token is supported
     uint256 minimumBalance; // Minimum balance required for deposits
-    bool isNativeFlow;     // Whether this is native FLOW token
+    bool isNative;         // Whether this is native FLOW token
 }
 ```
 
@@ -304,10 +304,10 @@ access(all) struct ProcessResult {
 
 ```
 1. User calls depositToYieldVault(yieldVaultId, token, amount)
-2. Contract validates YieldVault ownership
+2. Contract validates YieldVault exists (ownership not required)
 3. Contract escrows funds, creates PENDING request
 4. Worker fetches request via getPendingRequestsUnpacked()
-5. Worker validates YieldVault ownership (O(1) lookup)
+5. Worker does not require ownership for deposits (permissionless)
 6. Worker calls startProcessing() → PROCESSING, balance deducted
 7. COA withdraws funds from its balance
 8. Worker deposits to YieldVault via YieldVaultManager
@@ -356,6 +356,13 @@ access(all) struct ProcessResult {
 5. Contract decrements pending request count
 ```
 
+### Refunds & Claiming
+
+Refund handling differs based on when the failure occurs:
+- **After `startProcessing()` (failed CREATE/DEPOSIT):** Funds are credited to `pendingUserBalances` and must be withdrawn by the user via `claimRefund(tokenAddress)`.
+- **On user cancel or admin drop:** Escrowed funds are returned immediately (no claim step).
+- **WITHDRAW/CLOSE:** No escrowed funds on EVM side, so refunds are not applicable.
+
 ---
 
 ## Two-Phase Commit
@@ -368,7 +375,7 @@ The bridge uses a two-phase commit pattern for atomic state management:
 function startProcessing(uint256 requestId) external onlyAuthorizedCOA {
     // 1. Validate request exists and is PENDING
     // 2. Mark as PROCESSING
-    // 3. For CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT: Deduct user balance
+    // 3. For CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT: Deduct user balance and transfer to COA
     // 4. Emit RequestProcessed event
 }
 ```
@@ -386,7 +393,7 @@ function completeProcessing(
 ) external onlyAuthorizedCOA {
     // 1. Validate request is PROCESSING
     // 2. Mark as COMPLETED or FAILED
-    // 3. On failure: Refund user balance
+    // 3. On failure: Credit pendingUserBalances (user must claimRefund)
     // 4. On CREATE_YIELDVAULT success: Register YieldVault ownership
     // 5. On CLOSE_YIELDVAULT success: Unregister YieldVault ownership
     // 6. Remove from pending queue
@@ -394,7 +401,7 @@ function completeProcessing(
 }
 ```
 
-**Purpose:** Finalizes the operation with proper cleanup. Automatic refunds on failure ensure funds are never lost.
+**Purpose:** Finalizes the operation with proper cleanup. On failure, refunds are credited for later claim; cross-VM flow is not atomic.
 
 ---
 
@@ -485,6 +492,9 @@ function getRequest(uint256 requestId) returns (Request memory);
 
 // Check if token is native FLOW
 function isNativeFlow(address tokenAddress) returns (bool);
+
+// Claim refunded funds (credited on failed processing)
+function claimRefund(address tokenAddress) external;
 ```
 
 ### Cadence Side
@@ -530,13 +540,13 @@ mapping(address => mapping(uint64 => bool)) public userOwnsYieldVault;
 access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
 ```
 
-Every operation verifies ownership before execution.
+Ownership is verified for CREATE/WITHDRAW/CLOSE. Deposits are permissionless by design.
 
 ### Fund Safety
 
-1. **Escrow Model:** Funds held in contract until successful processing
-2. **Two-Phase Commit:** Balance deducted before operation, refunded on failure
-3. **Atomic Transfers:** No intermediate states where funds can be lost
+1. **Escrow Model:** Funds held in contract until processing begins; refunds are claimable on failure
+2. **Two-Phase Commit:** Balance deducted before operation, credited back on failure
+3. **Cross-VM Non-Atomicity:** Funds can be in transit between EVM and Cadence; stuck PROCESSING is possible without admin recovery
 4. **ReentrancyGuard:** Solidity contract protected against reentrancy
 
 ### Input Validation
@@ -637,7 +647,7 @@ pre {
 
 ### Cadence Error Handling
 
-Failed operations return `ProcessResult` with `success: false` and descriptive message. The Worker emits `RequestFailed` events and calls `completeProcessing(success: false)` to trigger refunds.
+Failed operations return `ProcessResult` with `success: false` and descriptive message. The Worker emits `RequestFailed` and calls `completeProcessing(success: false)` to credit refunds for later `claimRefund`.
 
 ---
 

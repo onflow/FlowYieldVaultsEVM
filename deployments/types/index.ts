@@ -48,10 +48,15 @@ export interface RequestCreatedEvent {
   tokenAddress: string;
   amount: string;
   yieldVaultId: string;
+  timestamp: string;
+  vaultIdentifier: string;
+  strategyIdentifier: string;
 }
 
 export interface RequestProcessedEvent {
   requestId: string;
+  user: string;
+  requestType: RequestType;
   status: RequestStatus;
   yieldVaultId: string;
   message: string;
@@ -60,6 +65,7 @@ export interface RequestProcessedEvent {
 export interface RequestCancelledEvent {
   requestId: string;
   user: string;
+  tokenAddress: string;
   refundAmount: string;
 }
 

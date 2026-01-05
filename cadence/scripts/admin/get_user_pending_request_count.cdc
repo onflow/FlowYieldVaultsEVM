@@ -10,6 +10,8 @@ import "EVM"
 ///
 access(all) fun main(contractAddress: String, userAddress: String): UInt256 {
     let evmContractAddress = EVM.addressFromString(contractAddress)
+    // Arbitrary "from" address for dryCall (read-only).
+    let fromAddress = EVM.addressFromString("0x0000000000000000000000000000000000000001")
     let evmUserAddress = EVM.addressFromString(userAddress)
 
     // Read getUserPendingRequestCount(address)
@@ -17,7 +19,9 @@ access(all) fun main(contractAddress: String, userAddress: String): UInt256 {
         "getUserPendingRequestCount(address)",
         [evmUserAddress]
     )
-    let result = evmContractAddress.call(
+    let result = EVM.dryCall(
+        from: fromAddress,
+        to: evmContractAddress,
         data: calldata,
         gasLimit: 100_000,
         value: EVM.Balance(attoflow: 0)

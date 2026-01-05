@@ -16,6 +16,7 @@ Cross-VM bridge enabling Flow EVM users to access Cadence-based yield vaults. Th
 address NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 uint64 NO_YIELDVAULT_ID = type(uint64).max;
 ```
+
 ```cadence
 // Cadence equivalents
 let nativeFlowEVMAddress: EVM.EVMAddress  // same as NATIVE_FLOW
@@ -42,31 +43,37 @@ flow test cadence/tests/<file>.cdc  # Single test (after deps installed)
 ## Key Patterns
 
 ### Ownership Tracking (Dual-state)
+
 Both contracts maintain parallel ownership mappings for O(1) lookups:
+
 - Solidity: `userOwnsYieldVault[address][yieldVaultId]`
 - Cadence: `yieldVaultOwnershipLookup[evmAddrString][yieldVaultId]`
 
 ### COA Bridge Pattern
+
 Worker holds `coaCap` capability to:
+
 - Call EVM contracts (`EVM.Call`)
 - Withdraw FLOW from EVM (`EVM.Withdraw`)
 - Bridge tokens (`EVM.Bridge`)
 
 ### Adaptive Scheduling
+
 `FlowYieldVaultsTransactionHandler` adjusts delay based on queue depth:
-- `>10 pending`: 3s delay
+
+- `≥11 pending`: 3s delay
 - `≥5 pending`: 5s delay
 - `≥1 pending`: 7s delay
 - `0 pending`: 30s idle delay
 
 ## File Structure
 
-| File | Purpose |
-|------|---------|
-| `solidity/src/FlowYieldVaultsRequests.sol` | EVM request queue + escrow |
-| `cadence/contracts/FlowYieldVaultsEVM.cdc` | Worker + YieldVaultManager |
-| `cadence/contracts/FlowYieldVaultsTransactionHandler.cdc` | Auto-scheduler |
-| `cadence/tests/test_helpers.cdc` | Shared test utilities (deployContracts, setupCOA) |
+| File                                                      | Purpose                                           |
+| --------------------------------------------------------- | ------------------------------------------------- |
+| `solidity/src/FlowYieldVaultsRequests.sol`                | EVM request queue + escrow                        |
+| `cadence/contracts/FlowYieldVaultsEVM.cdc`                | Worker + YieldVaultManager                        |
+| `cadence/contracts/FlowYieldVaultsTransactionHandler.cdc` | Auto-scheduler                                    |
+| `cadence/tests/test_helpers.cdc`                          | Shared test utilities (deployContracts, setupCOA) |
 
 ## Testing Notes
 

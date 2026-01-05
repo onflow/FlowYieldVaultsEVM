@@ -34,11 +34,15 @@ access(all) struct EVMContractConfig {
 
 access(all) fun main(contractAddress: String): EVMContractConfig {
     let evmContractAddress = EVM.addressFromString(contractAddress)
+    // Arbitrary "from" address for dryCall (read-only).
+    let fromAddress = EVM.addressFromString("0x0000000000000000000000000000000000000001")
 
     // Read authorizedCOA
     var authorizedCOA = ""
     let coaCalldata = EVM.encodeABIWithSignature("authorizedCOA()", [])
-    let coaResult = evmContractAddress.call(
+    let coaResult = EVM.dryCall(
+        from: fromAddress,
+        to: evmContractAddress,
         data: coaCalldata,
         gasLimit: 100_000,
         value: EVM.Balance(attoflow: 0)
@@ -51,7 +55,9 @@ access(all) fun main(contractAddress: String): EVMContractConfig {
     // Read allowlistEnabled
     var allowlistEnabled = false
     let allowlistCalldata = EVM.encodeABIWithSignature("allowlistEnabled()", [])
-    let allowlistResult = evmContractAddress.call(
+    let allowlistResult = EVM.dryCall(
+        from: fromAddress,
+        to: evmContractAddress,
         data: allowlistCalldata,
         gasLimit: 100_000,
         value: EVM.Balance(attoflow: 0)
@@ -64,7 +70,9 @@ access(all) fun main(contractAddress: String): EVMContractConfig {
     // Read blocklistEnabled
     var blocklistEnabled = false
     let blocklistCalldata = EVM.encodeABIWithSignature("blocklistEnabled()", [])
-    let blocklistResult = evmContractAddress.call(
+    let blocklistResult = EVM.dryCall(
+        from: fromAddress,
+        to: evmContractAddress,
         data: blocklistCalldata,
         gasLimit: 100_000,
         value: EVM.Balance(attoflow: 0)
@@ -77,7 +85,9 @@ access(all) fun main(contractAddress: String): EVMContractConfig {
     // Read maxPendingRequestsPerUser
     var maxPendingRequestsPerUser: UInt256 = 0
     let maxCalldata = EVM.encodeABIWithSignature("maxPendingRequestsPerUser()", [])
-    let maxResult = evmContractAddress.call(
+    let maxResult = EVM.dryCall(
+        from: fromAddress,
+        to: evmContractAddress,
         data: maxCalldata,
         gasLimit: 100_000,
         value: EVM.Balance(attoflow: 0)
@@ -90,7 +100,9 @@ access(all) fun main(contractAddress: String): EVMContractConfig {
     // Read getPendingRequestCount
     var pendingRequestCount: UInt256 = 0
     let countCalldata = EVM.encodeABIWithSignature("getPendingRequestCount()", [])
-    let countResult = evmContractAddress.call(
+    let countResult = EVM.dryCall(
+        from: fromAddress,
+        to: evmContractAddress,
         data: countCalldata,
         gasLimit: 100_000,
         value: EVM.Balance(attoflow: 0)

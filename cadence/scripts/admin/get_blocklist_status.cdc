@@ -22,10 +22,14 @@ access(all) struct BlocklistStatus {
 
 access(all) fun main(contractAddress: String, addressToCheck: String): BlocklistStatus {
     let evmContractAddress = EVM.addressFromString(contractAddress)
+    // Arbitrary "from" address for dryCall (read-only).
+    let fromAddress = EVM.addressFromString("0x0000000000000000000000000000000000000001")
 
     // Read blocklistEnabled
     let enabledCalldata = EVM.encodeABIWithSignature("blocklistEnabled()", [])
-    let enabledResult = evmContractAddress.call(
+    let enabledResult = EVM.dryCall(
+        from: fromAddress,
+        to: evmContractAddress,
         data: enabledCalldata,
         gasLimit: 100_000,
         value: EVM.Balance(attoflow: 0)
@@ -42,7 +46,9 @@ access(all) fun main(contractAddress: String, addressToCheck: String): Blocklist
     if addressToCheck.length > 0 {
         let checkAddress = EVM.addressFromString(addressToCheck)
         let blocklistedCalldata = EVM.encodeABIWithSignature("blocklisted(address)", [checkAddress])
-        let blocklistedResult = evmContractAddress.call(
+        let blocklistedResult = EVM.dryCall(
+            from: fromAddress,
+            to: evmContractAddress,
             data: blocklistedCalldata,
             gasLimit: 100_000,
             value: EVM.Balance(attoflow: 0)

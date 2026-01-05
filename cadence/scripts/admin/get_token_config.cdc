@@ -24,11 +24,15 @@ access(all) struct TokenConfig {
 
 access(all) fun main(contractAddress: String, tokenAddress: String): TokenConfig {
     let evmContractAddress = EVM.addressFromString(contractAddress)
+    // Arbitrary "from" address for dryCall (read-only).
+    let fromAddress = EVM.addressFromString("0x0000000000000000000000000000000000000001")
     let evmTokenAddress = EVM.addressFromString(tokenAddress)
 
     // Read allowedTokens(address)
     let calldata = EVM.encodeABIWithSignature("allowedTokens(address)", [evmTokenAddress])
-    let result = evmContractAddress.call(
+    let result = EVM.dryCall(
+        from: fromAddress,
+        to: evmContractAddress,
         data: calldata,
         gasLimit: 100_000,
         value: EVM.Balance(attoflow: 0)
