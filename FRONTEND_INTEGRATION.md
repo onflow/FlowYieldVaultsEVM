@@ -90,6 +90,13 @@ const tx = await contract.cancelRequest(requestId);
 await tx.wait();
 ```
 
+#### Claim Refund (Failed CREATE/DEPOSIT)
+```typescript
+// Claims pending refund balance for a token (native FLOW or ERC20)
+const tx = await contract.claimRefund(NATIVE_FLOW);
+await tx.wait();
+```
+
 ### Query Functions
 
 #### Get User's YieldVaults
@@ -123,7 +130,17 @@ const request = await contract.getRequest(requestId);
 // Returns: { id, user, requestType, status, tokenAddress, amount, yieldVaultId, timestamp, message, vaultIdentifier, strategyIdentifier }
 ```
 
-#### Get All Pending Requests (Paginated)
+#### Get User's Pending Requests (Unpacked)
+```typescript
+const [
+  ids, requestTypes, statuses, tokenAddresses,
+  amounts, yieldVaultIds, timestamps, messages,
+  vaultIdentifiers, strategyIdentifiers, pendingBalance
+] = await contract.getPendingRequestsByUserUnpacked(userAddress);
+// pendingBalance is native FLOW only; use getUserPendingBalance for a specific token
+```
+
+#### Get All Pending Requests (Paginated, Admin)
 ```typescript
 const [
   ids, users, requestTypes, statuses, tokenAddresses,
@@ -137,6 +154,12 @@ const userRequests = ids.filter((_, i) => users[i].toLowerCase() === userAddress
 
 ---
 
+## Request Preconditions and Limits
+
+- Requests revert when the contract is paused, the caller is blocklisted, or allowlist is enabled and the caller is not allowlisted.
+- `tokenAddress` must be configured in `allowedTokens` and `amount` must meet the configured `minimumBalance`.
+- `maxPendingRequestsPerUser` can cap in-flight requests (0 = unlimited).
+
 ## Request Lifecycle
 
 ```
@@ -145,7 +168,8 @@ const userRequests = ids.filter((_, i) => users[i].toLowerCase() === userAddress
 3. Cadence Worker processes → RequestProcessed event (status=PROCESSING)
 4. Operation completes → RequestProcessed event (status=COMPLETED or FAILED)
 5. On completion: YieldVault appears in user's list
-   On failure: Funds automatically refunded
+   On failure (CREATE/DEPOSIT): Refund credited to pending balance; user must call claimRefund
+   On cancel (PENDING): Funds are returned immediately for CREATE/DEPOSIT
 ```
 
 ---
@@ -174,13 +198,17 @@ contract.on('RequestProcessed', (requestId, user, requestType, status, yieldVaul
 contract.on('RequestCancelled', (requestId, user, tokenAddress, refundAmount) => {
   console.log('Request cancelled, refunded:', ethers.formatEther(refundAmount));
 });
+
+contract.on('RefundClaimed', (user, tokenAddress, amount) => {
+  console.log('Refund claimed:', tokenAddress, amount.toString());
+});
 ```
 
 ### Listen for Balance Updates
 ```typescript
 contract.on('BalanceUpdated', (user, tokenAddress, newBalance) => {
   if (user.toLowerCase() === currentUser.toLowerCase()) {
-    // Update UI with new escrowed balance
+    // Update UI with new escrowed/pending balance
     updateEscrowedBalance(newBalance);
   }
 });
@@ -203,8 +231,9 @@ fcl.config({
   'flow.network': 'testnet',
 });
 
-// Contract addresses
-const FLOW_YIELD_VAULTS_EVM_ADDRESS = '0xd5f3a54862af53d3'; // testnet
+// Contract addresses (testnet)
+const FLOW_YIELD_VAULTS_EVM_ADDRESS = '0xd5f3a54862af53d3'; // FlowYieldVaultsEVM
+const FLOW_YIELD_VAULTS_ADDRESS = '0xd2580caf2ef07c2f'; // FlowYieldVaults
 ```
 
 ### Get User's YieldVault IDs (from Cadence)
@@ -237,7 +266,7 @@ This is **critical** for displaying actual position values. The balance lives on
 
 ```typescript
 const GET_YIELDVAULT_BALANCE = `
-import FlowYieldVaults from 0xd5f3a54862af53d3
+import FlowYieldVaults from 0xd2580caf2ef07c2f
 
 access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): UFix64? {
     let account = getAccount(managerAddress)
@@ -255,7 +284,7 @@ access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): UFix64? {
 const balance = await fcl.query({
   cadence: GET_YIELDVAULT_BALANCE,
   args: (arg, t) => [
-    arg(FLOW_YIELD_VAULTS_EVM_ADDRESS, t.Address),
+    arg(FLOW_YIELD_VAULTS_ADDRESS, t.Address),
     arg(yieldVaultId.toString(), t.UInt64),
   ],
 });
@@ -266,7 +295,7 @@ const balance = await fcl.query({
 
 ```typescript
 const GET_YIELDVAULT_DETAILS = `
-import FlowYieldVaults from 0xd5f3a54862af53d3
+import FlowYieldVaults from 0xd2580caf2ef07c2f
 
 access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): {String: AnyStruct}? {
     let account = getAccount(managerAddress)
@@ -288,7 +317,7 @@ access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): {String: An
 const details = await fcl.query({
   cadence: GET_YIELDVAULT_DETAILS,
   args: (arg, t) => [
-    arg(FLOW_YIELD_VAULTS_EVM_ADDRESS, t.Address),
+    arg(FLOW_YIELD_VAULTS_ADDRESS, t.Address),
     arg(yieldVaultId.toString(), t.UInt64),
   ],
 });
@@ -312,7 +341,7 @@ async function getUserPositions(userEvmAddress: string) {
       const balance = await fcl.query({
         cadence: GET_YIELDVAULT_BALANCE,
         args: (arg, t) => [
-          arg(FLOW_YIELD_VAULTS_EVM_ADDRESS, t.Address),
+          arg(FLOW_YIELD_VAULTS_ADDRESS, t.Address),
           arg(id, t.UInt64),
         ],
       });
@@ -331,7 +360,7 @@ async function getUserPositions(userEvmAddress: string) {
 
 ```typescript
 const GET_SUPPORTED_STRATEGIES = `
-import FlowYieldVaults from 0xd5f3a54862af53d3
+import FlowYieldVaults from 0xd2580caf2ef07c2f
 
 access(all) fun main(): [String] {
     let strategies = FlowYieldVaults.getSupportedStrategies()
@@ -412,6 +441,7 @@ async function initializeUserDashboard(evmAddress: string) {
 2. **Real-time Updates**: PENDING → PROCESSING → COMPLETED/FAILED
 3. **Clear Messaging**: "Your transaction is being processed. This typically takes 15-60 seconds."
 4. **Escrowed Balance**: Show funds held in escrow during processing
+5. **Refunds**: Show pending refund balance and provide a claim action after failed CREATE/DEPOSIT
 
 ### Flow vs EVM Wallet Differences
 
@@ -441,8 +471,9 @@ if (wallet.type === 'evm') {
 // Sentinel address for native FLOW token
 const NATIVE_FLOW = '0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF';
 
-// Sentinel value for "no YieldVault" (used before creation completes)
+// Sentinel value for "no YieldVault" (Cadence may return this on failed CREATE)
 const NO_YIELDVAULT_ID = 18446744073709551615n; // type(uint64).max
+// CREATE requests start with yieldVaultId = 0 until processed
 
 // Request Types
 enum RequestType {
@@ -473,6 +504,7 @@ enum RequestStatus {
 - [ ] User can cancel pending request (only PENDING status)
 - [ ] Failed requests show clear error messages
 - [ ] Escrowed balance displays correctly
+- [ ] Failed CREATE/DEPOSIT refunds can be claimed via claimRefund
 
 ---
 
@@ -510,9 +542,11 @@ import {
 - **FCL Documentation**: [developers.flow.com/tools/clients/fcl-js](https://developers.flow.com/tools/clients/fcl-js)
 - **Cadence Scripts**: `cadence/scripts/` directory
   - `check_user_yieldvaults.cdc` - Get YieldVault IDs for EVM address
+  - `get_pending_requests_for_evm_address.cdc` - Get pending requests for an EVM address
   - `check_yieldvault_details.cdc` - Get system-wide YieldVault details
   - `check_yieldvaultmanager_status.cdc` - Comprehensive system status
   - `check_worker_status.cdc` - Worker health checks
+  - `validate_create_yieldvault_params.cdc` - Validate vault/strategy identifiers before CREATE
 
 ### Architecture
 - **Design Document**: [FLOW_YIELD_VAULTS_EVM_BRIDGE_DESIGN.md](./FLOW_YIELD_VAULTS_EVM_BRIDGE_DESIGN.md)
