@@ -65,7 +65,7 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 5. **For each request**, two-phase commit:
    - `startProcessing()`: Marks request as PROCESSING, deducts user balance (for CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT)
    - Execute Cadence operation (create/deposit/withdraw/close YieldVault)
-   - `completeProcessing()`: Marks as COMPLETED or FAILED (on failure, credits pending balance; user claims via `claimRefund`)
+   - `completeProcessing()`: Marks as COMPLETED or FAILED (on failure, credits `claimableRefunds`; user claims via `claimRefund`)
 6. **Funds bridged** to user on withdrawal/close operations
 
 ## Quick Start
@@ -277,9 +277,9 @@ Coverage includes:
 
 ### Fund Safety
 
-- Funds are escrowed until processing begins; failed CREATE/DEPOSIT credit refunds to `pendingUserBalances` (user calls `claimRefund`)
+- Funds are escrowed until processing begins; failed CREATE/DEPOSIT credit refunds to `claimableRefunds` (user calls `claimRefund`)
 - Two-phase commit keeps EVM-side balance updates consistent; cross-VM flow is not atomic
-- Request cancellation and admin drop return escrowed funds immediately
+- Request cancellation and admin drop move escrowed funds to `claimableRefunds` (pull pattern)
 
 ### Access Lists
 

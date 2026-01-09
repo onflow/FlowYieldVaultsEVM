@@ -584,7 +584,9 @@ pre {
 |-------|-------------|
 | `RequestCreated` | New request submitted |
 | `RequestProcessed` | Request status changed |
-| `RequestCancelled` | User cancelled request |
+| `RequestCancelled` | Request cancelled by user/admin; refund credited |
+| `RefundCredited` | Refund became claimable (pull pattern) |
+| `RefundClaimed` | User claimed a refund |
 | `BalanceUpdated` | User's escrowed balance changed |
 | `FundsWithdrawn` | Funds transferred out |
 | `AuthorizedCOAUpdated` | COA address changed |

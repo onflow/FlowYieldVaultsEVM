@@ -222,6 +222,14 @@ contract.on('RequestCancelled', (requestId, user, tokenAddress, claimableAmount)
   }
 });
 
+contract.on('RefundCredited', (user, tokenAddress, amount, requestId) => {
+  console.log('Refund credited:', requestId, tokenAddress, amount.toString());
+  // Prompt user to claim refund if amount > 0
+  if (amount > 0n) {
+    showClaimRefundPrompt(tokenAddress, amount);
+  }
+});
+
 contract.on('RefundClaimed', (user, tokenAddress, amount) => {
   console.log('Refund claimed:', tokenAddress, amount.toString());
 });
@@ -570,6 +578,8 @@ import {
   RequestCreatedEvent,
   RequestProcessedEvent,
   RequestCancelledEvent,
+  RefundCreditedEvent,
+  RefundClaimedEvent,
   NO_YIELD_VAULT_ID,
   NATIVE_FLOW_ADDRESS,
   isRequestPending,

@@ -194,7 +194,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.claimRefund(NATIVE_FLOW);
 
         assertEq(user.balance, balBefore + 2 ether);
-        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 0);
     }
 
     function test_ClaimRefund_EmitsEvents() public {
@@ -206,7 +206,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(coa);
         c.completeProcessing{value: 1 ether}(reqId, false, 0, "Failed");
 
-        // Only RefundClaimed event is emitted (no BalanceUpdated since we use separate claimableRefunds mapping)
+        // RefundClaimed is emitted on claim (no BalanceUpdated since we use separate claimableRefunds mapping)
         vm.prank(user);
         vm.expectEmit(true, true, false, true);
         emit RefundClaimed(user, NATIVE_FLOW, 1 ether);

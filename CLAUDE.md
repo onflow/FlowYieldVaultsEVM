@@ -43,7 +43,7 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 1. **EVM User** calls `FlowYieldVaultsRequests.sol` (creates request, escrows funds)
 2. **FlowYieldVaultsTransactionHandler.cdc** triggers `Worker.processRequests()` on schedule
 3. **FlowYieldVaultsEVM.cdc** Worker fetches pending requests via `getPendingRequestsUnpacked()`
-4. **Two-phase commit**: `startProcessing()` marks PROCESSING and deducts balance, `completeProcessing()` marks COMPLETED/FAILED (refunds on failure)
+4. **Two-phase commit**: `startProcessing()` marks PROCESSING and deducts balance, `completeProcessing()` marks COMPLETED/FAILED (refunds credited to `claimableRefunds` on failure)
 
 ### Contract Components
 
