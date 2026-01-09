@@ -155,8 +155,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice O(1) lookup for yieldvault ownership verification
     mapping(address => mapping(uint64 => bool)) public userOwnsYieldVault;
 
-    /// @notice Escrowed balances: user => token => amount
+    /// @notice Escrowed balances for active pending requests: user => token => amount
     mapping(address => mapping(address => uint256)) public pendingUserBalances;
+
+    /// @notice Claimable refunds from cancelled/dropped/failed requests: user => token => amount
+    mapping(address => mapping(address => uint256)) public claimableRefunds;
 
     /// @notice All requests indexed by request ID
     mapping(uint256 => Request) public requests;
@@ -290,11 +293,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         string message
     );
 
-    /// @notice Emitted when a user cancels their request
+    /// @notice Emitted when a request is cancelled (by user or admin)
     /// @param requestId Cancelled request ID
-    /// @param user User who cancelled
-    /// @param tokenAddress Token being refunded
-    /// @param refundAmount Amount refunded to user
+    /// @param user Address that cancelled (user or admin)
+    /// @param tokenAddress Token that can be claimed via claimRefund()
+    /// @param refundAmount Amount available to claim (0 for WITHDRAW/CLOSE requests)
     event RequestCancelled(
         uint256 indexed requestId,
         address indexed user,
@@ -628,10 +631,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /**
-     * @notice Drops pending requests and refunds escrowed funds to users.
+     * @notice Drops pending requests. Escrowed funds remain claimable via claimRefund().
      * @dev Admin-only cleanup function for removing stuck or problematic requests.
      *      Silently skips requests that don't exist or aren't in PENDING status.
-     *      For CREATE/DEPOSIT requests, immediately refunds escrowed funds to users.
+     *      For CREATE/DEPOSIT requests, escrowed funds remain in pendingUserBalances
+     *      and can be withdrawn by calling claimRefund() (pull pattern).
      *      WITHDRAW/CLOSE requests have no escrowed funds, so only status is updated.
      * @param requestIds Array of request IDs to drop. Invalid/non-pending IDs are skipped.
      */
@@ -657,35 +661,16 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 request.status = RequestStatus.FAILED;
                 request.message = "Dropped by admin";
 
-                // Refund escrowed funds for CREATE/DEPOSIT requests
-                // WITHDRAW/CLOSE requests don't escrow funds, so no refund needed
+                // For CREATE/DEPOSIT requests, move funds to claimableRefunds
+                // User must call claimRefund() to withdraw them (pull pattern)
+                // WITHDRAW/CLOSE requests don't escrow funds, so nothing to do
                 if (
                     (request.requestType == RequestType.CREATE_YIELDVAULT ||
-                        request.requestType ==
-                        RequestType.DEPOSIT_TO_YIELDVAULT) && request.amount > 0
+                        request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
+                    request.amount > 0
                 ) {
-                    // Deduct from escrowed balance tracking
-                    pendingUserBalances[request.user][
-                        request.tokenAddress
-                    ] -= request.amount;
-                    emit BalanceUpdated(
-                        request.user,
-                        request.tokenAddress,
-                        pendingUserBalances[request.user][request.tokenAddress]
-                    );
-
-                    // Transfer escrowed funds back to user
-                    _transferFunds(
-                        request.user,
-                        request.tokenAddress,
-                        request.amount
-                    );
-
-                    emit FundsWithdrawn(
-                        request.user,
-                        request.tokenAddress,
-                        request.amount
-                    );
+                    pendingUserBalances[request.user][request.tokenAddress] -= request.amount;
+                    claimableRefunds[request.user][request.tokenAddress] += request.amount;
                 }
 
                 // Update user's pending request count
@@ -852,11 +837,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /**
-     * @notice Cancels a pending request and refunds any escrowed funds.
+     * @notice Cancels a pending request. Escrowed funds remain claimable via claimRefund().
      * @dev Can be called by the request owner or the contract owner (admin).
      *      Only PENDING requests can be cancelled. Requests already in PROCESSING,
      *      COMPLETED, or FAILED status cannot be cancelled.
-     *      For CREATE/DEPOSIT requests, escrowed funds are immediately returned.
+     *      For CREATE/DEPOSIT requests, escrowed funds remain in pendingUserBalances
+     *      and can be withdrawn by calling claimRefund() (pull pattern).
      *      For WITHDRAW/CLOSE requests, no funds are escrowed, so no refund occurs.
      * @param requestId The unique identifier of the request to cancel.
      */
@@ -887,35 +873,24 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
         _removePendingRequest(requestId);
 
-        // === REFUND ESCROWED FUNDS (for CREATE/DEPOSIT requests only) ===
-        uint256 refundAmount = 0;
+        // === REFUND HANDLING (pull pattern) ===
+        // For CREATE/DEPOSIT requests, move funds from pendingUserBalances to claimableRefunds
+        // User must call claimRefund() to withdraw them
+        // WITHDRAW/CLOSE requests don't escrow funds, so nothing to do
+        uint256 claimableAmount = 0;
         if (
             (request.requestType == RequestType.CREATE_YIELDVAULT ||
                 request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
             request.amount > 0
         ) {
-            refundAmount = request.amount;
-            // Deduct from escrowed balance tracking
-            pendingUserBalances[request.user][request.tokenAddress] -= request
-                .amount;
-            emit BalanceUpdated(
-                request.user,
-                request.tokenAddress,
-                pendingUserBalances[request.user][request.tokenAddress]
-            );
-
-            // Transfer escrowed funds back to user
-            _transferFunds(request.user, request.tokenAddress, request.amount);
-
-            emit FundsWithdrawn(
-                request.user,
-                request.tokenAddress,
-                request.amount
-            );
+            claimableAmount = request.amount;
+            // Move from escrowed balance to claimable refunds
+            pendingUserBalances[request.user][request.tokenAddress] -= claimableAmount;
+            claimableRefunds[request.user][request.tokenAddress] += claimableAmount;
         }
 
         // === EMIT EVENTS ===
-        emit RequestCancelled(requestId, msg.sender, request.tokenAddress, refundAmount);
+        emit RequestCancelled(requestId, msg.sender, request.tokenAddress, claimableAmount);
         emit RequestProcessed(
             requestId,
             request.user,
@@ -927,16 +902,15 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Claims all refunded funds for a specific token
-    /// @dev Refunds accumulate in pendingUserBalances when CREATE/DEPOSIT requests fail.
-    ///      This function allows users to withdraw those funds directly.
+    /// @dev Refunds accumulate in claimableRefunds when requests are cancelled, dropped, or fail.
+    ///      This function allows users to withdraw those funds. Does NOT touch funds escrowed
+    ///      for active pending requests (pendingUserBalances).
     /// @param tokenAddress Token to claim refund for (NATIVE_FLOW or ERC20)
     function claimRefund(address tokenAddress) external nonReentrant {
-        uint256 balance = pendingUserBalances[msg.sender][tokenAddress];
+        uint256 balance = claimableRefunds[msg.sender][tokenAddress];
         if (balance == 0) revert NoRefundAvailable(tokenAddress);
 
-        pendingUserBalances[msg.sender][tokenAddress] = 0;
-
-        emit BalanceUpdated(msg.sender, tokenAddress, 0);
+        claimableRefunds[msg.sender][tokenAddress] = 0;
 
         _transferFunds(msg.sender, tokenAddress, balance);
 
@@ -1084,8 +1058,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                     request.amount
                 );
             }
-            // Credit refunded funds to user's pending balance for later claim
-            pendingUserBalances[request.user][request.tokenAddress] += request
+            // Credit refunded funds to claimable refunds for later claim
+            claimableRefunds[request.user][request.tokenAddress] += request
                 .amount;
         } else {
             // No refund expected for: successful requests OR WITHDRAW/CLOSE requests
@@ -1122,15 +1096,27 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         return allowedTokens[tokenAddress].isNative;
     }
 
-    /// @notice Gets a user's escrowed balance for a token
+    /// @notice Gets a user's escrowed balance for a token (funds tied to active pending requests)
     /// @param user User address
     /// @param tokenAddress Token address
-    /// @return Escrowed balance
+    /// @return Escrowed balance for active pending requests
     function getUserPendingBalance(
         address user,
         address tokenAddress
     ) external view returns (uint256) {
         return pendingUserBalances[user][tokenAddress];
+    }
+
+    /// @notice Gets a user's claimable refund balance for a token
+    /// @dev This is the amount available to withdraw via claimRefund()
+    /// @param user User address
+    /// @param tokenAddress Token address
+    /// @return Claimable refund amount
+    function getClaimableRefund(
+        address user,
+        address tokenAddress
+    ) external view returns (uint256) {
+        return claimableRefunds[user][tokenAddress];
     }
 
     /// @notice Gets the count of pending requests
@@ -1292,7 +1278,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return messages Messages
     /// @return vaultIdentifiers Vault identifiers
     /// @return strategyIdentifiers Strategy identifiers
-    /// @return pendingBalance Total pending balance for this user (native FLOW only)
+    /// @return pendingBalance Escrowed balance for active pending requests (native FLOW only)
+    /// @return claimableRefund Claimable refund amount (native FLOW only)
     function getPendingRequestsByUserUnpacked(
         address user
     )
@@ -1309,7 +1296,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             string[] memory messages,
             string[] memory vaultIdentifiers,
             string[] memory strategyIdentifiers,
-            uint256 pendingBalance
+            uint256 pendingBalance,
+            uint256 claimableRefund
         )
     {
         // Use the user's pending request IDs directly (O(1) lookup)
@@ -1346,8 +1334,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        // Get pending balance for native FLOW
+        // Get balances for native FLOW
         pendingBalance = pendingUserBalances[user][NATIVE_FLOW];
+        claimableRefund = claimableRefunds[user][NATIVE_FLOW];
     }
 
     // ============================================

@@ -95,7 +95,8 @@ uint256[] public pendingRequestIds;
 mapping(address => uint256) public userPendingRequestCount;
 
 // Balance tracking
-mapping(address => mapping(address => uint256)) public pendingUserBalances;
+mapping(address => mapping(address => uint256)) public pendingUserBalances;  // Escrowed for active requests
+mapping(address => mapping(address => uint256)) public claimableRefunds;     // Claimable from cancelled/failed
 
 // YieldVault ownership (EVM-side mirror)
 mapping(uint64 => bool) public validYieldVaultIds;
@@ -352,16 +353,23 @@ access(all) struct ProcessResult {
 1. User calls cancelRequest(requestId)
 2. Contract validates ownership and PENDING status
 3. Contract marks request as FAILED
-4. Contract refunds escrowed funds to user
+4. Contract moves escrowed funds from pendingUserBalances to claimableRefunds
 5. Contract decrements pending request count
+6. User calls claimRefund(tokenAddress) to withdraw funds
 ```
 
 ### Refunds & Claiming
 
-Refund handling differs based on when the failure occurs:
-- **After `startProcessing()` (failed CREATE/DEPOSIT):** Funds are credited to `pendingUserBalances` and must be withdrawn by the user via `claimRefund(tokenAddress)`.
-- **On user cancel or admin drop:** Escrowed funds are returned immediately (no claim step).
-- **WITHDRAW/CLOSE:** No escrowed funds on EVM side, so refunds are not applicable.
+All refund scenarios use a pull pattern - funds are credited to `claimableRefunds` and must be withdrawn by the user via `claimRefund(tokenAddress)`:
+
+| Scenario | What Happens |
+|----------|--------------|
+| After `startProcessing()` (failed CREATE/DEPOSIT) | Funds credited to `claimableRefunds` |
+| User cancels request | Funds moved from `pendingUserBalances` to `claimableRefunds` |
+| Admin drops request | Funds moved from `pendingUserBalances` to `claimableRefunds` |
+| WITHDRAW/CLOSE | No escrowed funds on EVM side, so refunds are not applicable |
+
+**Important:** `claimRefund()` only withdraws from `claimableRefunds`. It does NOT touch funds in `pendingUserBalances` (escrowed for active pending requests).
 
 ---
 
@@ -393,7 +401,7 @@ function completeProcessing(
 ) external onlyAuthorizedCOA {
     // 1. Validate request is PROCESSING
     // 2. Mark as COMPLETED or FAILED
-    // 3. On failure: Credit pendingUserBalances (user must claimRefund)
+    // 3. On failure: Credit claimableRefunds (user must call claimRefund)
     // 4. On CREATE_YIELDVAULT success: Register YieldVault ownership
     // 5. On CLOSE_YIELDVAULT success: Unregister YieldVault ownership
     // 6. Remove from pending queue
@@ -469,8 +477,11 @@ When idle (no pending requests), the handler uses Medium priority to ensure suff
 ### EVM Side
 
 ```solidity
-// User's escrowed balance
+// User's escrowed balance (funds tied to active pending requests)
 function getUserPendingBalance(address user, address tokenAddress) returns (uint256);
+
+// User's claimable refund (funds available to withdraw via claimRefund)
+function getClaimableRefund(address user, address tokenAddress) returns (uint256);
 
 // Pending request count
 function getPendingRequestCount() returns (uint256);
@@ -493,7 +504,7 @@ function getRequest(uint256 requestId) returns (Request memory);
 // Check if token is native FLOW
 function isNativeFlow(address tokenAddress) returns (bool);
 
-// Claim refunded funds (credited on failed processing)
+// Claim refunded funds from claimableRefunds (does NOT touch pendingUserBalances)
 function claimRefund(address tokenAddress) external;
 ```
 

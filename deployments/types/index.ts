@@ -66,7 +66,13 @@ export interface RequestCancelledEvent {
   requestId: string;
   user: string;
   tokenAddress: string;
-  refundAmount: string;
+  claimableAmount: string;  // Amount now claimable via claimRefund() (was refundAmount)
+}
+
+export interface RefundClaimedEvent {
+  user: string;
+  tokenAddress: string;
+  amount: string;
 }
 
 export interface YieldVaultCreatedForEVMUserEvent {
@@ -189,6 +195,7 @@ export type {
   RequestCreatedEvent,
   RequestProcessedEvent,
   RequestCancelledEvent,
+  RefundClaimedEvent,
   YieldVaultCreatedForEVMUserEvent,
   YieldVaultDepositedForEVMUserEvent,
   YieldVaultWithdrawnForEVMUserEvent,

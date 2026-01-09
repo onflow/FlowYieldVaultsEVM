@@ -90,9 +90,10 @@ const tx = await contract.cancelRequest(requestId);
 await tx.wait();
 ```
 
-#### Claim Refund (Failed CREATE/DEPOSIT)
+#### Claim Refund
 ```typescript
-// Claims pending refund balance for a token (native FLOW or ERC20)
+// Claims refund balance for a token (accumulated from cancelled/dropped/failed requests)
+// Only claims actual refunds - does NOT touch funds escrowed for active pending requests
 const tx = await contract.claimRefund(NATIVE_FLOW);
 await tx.wait();
 ```
@@ -114,9 +115,16 @@ const owns: boolean = await contract.doesUserOwnYieldVault(userAddress, yieldVau
 const count: bigint = await contract.getUserPendingRequestCount(userAddress);
 ```
 
-#### Get User's Escrowed Balance
+#### Get User's Escrowed Balance (Active Requests)
 ```typescript
-const balance: bigint = await contract.getUserPendingBalance(userAddress, tokenAddress);
+// Funds tied to active pending requests (not yet processed by worker)
+const escrowedBalance: bigint = await contract.getUserPendingBalance(userAddress, tokenAddress);
+```
+
+#### Get User's Claimable Refund
+```typescript
+// Funds available to claim via claimRefund() (from cancelled/dropped/failed requests)
+const claimableRefund: bigint = await contract.getClaimableRefund(userAddress, tokenAddress);
 ```
 
 #### Get Total Pending Request Count
@@ -135,9 +143,11 @@ const request = await contract.getRequest(requestId);
 const [
   ids, requestTypes, statuses, tokenAddresses,
   amounts, yieldVaultIds, timestamps, messages,
-  vaultIdentifiers, strategyIdentifiers, pendingBalance
+  vaultIdentifiers, strategyIdentifiers, pendingBalance, claimableRefund
 ] = await contract.getPendingRequestsByUserUnpacked(userAddress);
-// pendingBalance is native FLOW only; use getUserPendingBalance for a specific token
+// pendingBalance = escrowed funds for active pending requests (native FLOW only)
+// claimableRefund = funds available to claim via claimRefund() (native FLOW only)
+// Use getUserPendingBalance/getClaimableRefund for a specific token
 ```
 
 #### Get All Pending Requests (Paginated, Admin)
@@ -164,13 +174,22 @@ const userRequests = ids.filter((_, i) => users[i].toLowerCase() === userAddress
 
 ```
 1. User submits request → EVM tx succeeds → RequestCreated event
-2. Request queued (status=PENDING)
+2. Request queued (status=PENDING), funds escrowed in pendingUserBalances
 3. Cadence Worker processes → RequestProcessed event (status=PROCESSING)
 4. Operation completes → RequestProcessed event (status=COMPLETED or FAILED)
 5. On completion: YieldVault appears in user's list
-   On failure (CREATE/DEPOSIT): Refund credited to pending balance; user must call claimRefund
-   On cancel (PENDING): Funds are returned immediately for CREATE/DEPOSIT
+   On failure/cancel/drop: Funds moved to claimableRefunds; user must call claimRefund()
 ```
+
+### Refund Scenarios
+
+| Scenario | What Happens | User Action |
+|----------|--------------|-------------|
+| Request cancelled by user | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
+| Request dropped by admin | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
+| Cadence processing fails | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
+
+**Important:** `claimRefund()` only withdraws actual refunds. It does NOT touch funds escrowed for active pending requests.
 
 ---
 
@@ -195,8 +214,12 @@ contract.on('RequestProcessed', (requestId, user, requestType, status, yieldVaul
   }
 });
 
-contract.on('RequestCancelled', (requestId, user, tokenAddress, refundAmount) => {
-  console.log('Request cancelled, refunded:', ethers.formatEther(refundAmount));
+contract.on('RequestCancelled', (requestId, user, tokenAddress, claimableAmount) => {
+  console.log('Request cancelled, claimable:', ethers.formatEther(claimableAmount));
+  // Prompt user to claim refund if claimableAmount > 0
+  if (claimableAmount > 0n) {
+    showClaimRefundPrompt(tokenAddress, claimableAmount);
+  }
 });
 
 contract.on('RefundClaimed', (user, tokenAddress, amount) => {
@@ -206,10 +229,20 @@ contract.on('RefundClaimed', (user, tokenAddress, amount) => {
 
 ### Listen for Balance Updates
 ```typescript
+// BalanceUpdated fires when escrowed balance (pendingUserBalances) changes
+// This happens on: request creation, startProcessing, cancelRequest, dropRequests
 contract.on('BalanceUpdated', (user, tokenAddress, newBalance) => {
   if (user.toLowerCase() === currentUser.toLowerCase()) {
-    // Update UI with new escrowed/pending balance
+    // Update UI with new escrowed balance for active pending requests
     updateEscrowedBalance(newBalance);
+  }
+});
+
+// RefundClaimed fires when user claims accumulated refunds
+contract.on('RefundClaimed', (user, tokenAddress, amount) => {
+  if (user.toLowerCase() === currentUser.toLowerCase()) {
+    // Refresh claimable balance (should be 0 after claim)
+    refreshClaimableBalance();
   }
 });
 ```
@@ -440,8 +473,24 @@ async function initializeUserDashboard(evmAddress: string) {
 1. **Pending Requests Panel**: Show all user's pending/processing requests
 2. **Real-time Updates**: PENDING → PROCESSING → COMPLETED/FAILED
 3. **Clear Messaging**: "Your transaction is being processed. This typically takes 15-60 seconds."
-4. **Escrowed Balance**: Show funds held in escrow during processing
-5. **Refunds**: Show pending refund balance and provide a claim action after failed CREATE/DEPOSIT
+4. **Escrowed Balance**: Show funds held in escrow during processing (`getUserPendingBalance`)
+5. **Claimable Refunds**: Show refunds available to claim (`getClaimableRefund`) and provide a "Claim Refund" button
+
+### Refund UI Flow
+```typescript
+// Check if user has claimable refunds
+const claimable = await contract.getClaimableRefund(userAddress, NATIVE_FLOW);
+
+if (claimable > 0n) {
+  // Show "Claim Refund" banner/button
+  // Display: "You have X FLOW available to claim from cancelled/failed requests"
+
+  // On button click:
+  const tx = await contract.claimRefund(NATIVE_FLOW);
+  await tx.wait();
+  // Listen for RefundClaimed event to confirm
+}
+```
 
 ### Flow vs EVM Wallet Differences
 
@@ -503,8 +552,9 @@ enum RequestStatus {
 - [ ] Completed YieldVault appears in main positions list
 - [ ] User can cancel pending request (only PENDING status)
 - [ ] Failed requests show clear error messages
-- [ ] Escrowed balance displays correctly
-- [ ] Failed CREATE/DEPOSIT refunds can be claimed via claimRefund
+- [ ] Escrowed balance (`getUserPendingBalance`) displays correctly
+- [ ] Claimable refunds (`getClaimableRefund`) displays correctly after cancel/fail
+- [ ] User can claim refunds via `claimRefund()` and receives funds
 
 ---
 
