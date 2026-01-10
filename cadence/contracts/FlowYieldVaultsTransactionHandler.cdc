@@ -545,7 +545,7 @@ access(all) contract FlowYieldVaultsTransactionHandler {
         
         // Execution effort calculation parameters
         // Formula: baseEffortPerRequest * maxRequestsPerTx + baseOverhead
-        // Default: 2000 * 1 + 3000 = 2300 for 1 request
+        // Default: 2000 * 1 + 3000 = 5000 for 1 request
         //          2000 * 2 + 3000 = 7000 for 2 requests
         self.baseEffortPerRequest = 2000
         self.baseOverhead = 3000

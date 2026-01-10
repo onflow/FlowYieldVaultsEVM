@@ -6,12 +6,13 @@
 
 set -e  # Exit on any error
 
-# Get script directory (project root)
+# Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Load environment variables from .env file
+# Load environment variables from .env file in project root
 set -a
-source "$SCRIPT_DIR/.env"
+source "$PROJECT_ROOT/.env"
 set +a
 
 echo "=========================================="
@@ -24,13 +25,13 @@ echo ""
 # ==========================================
 echo "🔑 Step 1: Setting up COA (Cadence Owned Account)..."
 
-flow transactions send "$SCRIPT_DIR/cadence/transactions/setup_coa.cdc" \
+flow transactions send "$PROJECT_ROOT/cadence/transactions/setup_coa.cdc" \
     --network testnet \
     --signer testnet-account \
     --compute-limit 9999
 
 # Get the COA address
-COA_ADDRESS=$(flow scripts execute "$SCRIPT_DIR/cadence/scripts/get_coa_address.cdc" 0xd5f3a54862af53d3 --network testnet --output json | jq -r '.value')
+COA_ADDRESS=$(flow scripts execute "$PROJECT_ROOT/cadence/scripts/get_coa_address.cdc" 0xdf111ffc5064198a --network testnet --output json | jq -r '.value')
 
 if [ -z "$COA_ADDRESS" ] || [ "$COA_ADDRESS" == "null" ]; then
     echo "❌ Error: Could not get COA address"
@@ -46,7 +47,7 @@ echo ""
 # ==========================================
 echo "💰 Step 2: Funding COA with 10,000 FLOW..."
 
-flow transactions send "$SCRIPT_DIR/cadence/transactions/deposit_flow_to_coa.cdc" \
+flow transactions send "$PROJECT_ROOT/cadence/transactions/deposit_flow_to_coa.cdc" \
     10000.0 \
     --network testnet \
     --signer testnet-account \
@@ -62,12 +63,12 @@ echo ""
 echo "📦 Step 3: Building and deploying Solidity contract via COA..."
 
 # Build the contract
-cd "$SCRIPT_DIR/solidity"
+cd "$PROJECT_ROOT/solidity"
 forge build
-cd "$SCRIPT_DIR"
+cd "$PROJECT_ROOT"
 
 # Get the bytecode from the compiled contract
-BYTECODE=$(jq -r '.bytecode.object' "$SCRIPT_DIR/solidity/out/FlowYieldVaultsRequests.sol/FlowYieldVaultsRequests.json")
+BYTECODE=$(jq -r '.bytecode.object' "$PROJECT_ROOT/solidity/out/FlowYieldVaultsRequests.sol/FlowYieldVaultsRequests.json")
 
 # Remove 0x prefix if present
 BYTECODE=${BYTECODE#0x}
@@ -91,7 +92,7 @@ echo ""
 GAS_LIMIT=5000000
 
 echo "   Deploying via COA (Google KMS signed)..."
-DEPLOY_RESULT=$(flow transactions send "$SCRIPT_DIR/cadence/transactions/deploy_evm_contract.cdc" \
+DEPLOY_RESULT=$(flow transactions send "$PROJECT_ROOT/cadence/transactions/deploy_evm_contract.cdc" \
     "$FULL_BYTECODE" \
     "$GAS_LIMIT" \
     --network testnet \
@@ -140,7 +141,7 @@ echo "   Amount: max uint256 (unlimited)"
 # Max uint256 for unlimited approval
 MAX_UINT256="115792089237316195423570985008687907853269984665640564039457584007913129639935"
 
-flow transactions send "$SCRIPT_DIR/cadence/transactions/approve_erc20_from_coa.cdc" \
+flow transactions send "$PROJECT_ROOT/cadence/transactions/approve_erc20_from_coa.cdc" \
     "$WFLOW_ADDRESS" \
     "$DEPLOYED_ADDRESS" \
     "$MAX_UINT256" \
@@ -169,7 +170,7 @@ echo ""
 echo "🔧 Step 6: Setting up FlowYieldVaultsEVM Worker with Badge..."
 echo "   FlowYieldVaultsRequests address: $DEPLOYED_ADDRESS"
 
-flow transactions send "$SCRIPT_DIR/cadence/transactions/setup_worker_with_badge.cdc" \
+flow transactions send "$PROJECT_ROOT/cadence/transactions/setup_worker_with_badge.cdc" \
     "$DEPLOYED_ADDRESS" \
     --network testnet \
     --signer testnet-account \
@@ -187,7 +188,7 @@ echo "   - Delay: 10 seconds"
 echo "   - Priority: Calculated dynamically based on execution effort"
 echo "   - Execution Effort: Calculated dynamically based on maxRequestsPerTx"
 
-flow transactions send "$SCRIPT_DIR/cadence/transactions/scheduler/init_and_schedule.cdc" \
+flow transactions send "$PROJECT_ROOT/cadence/transactions/scheduler/init_and_schedule.cdc" \
     10.0 \
     --network testnet \
     --signer testnet-account \
@@ -207,7 +208,7 @@ echo "WFLOW Address (constructor arg): $WFLOW_ADDRESS"
 echo ""
 
 forge verify-contract \
-  --root "$SCRIPT_DIR/solidity" \
+  --root "$PROJECT_ROOT/solidity" \
   --rpc-url "$TESTNET_RPC_URL" \
   --verifier blockscout \
   --verifier-url 'https://evm-testnet.flowscan.io/api/' \
@@ -225,7 +226,7 @@ echo ""
 # ==========================================
 echo "📦 Step 9: Exporting artifacts and updating contract addresses..."
 
-"$SCRIPT_DIR/scripts/export-artifacts.sh" --network testnet --evm-address "$DEPLOYED_ADDRESS"
+"$PROJECT_ROOT/scripts/export-artifacts.sh" --network testnet --evm-address "$DEPLOYED_ADDRESS"
 
 echo ""
 echo "✅ Artifacts exported and addresses updated"
@@ -247,8 +248,8 @@ echo "   https://evm-testnet.flowscan.io/address/$DEPLOYED_ADDRESS"
 echo ""
 echo "🔍 Useful Commands:"
 echo "   - Check pending requests:"
-echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc 0xd5f3a54862af53d3 --network testnet"
+echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc 0xdf111ffc5064198a --network testnet"
 echo ""
 echo "   - Check handler status:"
-echo "     flow scripts execute cadence/scripts/check_yieldvaultmanager_status.cdc 0xd5f3a54862af53d3 --network testnet"
+echo "     flow scripts execute cadence/scripts/check_yieldvaultmanager_status.cdc 0xdf111ffc5064198a --network testnet"
 echo ""

@@ -3,21 +3,21 @@
     "FlowYieldVaultsRequests": {
       "abi": "./artifacts/FlowYieldVaultsRequests.json",
       "addresses": {
-        "testnet": "0x56a5a3e19285c63afdaa41366dc37613910e5ffc",
+        "testnet": "0xf633c9dbf1a3964a895fcc4ca4404b6f8ba8141d",
         "mainnet": "0x0000000000000000000000000000000000000000"
       }
     },
     "FlowYieldVaultsEVM": {
       "network": "flow",
       "addresses": {
-        "testnet": "0xd5f3a54862af53d3",
+        "testnet": "0xdf111ffc5064198a",
         "mainnet": "0x0000000000000000"
       }
     }
   },
   "metadata": {
     "version": "1.0.0",
-    "lastUpdated": "2025-12-18T17:50:13Z",
+    "lastUpdated": "2026-01-10T01:08:24Z",
     "networks": {
       "testnet": {
         "chainId": "545",

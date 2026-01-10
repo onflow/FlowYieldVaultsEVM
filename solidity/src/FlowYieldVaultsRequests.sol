@@ -1477,16 +1477,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /**
-     * @dev Checks if the specified token address is configured as native $FLOW.
-     *      Used internally to determine transfer method (native vs ERC20).
-     * @param tokenAddress The token address to check.
-     * @return True if the token is configured as native $FLOW, false otherwise.
-     */
-    function _isNativeToken(address tokenAddress) internal view returns (bool) {
-        return allowedTokens[tokenAddress].isNative;
-    }
-
-    /**
      * @dev Transfers funds to a recipient, handling both native $FLOW and ERC20 tokens.
      *      For native tokens, uses low-level call with value.
      *      For ERC20 tokens, uses SafeERC20's safeTransfer.
@@ -1499,7 +1489,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         address tokenAddress,
         uint256 amount
     ) internal {
-        if (_isNativeToken(tokenAddress)) {
+        if (isNativeFlow(tokenAddress)) {
             // Native FLOW: use low-level call to transfer ETH/FLOW
             (bool success, ) = to.call{value: amount}("");
             if (!success) revert TransferFailed();

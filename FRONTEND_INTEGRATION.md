@@ -15,18 +15,19 @@ git submodule update --init --recursive
 ### 2. Access Contract Artifacts
 
 ```typescript
-import addresses from './evm-contracts/deployments/contract-addresses.json';
-import abi from './evm-contracts/deployments/artifacts/FlowYieldVaultsRequests.json';
-import { RequestType, RequestStatus } from './evm-contracts/deployments/types';
+import addresses from "./evm-contracts/deployments/contract-addresses.json";
+import abi from "./evm-contracts/deployments/artifacts/FlowYieldVaultsRequests.json";
+import { RequestType, RequestStatus } from "./evm-contracts/deployments/types";
 
-const contractAddress = addresses.contracts.FlowYieldVaultsRequests.addresses.testnet;
+const contractAddress =
+  addresses.contracts.FlowYieldVaultsRequests.addresses.testnet;
 const networkConfig = addresses.metadata.networks.testnet;
 ```
 
 ### 3. Initialize ethers.js Contract
 
 ```typescript
-import { ethers } from 'ethers';
+import { ethers } from "ethers";
 
 // Get provider from wallet (e.g., MetaMask)
 const provider = new ethers.BrowserProvider(window.ethereum);
@@ -43,54 +44,60 @@ const contract = new ethers.Contract(contractAddress, abi, signer);
 ### User Operations
 
 #### Create YieldVault
+
 ```typescript
 // Native FLOW deposit
-const NATIVE_FLOW = '0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF';
-const amount = ethers.parseEther('10'); // 10 FLOW
+const NATIVE_FLOW = "0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF";
+const amount = ethers.parseEther("10"); // 10 FLOW
 
 const tx = await contract.createYieldVault(
-  NATIVE_FLOW,           // tokenAddress
-  amount,                // amount
-  vaultIdentifier,       // "A.{addr}.FlowToken.Vault"
-  strategyIdentifier,    // Strategy identifier
-  { value: amount }      // Send FLOW with transaction
+  NATIVE_FLOW, // tokenAddress
+  amount, // amount
+  vaultIdentifier, // "A.{addr}.FlowToken.Vault"
+  strategyIdentifier, // Strategy identifier
+  { value: amount } // Send FLOW with transaction
 );
 const receipt = await tx.wait();
 ```
 
 #### Deposit to Existing YieldVault
+
 ```typescript
 const tx = await contract.depositToYieldVault(
-  yieldVaultId,          // uint64
-  NATIVE_FLOW,           // tokenAddress
-  amount,                // amount
+  yieldVaultId, // uint64
+  NATIVE_FLOW, // tokenAddress
+  amount, // amount
   { value: amount }
 );
 await tx.wait();
 ```
 
 #### Withdraw from YieldVault
+
 ```typescript
 const tx = await contract.withdrawFromYieldVault(
-  yieldVaultId,          // uint64
-  amount                 // amount to withdraw
+  yieldVaultId, // uint64
+  amount // amount to withdraw
 );
 await tx.wait();
 ```
 
 #### Close YieldVault
+
 ```typescript
 const tx = await contract.closeYieldVault(yieldVaultId);
 await tx.wait();
 ```
 
 #### Cancel Pending Request
+
 ```typescript
 const tx = await contract.cancelRequest(requestId);
 await tx.wait();
 ```
 
 #### Claim Refund
+
 ```typescript
 // Claims refund balance for a token (accumulated from cancelled/dropped/failed requests)
 // Only claims actual refunds - does NOT touch funds escrowed for active pending requests
@@ -101,49 +108,77 @@ await tx.wait();
 ### Query Functions
 
 #### Get User's YieldVaults
+
 ```typescript
-const yieldVaultIds: bigint[] = await contract.getYieldVaultIdsForUser(userAddress);
+const yieldVaultIds: bigint[] = await contract.getYieldVaultIdsForUser(
+  userAddress
+);
 ```
 
 #### Check YieldVault Ownership
+
 ```typescript
-const owns: boolean = await contract.doesUserOwnYieldVault(userAddress, yieldVaultId);
+const owns: boolean = await contract.doesUserOwnYieldVault(
+  userAddress,
+  yieldVaultId
+);
 ```
 
 #### Get User's Pending Request Count
+
 ```typescript
 const count: bigint = await contract.getUserPendingRequestCount(userAddress);
 ```
 
 #### Get User's Escrowed Balance (Active Requests)
+
 ```typescript
 // Funds tied to active pending requests (not yet processed by worker)
-const escrowedBalance: bigint = await contract.getUserPendingBalance(userAddress, tokenAddress);
+const escrowedBalance: bigint = await contract.getUserPendingBalance(
+  userAddress,
+  tokenAddress
+);
 ```
 
 #### Get User's Claimable Refund
+
 ```typescript
 // Funds available to claim via claimRefund() (from cancelled/dropped/failed requests)
-const claimableRefund: bigint = await contract.getClaimableRefund(userAddress, tokenAddress);
+const claimableRefund: bigint = await contract.getClaimableRefund(
+  userAddress,
+  tokenAddress
+);
 ```
 
 #### Get Total Pending Request Count
+
 ```typescript
 const totalPending: bigint = await contract.getPendingRequestCount();
 ```
 
 #### Get Request Details
+
 ```typescript
 const request = await contract.getRequest(requestId);
 // Returns: { id, user, requestType, status, tokenAddress, amount, yieldVaultId, timestamp, message, vaultIdentifier, strategyIdentifier }
 ```
 
 #### Get User's Pending Requests (Unpacked)
+
 ```typescript
 const [
-  ids, requestTypes, statuses, tokenAddresses,
-  amounts, yieldVaultIds, timestamps, messages,
-  vaultIdentifiers, strategyIdentifiers, pendingBalance, claimableRefund
+  ids,
+  requestTypes,
+  statuses,
+  tokenAddresses,
+  amounts,
+  yieldVaultIds,
+  timestamps,
+  messages,
+  vaultIdentifiers,
+  strategyIdentifiers,
+  pendingBalance,
+  claimableRefund,
 ] = await contract.getPendingRequestsByUserUnpacked(userAddress);
 // pendingBalance = escrowed funds for active pending requests (native FLOW only)
 // claimableRefund = funds available to claim via claimRefund() (native FLOW only)
@@ -151,15 +186,26 @@ const [
 ```
 
 #### Get All Pending Requests (Paginated, Admin)
+
 ```typescript
 const [
-  ids, users, requestTypes, statuses, tokenAddresses,
-  amounts, yieldVaultIds, timestamps, messages,
-  vaultIdentifiers, strategyIdentifiers
+  ids,
+  users,
+  requestTypes,
+  statuses,
+  tokenAddresses,
+  amounts,
+  yieldVaultIds,
+  timestamps,
+  messages,
+  vaultIdentifiers,
+  strategyIdentifiers,
 ] = await contract.getPendingRequestsUnpacked(startIndex, count);
 
 // Filter for specific user client-side
-const userRequests = ids.filter((_, i) => users[i].toLowerCase() === userAddress.toLowerCase());
+const userRequests = ids.filter(
+  (_, i) => users[i].toLowerCase() === userAddress.toLowerCase()
+);
 ```
 
 ---
@@ -183,11 +229,11 @@ const userRequests = ids.filter((_, i) => users[i].toLowerCase() === userAddress
 
 ### Refund Scenarios
 
-| Scenario | What Happens | User Action |
-|----------|--------------|-------------|
+| Scenario                  | What Happens               | User Action                      |
+| ------------------------- | -------------------------- | -------------------------------- |
 | Request cancelled by user | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
-| Request dropped by admin | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
-| Cadence processing fails | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
+| Request dropped by admin  | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
+| Cadence processing fails  | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
 
 **Important:** `claimRefund()` only withdraws actual refunds. It does NOT touch funds escrowed for active pending requests.
 
@@ -196,50 +242,76 @@ const userRequests = ids.filter((_, i) => users[i].toLowerCase() === userAddress
 ## Event Listening
 
 ### Listen for Request Status Updates
+
 ```typescript
-contract.on('RequestCreated', (requestId, user, requestType, tokenAddress, amount, yieldVaultId, timestamp, vaultIdentifier, strategyIdentifier) => {
-  console.log('New request created:', requestId.toString());
-  // Add to pending requests UI
-});
-
-contract.on('RequestProcessed', (requestId, user, requestType, status, yieldVaultId, message) => {
-  console.log('Request processed:', requestId.toString(), 'status:', status);
-
-  if (status === 2) { // COMPLETED
-    // Refresh positions list
-    fetchPositions();
-  } else if (status === 3) { // FAILED
-    // Show error message
-    showError(message);
+contract.on(
+  "RequestCreated",
+  (
+    requestId,
+    user,
+    requestType,
+    tokenAddress,
+    amount,
+    yieldVaultId,
+    timestamp,
+    vaultIdentifier,
+    strategyIdentifier
+  ) => {
+    console.log("New request created:", requestId.toString());
+    // Add to pending requests UI
   }
-});
+);
 
-contract.on('RequestCancelled', (requestId, user, tokenAddress, claimableAmount) => {
-  console.log('Request cancelled, claimable:', ethers.formatEther(claimableAmount));
-  // Prompt user to claim refund if claimableAmount > 0
-  if (claimableAmount > 0n) {
-    showClaimRefundPrompt(tokenAddress, claimableAmount);
+contract.on(
+  "RequestProcessed",
+  (requestId, user, requestType, status, yieldVaultId, message) => {
+    console.log("Request processed:", requestId.toString(), "status:", status);
+
+    if (status === 2) {
+      // COMPLETED
+      // Refresh positions list
+      fetchPositions();
+    } else if (status === 3) {
+      // FAILED
+      // Show error message
+      showError(message);
+    }
   }
-});
+);
 
-contract.on('RefundCredited', (user, tokenAddress, amount, requestId) => {
-  console.log('Refund credited:', requestId, tokenAddress, amount.toString());
+contract.on(
+  "RequestCancelled",
+  (requestId, user, tokenAddress, claimableAmount) => {
+    console.log(
+      "Request cancelled, claimable:",
+      ethers.formatEther(claimableAmount)
+    );
+    // Prompt user to claim refund if claimableAmount > 0
+    if (claimableAmount > 0n) {
+      showClaimRefundPrompt(tokenAddress, claimableAmount);
+    }
+  }
+);
+
+contract.on("RefundCredited", (user, tokenAddress, amount, requestId) => {
+  console.log("Refund credited:", requestId, tokenAddress, amount.toString());
   // Prompt user to claim refund if amount > 0
   if (amount > 0n) {
     showClaimRefundPrompt(tokenAddress, amount);
   }
 });
 
-contract.on('RefundClaimed', (user, tokenAddress, amount) => {
-  console.log('Refund claimed:', tokenAddress, amount.toString());
+contract.on("RefundClaimed", (user, tokenAddress, amount) => {
+  console.log("Refund claimed:", tokenAddress, amount.toString());
 });
 ```
 
 ### Listen for Balance Updates
+
 ```typescript
 // BalanceUpdated fires when escrowed balance (pendingUserBalances) changes
 // This happens on: request creation, startProcessing, cancelRequest, dropRequests
-contract.on('BalanceUpdated', (user, tokenAddress, newBalance) => {
+contract.on("BalanceUpdated", (user, tokenAddress, newBalance) => {
   if (user.toLowerCase() === currentUser.toLowerCase()) {
     // Update UI with new escrowed balance for active pending requests
     updateEscrowedBalance(newBalance);
@@ -247,7 +319,7 @@ contract.on('BalanceUpdated', (user, tokenAddress, newBalance) => {
 });
 
 // RefundClaimed fires when user claims accumulated refunds
-contract.on('RefundClaimed', (user, tokenAddress, amount) => {
+contract.on("RefundClaimed", (user, tokenAddress, amount) => {
   if (user.toLowerCase() === currentUser.toLowerCase()) {
     // Refresh claimable balance (should be 0 after claim)
     refreshClaimableBalance();
@@ -264,24 +336,24 @@ The EVM contract only stores **request queue data** and **ownership mappings**. 
 ### Setup FCL
 
 ```typescript
-import * as fcl from '@onflow/fcl';
+import * as fcl from "@onflow/fcl";
 
 // Configure for testnet
 fcl.config({
-  'accessNode.api': 'https://rest-testnet.onflow.org',
-  'flow.network': 'testnet',
+  "accessNode.api": "https://rest-testnet.onflow.org",
+  "flow.network": "testnet",
 });
 
 // Contract addresses (testnet)
-const FLOW_YIELD_VAULTS_EVM_ADDRESS = '0xd5f3a54862af53d3'; // FlowYieldVaultsEVM
-const FLOW_YIELD_VAULTS_ADDRESS = '0xd2580caf2ef07c2f'; // FlowYieldVaults
+const FLOW_YIELD_VAULTS_EVM_ADDRESS = "0xdf111ffc5064198a"; // FlowYieldVaultsEVM
+const FLOW_YIELD_VAULTS_ADDRESS = "0xd2580caf2ef07c2f"; // FlowYieldVaults
 ```
 
 ### Get User's YieldVault IDs (from Cadence)
 
 ```typescript
 const GET_USER_YIELDVAULTS = `
-import FlowYieldVaultsEVM from 0xd5f3a54862af53d3
+import FlowYieldVaultsEVM from 0xdf111ffc5064198a
 
 access(all) fun main(evmAddress: String): [UInt64] {
     var normalizedAddress = evmAddress.toLower()
@@ -388,7 +460,7 @@ async function getUserPositions(userEvmAddress: string) {
       });
       return {
         yieldVaultId: id,
-        balance: parseFloat(balance || '0'),
+        balance: parseFloat(balance || "0"),
       };
     })
   );
@@ -421,7 +493,7 @@ const strategies = await fcl.query({ cadence: GET_SUPPORTED_STRATEGIES });
 
 ```typescript
 const CHECK_SYSTEM_STATUS = `
-import FlowYieldVaultsEVM from 0xd5f3a54862af53d3
+import FlowYieldVaultsEVM from 0xdf111ffc5064198a
 
 access(all) fun main(): {String: AnyStruct} {
     return {
@@ -436,14 +508,14 @@ const status = await fcl.query({ cadence: CHECK_SYSTEM_STATUS });
 
 ### EVM vs Cadence Query Comparison
 
-| Data | Query From | Why |
-|------|------------|-----|
-| Pending requests | EVM | Request queue lives on EVM |
-| Request status | EVM | Status updates happen on EVM |
-| User owns YieldVault | **Either** | Both maintain ownership mappings |
-| YieldVault balance | **Cadence** | Actual position value is on Cadence |
-| Yield/rewards | **Cadence** | Strategy execution is on Cadence |
-| Supported strategies | **Cadence** | Strategy registry is on Cadence |
+| Data                 | Query From  | Why                                 |
+| -------------------- | ----------- | ----------------------------------- |
+| Pending requests     | EVM         | Request queue lives on EVM          |
+| Request status       | EVM         | Status updates happen on EVM        |
+| User owns YieldVault | **Either**  | Both maintain ownership mappings    |
+| YieldVault balance   | **Cadence** | Actual position value is on Cadence |
+| Yield/rewards        | **Cadence** | Strategy execution is on Cadence    |
+| Supported strategies | **Cadence** | Strategy registry is on Cadence     |
 
 ### Recommended Frontend Data Flow
 
@@ -461,11 +533,11 @@ async function initializeUserDashboard(evmAddress: string) {
 
   // 3. Fetch balances for active positions (Cadence)
   const positions = await Promise.all(
-    yieldVaultIds.map(id => getYieldVaultDetails(id))
+    yieldVaultIds.map((id) => getYieldVaultDetails(id))
   );
 
   // 4. Subscribe to EVM events for real-time updates
-  evmContract.on('RequestProcessed', handleRequestProcessed);
+  evmContract.on("RequestProcessed", handleRequestProcessed);
 
   return { positions, pendingCount };
 }
@@ -478,6 +550,7 @@ async function initializeUserDashboard(evmAddress: string) {
 > "Users must know the exact status of their money at all times" - Tom
 
 ### Display Requirements
+
 1. **Pending Requests Panel**: Show all user's pending/processing requests
 2. **Real-time Updates**: PENDING → PROCESSING → COMPLETED/FAILED
 3. **Clear Messaging**: "Your transaction is being processed. This typically takes 15-60 seconds."
@@ -485,6 +558,7 @@ async function initializeUserDashboard(evmAddress: string) {
 5. **Claimable Refunds**: Show refunds available to claim (`getClaimableRefund`) and provide a "Claim Refund" button
 
 ### Refund UI Flow
+
 ```typescript
 // Check if user has claimable refunds
 const claimable = await contract.getClaimableRefund(userAddress, NATIVE_FLOW);
@@ -502,16 +576,16 @@ if (claimable > 0n) {
 
 ### Flow vs EVM Wallet Differences
 
-| Aspect | Flow Wallet | EVM Wallet |
-|--------|-------------|------------|
-| Transaction Time | ~10 seconds | ~15-60 seconds (two-step) |
-| Optimistic Updates | YES | NO |
-| UI Behavior | Immediate position | Show in "Pending" first |
+| Aspect             | Flow Wallet        | EVM Wallet                |
+| ------------------ | ------------------ | ------------------------- |
+| Transaction Time   | ~10 seconds        | ~15-60 seconds (two-step) |
+| Optimistic Updates | YES                | NO                        |
+| UI Behavior        | Immediate position | Show in "Pending" first   |
 
 **Important:** Do NOT apply optimistic updates for EVM wallets!
 
 ```typescript
-if (wallet.type === 'evm') {
+if (wallet.type === "evm") {
   // Show in pending requests UI
   // Wait for RequestProcessed event with status=COMPLETED
   // Then move to main positions list
@@ -526,7 +600,7 @@ if (wallet.type === 'evm') {
 
 ```typescript
 // Sentinel address for native FLOW token
-const NATIVE_FLOW = '0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF';
+const NATIVE_FLOW = "0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF";
 
 // Sentinel value for "no YieldVault" (Cadence may return this on failed CREATE)
 const NO_YIELDVAULT_ID = 18446744073709551615n; // type(uint64).max
@@ -537,7 +611,7 @@ enum RequestType {
   CREATE_YIELDVAULT = 0,
   DEPOSIT_TO_YIELDVAULT = 1,
   WITHDRAW_FROM_YIELDVAULT = 2,
-  CLOSE_YIELDVAULT = 3
+  CLOSE_YIELDVAULT = 3,
 }
 
 // Request Status
@@ -545,7 +619,7 @@ enum RequestStatus {
   PENDING = 0,
   PROCESSING = 1,
   COMPLETED = 2,
-  FAILED = 3
+  FAILED = 3,
 }
 ```
 
@@ -585,8 +659,8 @@ import {
   isRequestPending,
   isRequestCompleted,
   getRequestTypeName,
-  getRequestStatusName
-} from './evm-contracts/deployments/types';
+  getRequestStatusName,
+} from "./evm-contracts/deployments/types";
 ```
 
 ---
@@ -594,11 +668,13 @@ import {
 ## Support
 
 ### EVM Resources
+
 - **Contract ABI**: `deployments/artifacts/FlowYieldVaultsRequests.json`
 - **Contract Addresses**: `deployments/contract-addresses.json`
 - **Event Definitions**: See TypeScript types or ABI
 
 ### Cadence Resources
+
 - **FCL Documentation**: [developers.flow.com/tools/clients/fcl-js](https://developers.flow.com/tools/clients/fcl-js)
 - **Cadence Scripts**: `cadence/scripts/` directory
   - `check_user_yieldvaults.cdc` - Get YieldVault IDs for EVM address
@@ -609,4 +685,5 @@ import {
   - `validate_create_yieldvault_params.cdc` - Validate vault/strategy identifiers before CREATE
 
 ### Architecture
+
 - **Design Document**: [FLOW_YIELD_VAULTS_EVM_BRIDGE_DESIGN.md](./FLOW_YIELD_VAULTS_EVM_BRIDGE_DESIGN.md)
