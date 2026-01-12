@@ -173,6 +173,8 @@ access(all) contract FlowYieldVaultsEVM {
     // ============================================
 
     /// @notice Emitted when a Worker is initialized
+    /// @dev All capabilities are expected to originate from the same Cadence account
+    ///      (the transaction signer). This event does not include the Cadence owner address.
     /// @param coaAddress The COA address associated with the Worker
     /// @param coaCapId The capability ID for the COA
     /// @param yieldVaultManagerCapId The capability ID for the YieldVaultManager
