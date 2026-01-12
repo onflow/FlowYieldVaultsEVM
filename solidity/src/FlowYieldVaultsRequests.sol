@@ -979,7 +979,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      *      The PROCESSING status prevents request cancellation and double-processing.
      * @param requestId The unique identifier of the request to start processing.
      */
-    function startProcessing(uint256 requestId) external onlyAuthorizedCOA {
+    function startProcessing(uint256 requestId) external onlyAuthorizedCOA nonReentrant {
         Request storage request = requests[requestId];
 
         // === VALIDATION ===
@@ -1073,7 +1073,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         bool success,
         uint64 yieldVaultId,
         string calldata message
-    ) external payable onlyAuthorizedCOA {
+    ) external payable onlyAuthorizedCOA nonReentrant {
         Request storage request = requests[requestId];
 
         // === VALIDATION ===
