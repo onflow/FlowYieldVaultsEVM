@@ -112,7 +112,7 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 
 | Contract                          | Address                                      |
 | --------------------------------- | -------------------------------------------- |
-| FlowYieldVaultsRequests (EVM)     | `0xBA0D3CF51d099163cb5DA56F0E3d80EbF2125A9b` |
+| FlowYieldVaultsRequests (EVM)     | `0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d` |
 | FlowYieldVaultsEVM (Cadence)      | `df111ffc5064198a`                           |
 | FlowYieldVaultsTransactionHandler | `df111ffc5064198a`                           |
 

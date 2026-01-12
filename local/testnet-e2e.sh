@@ -88,12 +88,12 @@
 #   3. startProcessing() called - funds moved from Contract to COA
 #   4. Worker attempts to parse identifiers on Cadence side
 #   5. Validation fails: "Invalid vaultIdentifier/strategyIdentifier: X is not a valid Cadence type"
-#   6. completeProcessing(FAILED) called - updates pendingUserBalances accounting
+#   6. completeProcessing(FAILED) called - credits claimableRefunds
 #   7. No YieldVault created, yieldVaultId set to NO_YIELDVAULT_ID (max uint64)
 #
 # Balance changes:
 #   - User wallet:      -amount (+ gas fees) - funds left wallet
-#   - Pending balance:  +amount (funds refunded from COA back to contract)
+#   - Pending balance:  0 (escrow was deducted at startProcessing)
 #   - Contract balance: +amount (funds returned by COA during completeProcessing)
 #   - COA balance:      unchanged (funds returned to contract)
 #   - YieldVault:       none created
@@ -106,8 +106,8 @@
 #   3. completeProcessing(FAILED) is called with refund:
 #      - Native FLOW: COA sends funds back via msg.value
 #      - ERC20 (WFLOW): COA approves contract, then contract pulls via transferFrom
-#   4. Contract receives funds and updates pendingUserBalances
-#   5. User can withdraw their refunded funds normally
+#   4. Contract receives funds and credits claimableRefunds
+#   5. User can claim the refund via claimRefund()
 #
 # =============================================================================
 # TYPICAL TEST FLOW
@@ -142,10 +142,14 @@ fi
 
 # Configuration
 RPC_URL="${TESTNET_RPC_URL:-https://testnet.evm.nodes.onflow.org}"
-CONTRACT="0xBA0D3CF51d099163cb5DA56F0E3d80EbF2125A9b"
+CONTRACT="${CONTRACT:-}"
+CADENCE_CONTRACT="${CADENCE_CONTRACT:-}"
 WFLOW="0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e"
 NATIVE_FLOW="0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF"
-CADENCE_CONTRACT="0xdf111ffc5064198a"
+DEFAULT_CONTRACT="0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d"
+DEFAULT_CADENCE_CONTRACT="0xdf111ffc5064198a"
+REFUND_CHECK_MAX_ATTEMPTS="${REFUND_CHECK_MAX_ATTEMPTS:-60}"
+REFUND_CHECK_DELAY_SECONDS="${REFUND_CHECK_DELAY_SECONDS:-5}"
 
 # Default correct parameters
 DEFAULT_VAULT="A.7e60df042a9c0868.FlowToken.Vault"
@@ -177,6 +181,134 @@ print_warning() {
 
 print_error() {
     echo -e "${RED}✗ $1${NC}"
+}
+
+load_contract_addresses() {
+    local addresses_file="$PROJECT_DIR/deployments/contract-addresses.json"
+    if [ ! -f "$addresses_file" ]; then
+        return 0
+    fi
+
+    local evm_addr=""
+    local cadence_addr=""
+
+    if command -v python3 >/dev/null 2>&1; then
+        local parsed
+        parsed=$(python3 - "$addresses_file" <<'PY'
+import json, sys
+path = sys.argv[1]
+try:
+    data = json.load(open(path))
+    evm = data.get("contracts", {}).get("FlowYieldVaultsRequests", {}).get("addresses", {}).get("testnet", "")
+    cadence = data.get("contracts", {}).get("FlowYieldVaultsEVM", {}).get("addresses", {}).get("testnet", "")
+    print(evm)
+    print(cadence)
+except Exception:
+    pass
+PY
+)
+        evm_addr=$(printf '%s\n' "$parsed" | sed -n '1p')
+        cadence_addr=$(printf '%s\n' "$parsed" | sed -n '2p')
+    elif command -v jq >/dev/null 2>&1; then
+        evm_addr=$(jq -r '.contracts.FlowYieldVaultsRequests.addresses.testnet // empty' "$addresses_file")
+        cadence_addr=$(jq -r '.contracts.FlowYieldVaultsEVM.addresses.testnet // empty' "$addresses_file")
+    fi
+
+    if [ -z "$CONTRACT" ] && [ -n "$evm_addr" ]; then
+        CONTRACT="$evm_addr"
+    fi
+    if [ -z "$CADENCE_CONTRACT" ] && [ -n "$cadence_addr" ]; then
+        CADENCE_CONTRACT="$cadence_addr"
+    fi
+}
+
+load_contract_addresses
+
+if [ -z "$CONTRACT" ]; then
+    CONTRACT="$DEFAULT_CONTRACT"
+fi
+
+if [ -z "$CADENCE_CONTRACT" ]; then
+    CADENCE_CONTRACT="$DEFAULT_CADENCE_CONTRACT"
+fi
+
+extract_tx_hash() {
+    echo "$1" | grep -oE '0x[a-fA-F0-9]{64}' | head -n1
+}
+
+get_request_status() {
+    local request_id=$1
+    local result=$(cast call "$CONTRACT" "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,string,string))" "$request_id" --rpc-url "$RPC_URL")
+    echo "$result" | sed 's/[()]//g' | cut -d',' -f4 | tr -d ' '
+}
+
+status_label() {
+    case $1 in
+        0) echo "PENDING" ;;
+        1) echo "PROCESSING" ;;
+        2) echo "COMPLETED" ;;
+        3) echo "FAILED" ;;
+        *) echo "UNKNOWN" ;;
+    esac
+}
+
+wait_for_request_status() {
+    local request_id=$1
+    local target_status=$2
+    local max_attempts="${3:-30}"
+    local delay_seconds="${4:-5}"
+
+    for ((i = 1; i <= max_attempts; i++)); do
+        local status=$(get_request_status "$request_id")
+        local label=$(status_label "$status")
+        echo "Status: $label ($i/$max_attempts)"
+
+        if [ "$status" = "$target_status" ]; then
+            return 0
+        fi
+
+        if [ "$status" = "2" ] && [ "$target_status" = "3" ]; then
+            print_error "Request completed successfully; refund not expected."
+            return 1
+        fi
+
+        sleep "$delay_seconds"
+    done
+
+    print_error "Timed out waiting for status $(status_label "$target_status")."
+    return 1
+}
+
+extract_request_id() {
+    local tx_hash=$1
+    local receipt_json
+    receipt_json=$(cast receipt "$tx_hash" --json --rpc-url "$RPC_URL")
+
+    if command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "$receipt_json" | python3 - <<'PY' 2>/dev/null || true
+import json, sys
+data = json.load(sys.stdin)
+for log in data.get("logs", []):
+    topics = log.get("topics") or []
+    if len(topics) == 4:
+        print(int(topics[1], 16))
+        sys.exit(0)
+sys.exit(1)
+PY
+        return 0
+    fi
+
+    if command -v jq >/dev/null 2>&1; then
+        local request_id_hex
+        request_id_hex=$(printf '%s\n' "$receipt_json" | jq -r '.logs[] | select(.topics|length==4) | .topics[1]' | head -n1)
+        if [ -n "$request_id_hex" ] && [ "$request_id_hex" != "null" ]; then
+            printf "%d\n" "$request_id_hex"
+        fi
+        return 0
+    fi
+
+    print_error "python3 or jq is required to extract requestId from the receipt."
+    return 1
 }
 
 # Convert wei to ether for display
@@ -216,12 +348,19 @@ check_evm_state() {
     echo "User Native FLOW:  $(wei_to_ether $user_flow) FLOW"
     echo "User WFLOW:        $(wei_to_ether $user_wflow) WFLOW"
 
-    # Pending balances (what user can withdraw from EVM contract)
+    # Pending balances (escrow for active requests)
     local pending_flow=$(cast call "$CONTRACT" "getUserPendingBalance(address,address)(uint256)" "$USER" "$NATIVE_FLOW" --rpc-url "$RPC_URL")
     local pending_wflow=$(cast call "$CONTRACT" "getUserPendingBalance(address,address)(uint256)" "$USER" "$WFLOW" --rpc-url "$RPC_URL")
 
     echo "Pending FLOW:      $(wei_to_ether $pending_flow) FLOW"
     echo "Pending WFLOW:     $(wei_to_ether $pending_wflow) WFLOW"
+
+    # Claimable refunds (available via claimRefund)
+    local claimable_flow=$(cast call "$CONTRACT" "getClaimableRefund(address,address)(uint256)" "$USER" "$NATIVE_FLOW" --rpc-url "$RPC_URL")
+    local claimable_wflow=$(cast call "$CONTRACT" "getClaimableRefund(address,address)(uint256)" "$USER" "$WFLOW" --rpc-url "$RPC_URL")
+
+    echo "Claimable FLOW:    $(wei_to_ether $claimable_flow) FLOW"
+    echo "Claimable WFLOW:   $(wei_to_ether $claimable_wflow) WFLOW"
 
     # Contract balances (actual funds held by EVM contract)
     local contract_flow=$(cast balance "$CONTRACT" --rpc-url "$RPC_URL")
@@ -325,6 +464,83 @@ create_yieldvault_wflow() {
         --rpc-url "$RPC_URL"
 
     print_success "Transaction sent"
+}
+
+claim_refund() {
+    local token_address="${1:-$NATIVE_FLOW}"
+    print_header "Claiming Refund"
+    echo "Token:   $token_address"
+    echo ""
+
+    cast send "$CONTRACT" "claimRefund(address)" \
+        "$token_address" \
+        --private-key "$PRIVATE_KEY" \
+        --rpc-url "$RPC_URL"
+
+    print_success "Refund claimed"
+}
+
+refund_check() {
+    local amount=$1
+    local vault="${2:-InvalidVault}"
+    local strategy="${3:-InvalidStrategy}"
+
+    if [ -z "$PRIVATE_KEY" ]; then
+        print_error "PRIVATE_KEY is required"
+        exit 1
+    fi
+
+    if [ -z "$USER" ]; then
+        print_error "Unable to derive USER from PRIVATE_KEY"
+        exit 1
+    fi
+
+    if [ -z "$amount" ]; then
+        print_error "Amount required"
+        exit 1
+    fi
+
+    validate_amount "$amount"
+    local amount_wei=$(ether_to_wei "$amount")
+
+    print_header "Refund Check (forced failure)"
+    echo "Amount:   $amount FLOW"
+    echo "Vault:    $vault"
+    echo "Strategy: $strategy"
+    echo ""
+
+    local tx_out
+    tx_out=$(cast send "$CONTRACT" "createYieldVault(address,uint256,string,string)" \
+        "$NATIVE_FLOW" \
+        "$amount_wei" \
+        "$vault" \
+        "$strategy" \
+        --value "$amount_wei" \
+        --private-key "$PRIVATE_KEY" \
+        --rpc-url "$RPC_URL")
+
+    local tx_hash
+    tx_hash=$(extract_tx_hash "$tx_out")
+    if [ -z "$tx_hash" ]; then
+        print_error "Could not parse transaction hash from send output."
+        echo "$tx_out"
+        exit 1
+    fi
+    print_success "Transaction sent: $tx_hash"
+
+    local request_id
+    request_id=$(extract_request_id "$tx_hash")
+    if [ -z "$request_id" ]; then
+        print_error "Could not extract requestId from receipt."
+        exit 1
+    fi
+    print_success "Request ID: $request_id"
+
+    wait_for_request_status "$request_id" 3 "$REFUND_CHECK_MAX_ATTEMPTS" "$REFUND_CHECK_DELAY_SECONDS"
+
+    get_user_claimable_refund "$USER" "$NATIVE_FLOW"
+    claim_refund "$NATIVE_FLOW"
+    check_evm_state
 }
 
 # =============================================================================
@@ -463,6 +679,18 @@ get_user_pending_request_count() {
     echo "Count: $count"
 }
 
+get_user_claimable_refund() {
+    local user_address=$1
+    local token_address=$2
+    print_header "User Claimable Refund"
+
+    local amount_wei=$(cast call "$CONTRACT" "getClaimableRefund(address,address)(uint256)" "$user_address" "$token_address" --rpc-url "$RPC_URL")
+
+    echo "User:    $user_address"
+    echo "Token:   $token_address"
+    echo "Amount:  $(wei_to_ether $amount_wei) ($amount_wei wei)"
+}
+
 # =============================================================================
 # Admin Transaction Functions (Cadence transactions calling EVM)
 # =============================================================================
@@ -597,6 +825,10 @@ show_help() {
     echo "                                     Create YieldVault with Native FLOW"
     echo "  create-wflow <amount> [vault] [strategy]"
     echo "                                     Create YieldVault with WFLOW"
+    echo "  refund-check <amount> [vault] [strategy]"
+    echo "                                     Force failure, then claim refund (defaults: InvalidVault/InvalidStrategy)"
+    echo "  claim-refund [token]"
+    echo "                                     Claim refund for token (default: NATIVE_FLOW)"
     echo "  request <id>                       Get request details"
     echo "  yieldvault <id>                    Get YieldVault balance"
     echo "  user-yieldvaults                   List user's YieldVaults with balances"
@@ -608,6 +840,7 @@ show_help() {
     echo "  token-config <token>               Get token config (use $NATIVE_FLOW or $WFLOW)"
     echo "  pending-balance <user> <token>     Get user's pending balance for a token"
     echo "  pending-count <user>               Get user's pending request count"
+    echo "  claimable-refund <user> <token>    Get user's claimable refund for a token"
     echo ""
     echo "ADMIN TRANSACTION COMMANDS (require testnet-account signer):"
     echo "  set-allowlist <true|false>         Enable/disable allowlist"
@@ -627,11 +860,14 @@ show_help() {
     echo "  Strategy:    $DEFAULT_STRATEGY"
     echo "  NATIVE_FLOW: $NATIVE_FLOW"
     echo "  WFLOW:       $WFLOW"
+    echo "  CONTRACT:    $CONTRACT"
+    echo "  CADENCE:     $CADENCE_CONTRACT"
     echo ""
     echo "EXAMPLES:"
     echo "  $0 state"
     echo "  $0 create-flow 1.2"
     echo "  $0 create-flow 1.5 InvalidVault InvalidStrategy"
+    echo "  $0 refund-check 0.1"
     echo "  $0 request 10"
     echo ""
     echo "  # Admin queries"
@@ -673,6 +909,12 @@ case "$1" in
             exit 1
         fi
         create_yieldvault_wflow "$2" "$3" "$4"
+        ;;
+    refund-check)
+        refund_check "$2" "$3" "$4"
+        ;;
+    claim-refund)
+        claim_refund "$2"
         ;;
     request)
         if [ -z "$2" ]; then
@@ -722,6 +964,13 @@ case "$1" in
             exit 1
         fi
         get_user_pending_request_count "$2"
+        ;;
+    claimable-refund)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            print_error "User address and token address required"
+            exit 1
+        fi
+        get_user_claimable_refund "$2" "$3"
         ;;
 
     # Admin transaction commands

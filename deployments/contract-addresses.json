@@ -3,7 +3,7 @@
     "FlowYieldVaultsRequests": {
       "abi": "./artifacts/FlowYieldVaultsRequests.json",
       "addresses": {
-        "testnet": "0xf633c9dbf1a3964a895fcc4ca4404b6f8ba8141d",
+        "testnet": "0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d",
         "mainnet": "0x0000000000000000000000000000000000000000"
       }
     },
