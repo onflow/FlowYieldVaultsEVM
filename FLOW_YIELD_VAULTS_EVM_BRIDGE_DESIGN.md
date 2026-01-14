@@ -43,7 +43,7 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │  │  │  - coaCap (EVM.Call, EVM.Withdraw, EVM.Bridge)                  │ │  │
 │  │  │  - yieldVaultManagerCap (FungibleToken.Withdraw)                │ │  │
 │  │  │  - betaBadgeCap (FlowYieldVaultsClosedBeta.Beta)                │ │  │
-│  │  │  - feeProviderCap (FungibleToken.Withdraw)                      │ │  │
+│  │  │  - feeProviderCap (FungibleToken.Withdraw, FungibleToken.Provider)│ │  │
 │  │  │                                                                 │ │  │
 │  │  │  Functions:                                                     │ │  │
 │  │  │  - processRequests()                                            │ │  │
@@ -67,7 +67,7 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │  │  - Implements FlowTransactionScheduler.TransactionHandler           │   │
 │  │  - Auto-schedules next execution after each run                     │   │
 │  │  - Adaptive delay based on pending request count                    │   │
-│  │  - Single scheduled execution (parallel scheduling planned)         │   │
+│  │  - Single scheduled execution                                       │   │
 │  │  - Pausable via Admin resource                                      │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
@@ -93,10 +93,16 @@ Request queue and fund escrow contract.
 mapping(uint256 => Request) public requests;
 uint256[] public pendingRequestIds;
 mapping(address => uint256) public userPendingRequestCount;
+mapping(address => uint256[]) public pendingRequestIdsByUser;
 
 // Balance tracking
 mapping(address => mapping(address => uint256)) public pendingUserBalances;  // Escrowed for active requests
 mapping(address => mapping(address => uint256)) public claimableRefunds;     // Claimable from cancelled/failed
+
+// Token configuration
+mapping(address => TokenConfig) public allowedTokens;
+uint256 public maxPendingRequestsPerUser;
+bool public paused;
 
 // YieldVault ownership (EVM-side mirror)
 mapping(uint64 => bool) public validYieldVaultIds;
@@ -189,7 +195,7 @@ struct Request {
     RequestStatus status;        // PENDING | PROCESSING | COMPLETED | FAILED
     address tokenAddress;        // NATIVE_FLOW (0xFFfF...FfFFFfF) or ERC20 address
     uint256 amount;              // Amount in wei (0 for CLOSE_YIELDVAULT)
-    uint64 yieldVaultId;               // Target YieldVault Id (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed)
+    uint64 yieldVaultId;               // Target YieldVault Id (0 for CREATE_YIELDVAULT until completed; NO_YIELDVAULT_ID on failed CREATE during processing; cancel/drop keep 0)
     uint256 timestamp;           // Block timestamp when created
     string message;              // Status message or error reason
     string vaultIdentifier;      // Cadence vault type (e.g., "A.xxx.FlowToken.Vault")
@@ -268,7 +274,7 @@ access(all) struct ProcessResult {
        │◀────────────────────│                        │                     │
        │     requestId       │                        │                     │
        │                     │                        │                     │
-       │                     │   getPendingRequests   │                     │
+       │                     │   getPendingRequestsUnpacked │               │
        │                     │◀───────────────────────│                     │
        │                     │     [EVMRequest]       │                     │
        │                     │───────────────────────▶│                     │
@@ -280,8 +286,9 @@ access(all) struct ProcessResult {
        │                     │───────────────────────▶│                     │
        │                     │                        │                     │
        │                     │                        │ COA.withdraw(amount)│
+       │                     │                        │ or withdrawTokens() │
        │                     │                        │────────────────────▶│
-       │                     │                        │      $FLOW          │
+       │                     │                        │   $FLOW / ERC20     │
        │                     │                        │◀────────────────────│
        │                     │                        │                     │
        │                     │                        │ createYieldVault()  │
@@ -350,8 +357,8 @@ access(all) struct ProcessResult {
 ### Request Cancellation
 
 ```
-1. User calls cancelRequest(requestId)
-2. Contract validates ownership and PENDING status
+1. User or admin calls cancelRequest(requestId)
+2. Contract validates ownership (or admin) and PENDING status
 3. Contract marks request as FAILED
 4. Contract moves escrowed funds from pendingUserBalances to claimableRefunds
 5. Contract decrements pending request count
@@ -401,7 +408,7 @@ function completeProcessing(
 ) external onlyAuthorizedCOA {
     // 1. Validate request is PROCESSING
     // 2. Mark as COMPLETED or FAILED
-    // 3. On failure: Credit claimableRefunds (user must call claimRefund)
+    // 3. On failure (CREATE/DEPOSIT): Credit claimableRefunds (user must call claimRefund)
     // 4. On CREATE_YIELDVAULT success: Register YieldVault ownership
     // 5. On CLOSE_YIELDVAULT success: Unregister YieldVault ownership
     // 6. Remove from pending queue
@@ -498,8 +505,17 @@ function doesUserOwnYieldVault(address user, uint64 yieldVaultId) returns (bool)
 // Get pending request IDs array
 function getPendingRequestIds() returns (uint256[] memory);
 
+// Get pending requests in unpacked arrays (pagination)
+function getPendingRequestsUnpacked(uint256 startIndex, uint256 count) returns (...);
+
+// Get pending requests for a user in unpacked arrays (includes native FLOW balances)
+function getPendingRequestsByUserUnpacked(address user) returns (...);
+
 // Get single request by ID
 function getRequest(uint256 requestId) returns (Request memory);
+
+// Check if YieldVault Id is valid
+function isYieldVaultIdValid(uint64 yieldVaultId) returns (bool);
 
 // Check if token is native FLOW
 function isNativeFlow(address tokenAddress) returns (bool);
@@ -517,9 +533,15 @@ access(all) view fun getYieldVaultIdsForEVMAddress(_ evmAddress: String): [UInt6
 // Ownership check (O(1))
 access(all) view fun doesEVMAddressOwnYieldVault(evmAddress: String, yieldVaultId: UInt64): Bool
 
+// Pending requests for a specific EVM address
+access(all) fun getPendingRequestsForEVMAddress(_ evmAddressHex: String): PendingRequestsInfo
+
+// Total pending request count (public query)
+access(all) fun getPendingRequestCount(): Int
+
 // Handler execution statistics (FlowYieldVaultsTransactionHandler)
 access(all) view fun getStats(): {String: AnyStruct}
-// Returns: {"executionCount": Int, "lastExecutionTime": UFix64}
+// Returns: {"executionCount": UInt64, "lastExecutionTime": UFix64?}
 ```
 
 ---
@@ -534,6 +556,7 @@ access(all) view fun getStats(): {String: AnyStruct}
 | FlowYieldVaultsRequests | `onlyOwner` | Admin functions restricted to owner |
 | FlowYieldVaultsRequests | `onlyAllowlisted` | Optional whitelist for users |
 | FlowYieldVaultsRequests | `notBlocklisted` | Optional blacklist for users |
+| FlowYieldVaultsRequests | `whenNotPaused` | New request creation blocked when paused |
 | FlowYieldVaultsEVM | Capability-based | Worker requires valid COA, YieldVaultManager, BetaBadge caps |
 | FlowYieldVaultsTransactionHandler | Admin resource | Pause/unpause restricted to Admin holder |
 
@@ -551,7 +574,7 @@ mapping(address => mapping(uint64 => bool)) public userOwnsYieldVault;
 access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
 ```
 
-Ownership is verified for CREATE/WITHDRAW/CLOSE. Deposits are permissionless by design.
+Ownership is verified for WITHDRAW/CLOSE on both EVM and Cadence. Deposits are permissionless; CREATE only validates identifiers.
 
 ### Fund Safety
 
@@ -568,6 +591,10 @@ pre {
     requestType >= RequestType.CREATE_YIELDVAULT.rawValue &&
     requestType <= RequestType.CLOSE_YIELDVAULT.rawValue:
         "Invalid request type"
+
+    status >= RequestStatus.PENDING.rawValue &&
+    status <= RequestStatus.FAILED.rawValue:
+        "Invalid status"
 
     requestType == RequestType.CLOSE_YIELDVAULT.rawValue || amount > 0:
         "Amount must be greater than 0 for non-close operations"
@@ -598,7 +625,10 @@ pre {
 | `AddressesAddedToBlocklist` | Batch blocklist additions |
 | `AddressesRemovedFromBlocklist` | Batch blocklist removals |
 | `MaxPendingRequestsPerUserUpdated` | Config change |
+| `Paused` | Contract paused |
+| `Unpaused` | Contract unpaused |
 | `YieldVaultIdRegistered` | New YieldVault registered |
+| `YieldVaultIdUnregistered` | YieldVault unregistered (closed) |
 | `RequestsDropped` | Admin dropped requests |
 
 ### FlowYieldVaultsEVM (Cadence)
@@ -615,6 +645,15 @@ pre {
 | `RequestFailed` | Request processing failed |
 | `MaxRequestsPerTxUpdated` | Configuration changed |
 | `WithdrawFundsFromEVMFailed` | Failed to withdraw funds from EVM |
+| `EVMAllowlistStatusChanged` | Allowlist status changed on EVM |
+| `EVMAllowlistUpdated` | Addresses added/removed from allowlist on EVM |
+| `EVMBlocklistStatusChanged` | Blocklist status changed on EVM |
+| `EVMBlocklistUpdated` | Addresses added/removed from blocklist on EVM |
+| `EVMTokenConfigured` | Token configuration changed on EVM |
+| `EVMAuthorizedCOAUpdated` | Authorized COA updated on EVM |
+| `EVMMaxPendingRequestsPerUserUpdated` | Max pending requests per user updated on EVM |
+| `EVMRequestsDropped` | Requests dropped on EVM |
+| `EVMRequestCancelled` | Request cancelled on EVM |
 
 ### FlowYieldVaultsTransactionHandler (Cadence)
 
@@ -638,9 +677,9 @@ pre {
 | Error | Cause |
 |-------|-------|
 | `NotAuthorizedCOA` | Non-COA calling restricted function |
-| `NotOwner` | Non-owner calling admin function |
 | `NotInAllowlist` | User not whitelisted |
 | `Blocklisted` | User is blacklisted |
+| `ContractPaused` | Contract is paused |
 | `AmountMustBeGreaterThanZero` | Zero amount deposit |
 | `TokenNotSupported` | Unsupported token |
 | `RequestNotFound` | Invalid request ID |
@@ -654,6 +693,9 @@ pre {
 | `InvalidCOAAddress` | Invalid COA address provided |
 | `EmptyAddressArray` | Empty array passed to batch functions |
 | `CannotAllowlistZeroAddress` | Cannot add zero address to allowlist |
+| `EmptyVaultIdentifier` | Empty vault identifier for CREATE |
+| `EmptyStrategyIdentifier` | Empty strategy identifier for CREATE |
+| `NoRefundAvailable` | No refund available to claim |
 | `MsgValueMustEqualAmount` | msg.value must equal amount for native FLOW |
 | `MsgValueMustBeZero` | msg.value must be zero for ERC20 tokens |
 | `TransferFailed` | Token transfer failed |
@@ -680,6 +722,8 @@ function batchAddToBlocklist(address[] calldata _addresses) external onlyOwner;
 function batchRemoveFromBlocklist(address[] calldata _addresses) external onlyOwner;
 function setTokenConfig(address token, bool supported, uint256 min, bool native) external onlyOwner;
 function setMaxPendingRequestsPerUser(uint256 _max) external onlyOwner;
+function pause() external onlyOwner;
+function unpause() external onlyOwner;
 function dropRequests(uint256[] calldata requestIds) external onlyOwner;
 ```
 
@@ -734,7 +778,7 @@ access(all) fun stopAll()  // Emergency: pause + cancel all scheduled executions
 
 ### Deployment Order
 
-1. Deploy `FlowYieldVaultsRequests` on EVM with COA address
+1. Deploy `FlowYieldVaultsRequests` on EVM with COA and WFLOW addresses
 2. Deploy `FlowYieldVaultsEVM` on Cadence
 3. Deploy `FlowYieldVaultsTransactionHandler` on Cadence
 4. Configure `FlowYieldVaultsEVM` with EVM contract address

@@ -186,9 +186,11 @@ forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYie
 
 | Network | Contract | Address |
 |---------|----------|---------|
-| Testnet | FlowYieldVaultsRequests | `0x935936B21B397902B786B55A21d3CB3863C9E814` |
+| Testnet | FlowYieldVaultsRequests | `0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d` |
 | Testnet | FlowYieldVaultsEVM | Deployed on Cadence |
 | Testnet | FlowYieldVaultsTransactionHandler | Deployed on Cadence |
+
+Source of truth for published addresses: `deployments/contract-addresses.json`.
 
 ## Testing
 
@@ -234,6 +236,8 @@ Coverage includes:
 ./local/run_e2e_tests.sh
 ./local/run_admin_e2e_tests.sh
 ```
+
+Testnet E2E uses `deployments/contract-addresses.json` to auto-load addresses (see `./local/testnet-e2e.sh`).
 
 ## Configuration
 

@@ -1,7 +1,7 @@
 # FlowYieldVaults EVM Integration - Testing Documentation
 
-**Status**: Not run in this environment. Use the commands below to verify.
-**Last Updated**: 2026-01-05
+**Status**: Last run in this environment on 2026-01-13 (Solidity: 67 passed, Cadence: 22 passed).
+**Last Updated**: 2026-01-13
 
 ## Overview
 
@@ -11,7 +11,7 @@ Comprehensive test suite for the Flow YieldVaults EVM Integration, covering both
 
 | Component | Tests | Notes |
 |-----------|-------|-------|
-| **Solidity (Foundry)** | 37 | Unit tests in `solidity/test/` |
+| **Solidity (Foundry)** | 67 | Unit tests in `solidity/test/` |
 | **Cadence (Flow CLI)** | 22 | Unit/integration tests in `cadence/tests/` |
 | **Local E2E (Emulator)** | Scripted | `./local/run_e2e_tests.sh` |
 | **Local Admin E2E (Emulator)** | Scripted | `./local/run_admin_e2e_tests.sh` |
@@ -25,18 +25,27 @@ E2E scripts run scenario-based checks rather than a fixed test count; use the sc
 
 ```
 solidity/test/
-└── FlowYieldVaultsRequests.t.sol        # 37 tests - Complete EVM contract testing
+└── FlowYieldVaultsRequests.t.sol        # 67 tests - Complete EVM contract testing
 ```
 
 **Test Categories**:
-- User request creation (CREATE/DEPOSIT/WITHDRAW/CLOSE) - 8 tests
-- COA operations & authorization - 7 tests
-- Request lifecycle & cancellation - 3 tests
-- Events & state management - 6 tests
-- Pagination & queries - 3 tests
-- Multi-user isolation - 2 tests
-- Admin functions - 5 tests
-- **Allowlist functionality** - 3 tests
+- User request lifecycle - 7 tests
+- Claim refunds - 4 tests
+- COA processing (startProcessing/completeProcessing) - 7 tests
+- Admin functions - 6 tests
+- Ownership transfer - 4 tests
+- Access control (allowlist/blocklist) - 3 tests
+- Validation & input checks - 8 tests
+- Multi-user isolation - 1 test
+- View functions & pagination - 2 tests
+- Integration full lifecycle - 2 tests
+- WFLOW support - 3 tests
+- FIFO queue behavior - 5 tests
+- Per-user pending requests view - 5 tests
+- User request index tracking - 2 tests
+- YieldVault index tracking - 3 tests
+- Stress tests - 2 tests
+- Edge cases - 3 tests
 
 ### Cadence Tests (Flow Side)
 
@@ -72,7 +81,7 @@ local/
 ### Solidity Tests (Foundry)
 
 ```bash
-# Run all Solidity tests (37 tests)
+# Run all Solidity tests (67 tests)
 ./local/run_solidity_tests.sh
 
 # Or run directly
@@ -130,29 +139,38 @@ PRIVATE_KEY=0xYOUR_KEY TESTNET_RPC_URL=https://testnet.evm.nodes.onflow.org \
   ./local/testnet-e2e.sh state
 ```
 
-Update the hardcoded `CONTRACT` address in `./local/testnet-e2e.sh` after each new deployment.
+Set `CONTRACT`/`CADENCE_CONTRACT` or update `deployments/contract-addresses.json` after each new deployment (the script loads those automatically, with a fallback to defaults).
 
 ---
 
-## Solidity Test Coverage (37 tests)
+## Solidity Test Coverage (67 tests)
 
 | Category | Tests | Key Focus |
 |----------|-------|-----------|
-| User request creation | 8 | CREATE/DEPOSIT/WITHDRAW/CLOSE, validation, cancellation |
-| COA operations | 7 | Authorized worker operations, startProcessing, completeProcessing |
-| Request lifecycle | 3 | End-to-end flows, ownership validation |
-| Events & state | 6 | Event emission, state tracking |
-| Pagination & queries | 3 | Batch retrieval, Cadence compatibility |
-| Multi-user isolation | 2 | Independent balances, no cross-user interference |
-| Admin functions | 5 | SetAuthorizedCOA, ownership transfer, token config |
-| Allowlist | 3 | Beta access, batch operations, error handling |
+| User request lifecycle | 7 | CREATE/DEPOSIT/WITHDRAW/CLOSE, cancel |
+| Claim refunds | 4 | claimRefund flow, balances, events |
+| COA processing | 7 | startProcessing/completeProcessing authorization and state |
+| Admin functions | 6 | COA, token config, max requests, dropRequests |
+| Ownership transfer | 4 | Two-step ownership, admin rights |
+| Access control | 3 | Allowlist/blocklist enforcement |
+| Validation & input checks | 8 | Amounts, identifiers, yield vault IDs |
+| Multi-user isolation | 1 | Independent pending balances |
+| View functions & pagination | 2 | getPendingRequestsUnpacked paging |
+| Integration full lifecycle | 2 | End-to-end create/withdraw |
+| WFLOW support | 3 | WFLOW config, immutability, zero address |
+| FIFO queue behavior | 5 | Pending queue ordering after removals |
+| Per-user pending requests view | 5 | getPendingRequestsByUserUnpacked cases |
+| User request index tracking | 2 | Index integrity after operations |
+| YieldVault index tracking | 3 | Register/unregister, multiple vaults |
+| Stress tests | 2 | Many requests/users correctness |
+| Edge cases | 3 | Single request removal, failed processing, cancel middle |
 
 **Key Validations**:
-- Request IDs increment, pending balances track escrow
-- Only authorized COA can update requests/balances
+- Request IDs increment, pending balances track escrow, refunds are claimable
+- Only authorized COA can start/complete processing
 - Two-phase commit (startProcessing → completeProcessing) maintains consistency
-- Allowlist/blocklist enforce access control
-- No double-spending or cross-user vulnerabilities
+- Allowlist/blocklist and admin controls enforce access
+- FIFO order and per-user indexes remain consistent after removals
 
 ---
 
@@ -178,9 +196,9 @@ Update the hardcoded `CONTRACT` address in `./local/testnet-e2e.sh` after each n
 
 | Component | Tests | Categories |
 |-----------|-------|------------|
-| **Solidity** | 37 | Request creation (8), COA ops (7), Lifecycle (3), Events (6), Pagination (3), Multi-user (2), Admin (5), Allowlist (3) |
+| **Solidity** | 67 | Lifecycle (7), Refunds (4), COA (7), Admin (6), Ownership (4), Access control (3), Validation (8), Views (2), Integration (2), WFLOW (3), FIFO (5), Per-user views (5), Index tracking (5), Stress (2), Edge (3), Multi-user (1) |
 | **Cadence** | 22 | Lifecycle (8), Access control (7), Error handling (4), Validation (3) |
-| **Total** | **59** | **Unit/integration test count (E2E scripts not included)** |
+| **Total** | **89** | **Unit/integration test count (E2E scripts not included)** |
 
 ---
 
@@ -190,50 +208,29 @@ Update the hardcoded `CONTRACT` address in `./local/testnet-e2e.sh` after each n
 
 ## Test Results
 
+### Latest Results (2026-01-13)
+
+- Solidity (Foundry): 67/67 passed via `./local/run_solidity_tests.sh`
+- Cadence (Flow CLI): 22/22 passed via `./local/run_cadence_tests.sh`
+
 ### Sample Output (Historical)
 
 The snippet below is for reference and may be stale. Re-run tests in your environment to get current results.
 
 #### Solidity Tests (Foundry)
 ```
-Ran 37 tests for test/FlowYieldVaultsRequests.t.sol:FlowYieldVaultsRequestsTest
-[PASS] test_AcceptOwnership_RevertNotPendingOwner()
-[PASS] test_Allowlist()
-[PASS] test_Blocklist()
-[PASS] test_BlocklistTakesPrecedence()
-[PASS] test_CancelRequest_RefundsFunds()
-[PASS] test_CancelRequest_RevertAlreadyCancelled()
-[PASS] test_CancelRequest_RevertNotOwner()
-[PASS] test_CloseYieldVault()
-[PASS] test_CompleteProcessing_CloseYieldVaultRemovesOwnership()
-[PASS] test_CompleteProcessing_FailureRefundsBalance()
-[PASS] test_CompleteProcessing_RevertNotProcessing()
-[PASS] test_CompleteProcessing_Success()
+Ran 67 tests for test/FlowYieldVaultsRequests.t.sol:FlowYieldVaultsRequestsTest
 [PASS] test_CreateYieldVault()
-[PASS] test_CreateYieldVault_RevertBelowMinimum()
-[PASS] test_CreateYieldVault_RevertMsgValueMismatch()
-[PASS] test_CreateYieldVault_RevertZeroAmount()
-[PASS] test_DepositToYieldVault()
-[PASS] test_DepositToYieldVault_RevertInvalidYieldVaultId()
-[PASS] test_DepositToYieldVault_RevertNotOwner()
-[PASS] test_DropRequests()
-[PASS] test_FullCreateYieldVaultLifecycle()
-[PASS] test_FullWithdrawLifecycle()
-[PASS] test_GetPendingRequestsUnpacked()
-[PASS] test_GetPendingRequestsUnpacked_Pagination()
-[PASS] test_MaxPendingRequests_EnforcesLimit()
-[PASS] test_SetAuthorizedCOA()
-[PASS] test_SetAuthorizedCOA_RevertZeroAddress()
-[PASS] test_SetMaxPendingRequestsPerUser()
-[PASS] test_SetTokenConfig()
-[PASS] test_StartProcessing_RevertNotPending()
-[PASS] test_StartProcessing_RevertUnauthorized()
+[PASS] test_ClaimRefund_Success()
 [PASS] test_StartProcessing_Success()
-[PASS] test_TransferOwnership_NewOwnerHasAdminRights()
-[PASS] test_TransferOwnership_RevertNotOwner()
-[PASS] test_TransferOwnership_TwoStepProcess()
-[PASS] test_UserBalancesAreSeparate()
+[PASS] test_CompleteProcessing_Success()
+[PASS] test_FIFOOrder_MaintainedAfterRemoval()
+[PASS] test_GetPendingRequestsByUserUnpacked_SingleUser()
+[PASS] test_WFLOWConfiguredOnDeployment()
+[PASS] test_YieldVaultIndex_RegisterAndUnregister()
+[PASS] test_CancelMiddleRequest_UpdatesIndexCorrectly()
 [PASS] test_WithdrawFromYieldVault()
+... (output truncated)
 ```
 
 #### Cadence Tests (Flow CLI)
@@ -269,7 +266,7 @@ validation_test.cdc: 3 tests PASS
 - testUnsupportedStrategyNotInSupportedList
 ```
 
-**Total: 59 tests (sample output)**
+**Total: 89 tests (sample output)**
 
 ---
 

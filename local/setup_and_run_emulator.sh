@@ -2,24 +2,8 @@
 
 set -e  # Exit on any error
 
-# install Flow YieldVaults submodule as dependency
-# Use selective initialization to avoid circular dependency:
-# FlowYieldVaults -> FlowYieldVaultsEVM -> FlowYieldVaults (circular!)
-# We need all submodules from FlowYieldVaults EXCEPT FlowYieldVaultsEVM
-git submodule update --init --force --depth 1 lib/FlowYieldVaults
-
-# Selectively init submodules inside FlowYieldVaults (skip FlowYieldVaultsEVM to avoid circular dep)
-cd lib/FlowYieldVaults
-git submodule update --init --recursive lib/FlowCreditMarket
-git submodule update --init --recursive lib/flow-evm-bridge
-git submodule update --init --recursive lib/flow-evm-gateway
-git submodule update --init --recursive solidity/lib/punch-swap-v3-contracts
-git submodule update --init --recursive solidity/lib/forge-std
-git submodule update --init --recursive solidity/lib/openzeppelin-contracts
-git submodule update --init --recursive solidity/lib/v2-core
-git submodule update --init --recursive solidity/lib/v2-periphery
-# NOTE: Skipping lib/FlowYieldVaultsEVM to avoid circular dependency
-cd ../..
+# Install FlowYieldVaults submodule as dependency.
+git submodule update --init --recursive
 
 # ============================================
 # CLEANUP SECTION - All cleanup operations

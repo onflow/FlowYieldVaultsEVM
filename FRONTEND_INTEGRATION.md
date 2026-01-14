@@ -129,6 +129,7 @@ const owns: boolean = await contract.doesUserOwnYieldVault(
 ```typescript
 const count: bigint = await contract.getUserPendingRequestCount(userAddress);
 ```
+Note: counts include both `PENDING` and `PROCESSING` requests (they remain in the pending queue until completion/cancel/drop).
 
 #### Get User's Escrowed Balance (Active Requests)
 
@@ -155,6 +156,7 @@ const claimableRefund: bigint = await contract.getClaimableRefund(
 ```typescript
 const totalPending: bigint = await contract.getPendingRequestCount();
 ```
+Note: counts include both `PENDING` and `PROCESSING` requests (they remain in the pending queue until completion/cancel/drop).
 
 #### Get Request Details
 
@@ -213,29 +215,32 @@ const userRequests = ids.filter(
 ## Request Preconditions and Limits
 
 - Requests revert when the contract is paused, the caller is blocklisted, or allowlist is enabled and the caller is not allowlisted.
-- `tokenAddress` must be configured in `allowedTokens` and `amount` must meet the configured `minimumBalance`.
+- For CREATE/DEPOSIT only: `tokenAddress` must be configured in `allowedTokens` and `amount` must meet the configured `minimumBalance`.
 - `maxPendingRequestsPerUser` can cap in-flight requests (0 = unlimited).
 
 ## Request Lifecycle
 
 ```
 1. User submits request → EVM tx succeeds → RequestCreated event
-2. Request queued (status=PENDING), funds escrowed in pendingUserBalances
+2. Request queued (status=PENDING); CREATE/DEPOSIT escrow funds in pendingUserBalances
 3. Cadence Worker processes → RequestProcessed event (status=PROCESSING)
 4. Operation completes → RequestProcessed event (status=COMPLETED or FAILED)
-5. On completion: YieldVault appears in user's list
-   On failure/cancel/drop: Funds moved to claimableRefunds; user must call claimRefund()
+5. On completion:
+   - CREATE: YieldVault appears in user's list
+   - CLOSE: YieldVault is removed from user's list
+   - DEPOSIT/WITHDRAW: list unchanged
+   On failure/cancel/drop (CREATE/DEPOSIT only): Funds moved to claimableRefunds; user must call claimRefund()
 ```
 
 ### Refund Scenarios
 
-| Scenario                  | What Happens               | User Action                      |
-| ------------------------- | -------------------------- | -------------------------------- |
-| Request cancelled by user | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
-| Request dropped by admin  | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
-| Cadence processing fails  | Funds → `claimableRefunds` | Call `claimRefund(tokenAddress)` |
+| Scenario                  | What Happens                                  | User Action                      |
+| ------------------------- | --------------------------------------------- | -------------------------------- |
+| Request cancelled by user | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
+| Request dropped by admin  | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
+| Cadence processing fails  | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
 
-**Important:** `claimRefund()` only withdraws actual refunds. It does NOT touch funds escrowed for active pending requests.
+**Important:** `claimRefund()` only withdraws actual refunds. It does NOT touch funds escrowed for active pending requests. WITHDRAW/CLOSE requests never escrow funds and never generate refunds.
 
 ---
 
@@ -404,7 +409,7 @@ const balance = await fcl.query({
 // Returns UFix64 string like "100.00000000"
 ```
 
-### Get YieldVault Details (Balance + Strategy)
+### Get YieldVault Details (Balance + Supported Vault Types)
 
 ```typescript
 const GET_YIELDVAULT_DETAILS = `
@@ -608,10 +613,10 @@ const NO_YIELDVAULT_ID = 18446744073709551615n; // type(uint64).max
 
 // Request Types
 enum RequestType {
-  CREATE_YIELDVAULT = 0,
-  DEPOSIT_TO_YIELDVAULT = 1,
-  WITHDRAW_FROM_YIELDVAULT = 2,
-  CLOSE_YIELDVAULT = 3,
+  CREATE_YIELD_VAULT = 0,
+  DEPOSIT_TO_YIELD_VAULT = 1,
+  WITHDRAW_FROM_YIELD_VAULT = 2,
+  CLOSE_YIELD_VAULT = 3,
 }
 
 // Request Status

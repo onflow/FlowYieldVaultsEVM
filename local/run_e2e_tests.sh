@@ -156,6 +156,53 @@ get_user_yieldvaults() {
     grep "Result:" | sed 's/Result: //'
 }
 
+# Get newly created request ID by diffing before/after pending lists
+get_new_request_id() {
+  local before=$1
+  local after=$2
+
+  local before_ids
+  local after_ids
+
+  before_ids=$(echo "$before" | grep -Eo '[0-9]+' || true)
+  after_ids=$(echo "$after" | grep -Eo '[0-9]+' || true)
+
+  local new_id=""
+  for id in $after_ids; do
+    if ! echo "$before_ids" | grep -q -w "$id"; then
+      new_id="$id"
+    fi
+  done
+
+  echo "$new_id"
+}
+
+# Get newly created YieldVault ID by diffing before/after lists
+get_new_yieldvault_id() {
+  local before=$1
+  local after=$2
+
+  local before_ids
+  local after_ids
+
+  before_ids=$(echo "$before" | grep -Eo '[0-9]+' || true)
+  after_ids=$(echo "$after" | grep -Eo '[0-9]+' || true)
+
+  local new_id=""
+  for id in $after_ids; do
+    if ! echo "$before_ids" | grep -q -w "$id"; then
+      new_id="$id"
+    fi
+  done
+
+  echo "$new_id"
+}
+
+# Clean up wei values for numeric comparisons
+clean_wei() {
+  echo "$1" | sed 's/ \[.*\]$//' | tr -d ' ' | sed 's/^0*$/0/' | sed 's/^0\+\([1-9]\)/\1/'
+}
+
 # Process pending requests via Cadence
 process_requests() {
   local start_index=${1:-0}
@@ -208,6 +255,15 @@ get_escrow_balance() {
   local user_address=$1
   local token_address=${2:-$NATIVE_FLOW}
   cast_call "getUserPendingBalance(address,address)(uint256)" "$user_address" "$token_address" | \
+    sed 's/ \[.*\]$//' | tr -d ' '
+}
+
+# Get claimable refund balance from Solidity contract (in wei)
+# Strips scientific notation suffix like "[1e19]" from cast output
+get_claimable_refund() {
+  local user_address=$1
+  local token_address=${2:-$NATIVE_FLOW}
+  cast_call "getClaimableRefund(address,address)(uint256)" "$user_address" "$token_address" | \
     sed 's/ \[.*\]$//' | tr -d ' '
 }
 
@@ -353,6 +409,31 @@ assert_escrow_balance() {
 
   if [ "$actual" = "$expected" ]; then
     log_success "$message (escrow: $(wei_to_ether $actual) FLOW)"
+    return 0
+  else
+    log_fail "$message (expected: $(wei_to_ether $expected) FLOW, got: $(wei_to_ether $actual) FLOW)"
+    return 1
+  fi
+}
+
+# Assert claimable refund balance equals expected (in wei)
+assert_claimable_refund() {
+  local user_address=$1
+  local expected=$2
+  local message=$3
+
+  local actual=$(get_claimable_refund "$user_address")
+
+  # Clean up values - remove scientific notation suffix, whitespace, leading zeros
+  actual=$(echo "$actual" | sed 's/ \[.*\]$//' | tr -d ' ' | sed 's/^0*$/0/' | sed 's/^0\+\([1-9]\)/\1/')
+  expected=$(echo "$expected" | sed 's/ \[.*\]$//' | tr -d ' ' | sed 's/^0*$/0/' | sed 's/^0\+\([1-9]\)/\1/')
+
+  # Handle empty as 0
+  actual=${actual:-0}
+  expected=${expected:-0}
+
+  if [ "$actual" = "$expected" ]; then
+    log_success "$message (refund: $(wei_to_ether $actual) FLOW)"
     return 0
   else
     log_fail "$message (expected: $(wei_to_ether $expected) FLOW, got: $(wei_to_ether $actual) FLOW)"
@@ -508,6 +589,7 @@ log_test "User A creates YieldVault with 10 FLOW"
 INITIAL_PENDING=$(get_pending_count)
 USER_A_BALANCE_BEFORE=$(get_user_balance "$USER_A_EOA")
 USER_A_ESCROW_BEFORE=$(get_escrow_balance "$USER_A_EOA")
+USER_A_VAULTS_BEFORE=$(get_user_yieldvaults "$USER_A_EOA")
 
 log_info "Initial pending requests: $INITIAL_PENDING"
 log_info "User A EVM balance before: $(wei_to_ether $USER_A_BALANCE_BEFORE) FLOW"
@@ -570,8 +652,8 @@ else
   log_fail "No YieldVaults found for User A"
 fi
 
-# Extract YieldVault ID for balance verification
-YIELDVAULT_ID=$(echo "$USER_A_VAULTS" | grep -Eo '[0-9]+' | head -1)
+# Extract newly created YieldVault ID for balance verification
+YIELDVAULT_ID=$(get_new_yieldvault_id "$USER_A_VAULTS_BEFORE" "$USER_A_VAULTS")
 
 # Verify escrow balance cleared after processing
 log_test "Verify escrow cleared after processing"
@@ -759,8 +841,11 @@ log_test "User C creates a request then cancels it"
 # Capture initial state
 USER_C_BALANCE_BEFORE_CREATE=$(get_user_balance "$USER_C_EOA")
 USER_C_ESCROW_BEFORE=$(get_escrow_balance "$USER_C_EOA")
+USER_C_REFUND_BEFORE=$(get_claimable_refund "$USER_C_EOA")
+PENDING_IDS_BEFORE=$(cast_call "getPendingRequestIds()(uint256[])")
 log_info "User C EVM balance before: $(wei_to_ether $USER_C_BALANCE_BEFORE_CREATE) FLOW"
 log_info "User C escrow before: $USER_C_ESCROW_BEFORE wei"
+log_info "User C claimable refund before: $USER_C_REFUND_BEFORE wei"
 
 # Create request
 TX_OUTPUT=$(cast_send "$USER_C_PK" \
@@ -783,9 +868,9 @@ assert_escrow_balance "$USER_C_EOA" "$CANCEL_AMOUNT_WEI" "Funds escrowed correct
 USER_C_BALANCE_AFTER_CREATE=$(get_user_balance "$USER_C_EOA")
 log_info "User C EVM balance after create: $(wei_to_ether $USER_C_BALANCE_AFTER_CREATE) FLOW"
 
-# Get the request ID (should be the latest)
-PENDING_IDS=$(cast_call "getPendingRequestIds()(uint256[])")
-REQUEST_ID=$(echo "$PENDING_IDS" | grep -Eo '[0-9]+' | tail -1)
+# Get the request ID (diff from previous pending list)
+PENDING_IDS_AFTER=$(cast_call "getPendingRequestIds()(uint256[])")
+REQUEST_ID=$(get_new_request_id "$PENDING_IDS_BEFORE" "$PENDING_IDS_AFTER")
 log_info "Request ID to cancel: $REQUEST_ID"
 
 if [ -n "$REQUEST_ID" ]; then
@@ -803,14 +888,32 @@ if [ -n "$REQUEST_ID" ]; then
   USER_C_ESCROW_AFTER_CANCEL=$(get_escrow_balance "$USER_C_EOA")
   assert_escrow_balance "$USER_C_EOA" "0" "Escrow cleared after cancel"
 
-  # Verify refund - balance should have increased by the cancelled amount
-  log_test "Verify User C received refund"
-  sleep 1
-  USER_C_BALANCE_AFTER_CANCEL=$(get_user_balance "$USER_C_EOA")
-  log_info "User C EVM balance after cancel: $(wei_to_ether $USER_C_BALANCE_AFTER_CANCEL) FLOW"
+  # Verify refund is claimable
+  log_test "Verify claimable refund credited"
+  USER_C_REFUND_AFTER_CANCEL=$(get_claimable_refund "$USER_C_EOA")
+  log_info "User C claimable refund after cancel: $USER_C_REFUND_AFTER_CANCEL wei"
+  EXPECTED_REFUND_TOTAL=$(echo "$(clean_wei "$USER_C_REFUND_BEFORE") + $(clean_wei "$CANCEL_AMOUNT_WEI")" | bc)
+  assert_claimable_refund "$USER_C_EOA" "$EXPECTED_REFUND_TOTAL" "Claimable refund credited"
 
-  # Balance after cancel should be close to balance after create + refund amount
-  assert_balance_increased "$USER_C_BALANCE_AFTER_CREATE" "$USER_C_BALANCE_AFTER_CANCEL" "$CANCEL_AMOUNT_WEI" "User C received full refund"
+  # Claim refund and verify balance
+  log_test "Claim refund"
+  TX_OUTPUT=$(cast_send "$USER_C_PK" \
+    "claimRefund(address)" \
+    "$NATIVE_FLOW")
+  assert_tx_success "$TX_OUTPUT" "Claim refund transaction submitted"
+
+  log_test "Verify User C received refund after claim"
+  sleep 1
+  USER_C_BALANCE_AFTER_CLAIM=$(get_user_balance "$USER_C_EOA")
+  log_info "User C EVM balance after claim: $(wei_to_ether $USER_C_BALANCE_AFTER_CLAIM) FLOW"
+
+  # Balance after claim should be close to balance after create + claimable refund amount
+  assert_balance_increased "$USER_C_BALANCE_AFTER_CREATE" "$USER_C_BALANCE_AFTER_CLAIM" "$EXPECTED_REFUND_TOTAL" "User C received refund after claim"
+
+  # Verify claimable refund cleared after claim
+  log_test "Verify claimable refund cleared"
+  USER_C_REFUND_AFTER_CLAIM=$(get_claimable_refund "$USER_C_EOA")
+  assert_claimable_refund "$USER_C_EOA" "0" "Claimable refund cleared after claim"
 
   # Verify request status is FAILED (3)
   log_test "Verify request status is FAILED"
