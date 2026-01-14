@@ -686,25 +686,34 @@ access(all) contract FlowYieldVaultsEVM {
             return success
         }
 
-        /// @notice Helper function to return funds to user and create a failure result
+        /// @notice Helper function to return funds to the COA and create a failure result
         /// @dev Used when an operation fails after funds have already been withdrawn from COA.
-        ///      Bridges the vault contents back to the user's EVM address before returning.
+        ///      Returns the vault contents to the COA so completeProcessing can refund via pull.
         /// @param vault The vault containing funds to return (will be consumed)
-        /// @param recipient The EVM address to send funds back to
         /// @param tokenAddress The token address (native FLOW or ERC20) for bridging
         /// @param errorMessage The error message to include in the result
-        /// @return ProcessResult with success=false and the error message appended with "Funds returned to user"
-        access(self) fun returnFundsAndFail(
+        /// @return ProcessResult with success=false and the error message appended with "Funds returned to COA for refund"
+        access(self) fun returnFundsToCOAAndFail(
             vault: @{FungibleToken.Vault},
-            recipient: EVM.EVMAddress,
             tokenAddress: EVM.EVMAddress,
             errorMessage: String
         ): ProcessResult {
-            self.bridgeFundsToEVMUser(vault: <-vault, recipient: recipient, tokenAddress: tokenAddress)
+            if tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString() {
+                self.getCOARef().deposit(from: <-vault as! @FlowToken.Vault)
+            } else {
+                let feeProvider = self.feeProviderCap.borrow()
+                    ?? panic("Could not borrow fee provider capability (id: \(self.feeProviderCap.id))")
+
+                self.getCOARef().depositTokens(
+                    vault: <-vault,
+                    feeProvider: feeProvider
+                )
+            }
+
             return ProcessResult(
                 success: false,
                 yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                message: "\(errorMessage). Funds returned to user."
+                message: "\(errorMessage). Funds returned to COA for refund."
             )
         }
 
@@ -752,9 +761,8 @@ access(all) contract FlowYieldVaultsEVM {
             // Phase 3: Validate vault type matches the requested identifier
             let vaultType = vault.getType()
             if vaultType.identifier != vaultIdentifier {
-                return self.returnFundsAndFail(
+                return self.returnFundsToCOAAndFail(
                     vault: <-vault,
-                    recipient: request.user,
                     tokenAddress: request.tokenAddress,
                     errorMessage: "Vault type mismatch: expected \(vaultIdentifier), got \(vaultType.identifier)"
                 )
