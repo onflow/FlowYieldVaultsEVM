@@ -528,7 +528,7 @@ access(all) contract FlowYieldVaultsEVM {
             // Note: Must call startProcessing BEFORE completeProcessing because Solidity requires
             // request status to be PROCESSING before it can be marked COMPLETED/FAILED
             if request.requestType == FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue {
-                let validationResult = self.validateCreateYieldVaultParameters(request)
+                let validationResult = FlowYieldVaultsEVM.validateCreateYieldVaultParameters(request)
                 if !validationResult.success {
                     // Start processing first to transition request from PENDING to PROCESSING
                     // This is required because completeProcessing requires PROCESSING status
@@ -684,69 +684,6 @@ access(all) contract FlowYieldVaultsEVM {
                 success: false,
                 yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
                 message: "\(errorMessage). Funds returned to user."
-            )
-        }
-
-        /// @notice Validates CREATE_YIELDVAULT request parameters before processing
-        /// @dev Validates that vaultIdentifier and strategyIdentifier are valid Cadence types
-        ///      and that the strategy is supported by FlowYieldVaults protocol.
-        ///      This prevents panics during createYieldVault by catching invalid parameters early.
-        ///      Note: Basic string validations (empty checks) should be done on the Solidity side.
-        /// @param request The request to validate
-        /// @return ProcessResult with success=true if valid, or success=false with error message
-        access(self) fun validateCreateYieldVaultParameters(_ request: EVMRequest): ProcessResult {
-            // Validate vaultIdentifier is a valid Cadence type identifier
-            let vaultType = CompositeType(request.vaultIdentifier)
-            if vaultType == nil {
-                return ProcessResult(
-                    success: false,
-                    yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                    message: "Invalid vaultIdentifier: \(request.vaultIdentifier) is not a valid Cadence type"
-                )
-            }
-
-            // Validate strategyIdentifier is a valid Cadence type identifier
-            let strategyType = CompositeType(request.strategyIdentifier)
-            if strategyType == nil {
-                return ProcessResult(
-                    success: false,
-                    yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                    message: "Invalid strategyIdentifier: \(request.strategyIdentifier) is not a valid Cadence type"
-                )
-            }
-
-            // Validate strategy is supported by FlowYieldVaults protocol
-            let supportedStrategies = FlowYieldVaults.getSupportedStrategies()
-            var isStrategySupported = false
-            for supported in supportedStrategies {
-                if supported == strategyType! {
-                    isStrategySupported = true
-                    break
-                }
-            }
-            if !isStrategySupported {
-                return ProcessResult(
-                    success: false,
-                    yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                    message: "Unsupported strategy: \(request.strategyIdentifier) is not supported by FlowYieldVaults"
-                )
-            }
-
-            // Validate vault type is supported for this strategy's initialization
-            let supportedVaults = FlowYieldVaults.getSupportedInitializationVaults(forStrategy: strategyType!)
-            if supportedVaults[vaultType!] != true {
-                return ProcessResult(
-                    success: false,
-                    yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                    message: "Unsupported vault type: \(request.vaultIdentifier) cannot be used to initialize strategy \(request.strategyIdentifier)"
-                )
-            }
-
-            // Validation passed
-            return ProcessResult(
-                success: true,
-                yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
-                message: "Validation passed"
             )
         }
 
@@ -1390,15 +1327,6 @@ access(all) contract FlowYieldVaultsEVM {
         // EVM Admin Functions
         // ============================================
 
-        /// @dev Converts an array of EVM addresses to an array of strings for event emission
-        access(self) fun evmAddressesToStrings(_ addresses: [EVM.EVMAddress]): [String] {
-            var result: [String] = []
-            for addr in addresses {
-                result.append(addr.toString())
-            }
-            return result
-        }
-
         /// @notice Enables or disables the allowlist on the EVM contract
         /// @param enabled True to enable, false to disable
         access(all) fun setAllowlistEnabled(_ enabled: Bool) {
@@ -1442,7 +1370,7 @@ access(all) contract FlowYieldVaultsEVM {
                 panic("batchAddToAllowlist failed: ".concat(errorMsg))
             }
 
-            emit EVMAllowlistUpdated(addresses: self.evmAddressesToStrings(addresses), added: true)
+            emit EVMAllowlistUpdated(addresses: FlowYieldVaultsEVM.evmAddressesToStrings(addresses), added: true)
         }
 
         /// @notice Removes multiple addresses from the allowlist on the EVM contract
@@ -1465,7 +1393,7 @@ access(all) contract FlowYieldVaultsEVM {
                 panic("batchRemoveFromAllowlist failed: ".concat(errorMsg))
             }
 
-            emit EVMAllowlistUpdated(addresses: self.evmAddressesToStrings(addresses), added: false)
+            emit EVMAllowlistUpdated(addresses: FlowYieldVaultsEVM.evmAddressesToStrings(addresses), added: false)
         }
 
         /// @notice Enables or disables the blocklist on the EVM contract
@@ -1511,7 +1439,7 @@ access(all) contract FlowYieldVaultsEVM {
                 panic("batchAddToBlocklist failed: ".concat(errorMsg))
             }
 
-            emit EVMBlocklistUpdated(addresses: self.evmAddressesToStrings(addresses), added: true)
+            emit EVMBlocklistUpdated(addresses: FlowYieldVaultsEVM.evmAddressesToStrings(addresses), added: true)
         }
 
         /// @notice Removes multiple addresses from the blocklist on the EVM contract
@@ -1534,7 +1462,7 @@ access(all) contract FlowYieldVaultsEVM {
                 panic("batchRemoveFromBlocklist failed: ".concat(errorMsg))
             }
 
-            emit EVMBlocklistUpdated(addresses: self.evmAddressesToStrings(addresses), added: false)
+            emit EVMBlocklistUpdated(addresses: FlowYieldVaultsEVM.evmAddressesToStrings(addresses), added: false)
         }
 
         /// @notice Configures a token on the EVM contract
@@ -1834,6 +1762,78 @@ access(all) contract FlowYieldVaultsEVM {
     // ============================================
     // Internal Functions
     // ============================================
+
+    /// @notice Validates CREATE_YIELDVAULT request parameters before processing
+    /// @dev Validates that vaultIdentifier and strategyIdentifier are valid Cadence types
+    ///      and that the strategy is supported by FlowYieldVaults protocol.
+    ///      This prevents panics during createYieldVault by catching invalid parameters early.
+    ///      Note: Basic string validations (empty checks) should be done on the Solidity side.
+    /// @param request The request to validate
+    /// @return ProcessResult with success=true if valid, or success=false with error message
+    access(self) fun validateCreateYieldVaultParameters(_ request: EVMRequest): ProcessResult {
+        // Validate vaultIdentifier is a valid Cadence type identifier
+        let vaultType = CompositeType(request.vaultIdentifier)
+        if vaultType == nil {
+            return ProcessResult(
+                success: false,
+                yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                message: "Invalid vaultIdentifier: \(request.vaultIdentifier) is not a valid Cadence type"
+            )
+        }
+
+        // Validate strategyIdentifier is a valid Cadence type identifier
+        let strategyType = CompositeType(request.strategyIdentifier)
+        if strategyType == nil {
+            return ProcessResult(
+                success: false,
+                yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                message: "Invalid strategyIdentifier: \(request.strategyIdentifier) is not a valid Cadence type"
+            )
+        }
+
+        // Validate strategy is supported by FlowYieldVaults protocol
+        let supportedStrategies = FlowYieldVaults.getSupportedStrategies()
+        var isStrategySupported = false
+        for supported in supportedStrategies {
+            if supported == strategyType! {
+                isStrategySupported = true
+                break
+            }
+        }
+        if !isStrategySupported {
+            return ProcessResult(
+                success: false,
+                yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                message: "Unsupported strategy: \(request.strategyIdentifier) is not supported by FlowYieldVaults"
+            )
+        }
+
+        // Validate vault type is supported for this strategy's initialization
+        let supportedVaults = FlowYieldVaults.getSupportedInitializationVaults(forStrategy: strategyType!)
+        if supportedVaults[vaultType!] != true {
+            return ProcessResult(
+                success: false,
+                yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+                message: "Unsupported vault type: \(request.vaultIdentifier) cannot be used to initialize strategy \(request.strategyIdentifier)"
+            )
+        }
+
+        // Validation passed
+        return ProcessResult(
+            success: true,
+            yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+            message: "Validation passed"
+        )
+    }
+
+    /// @dev Converts an array of EVM addresses to an array of strings for event emission
+    access(self) fun evmAddressesToStrings(_ addresses: [EVM.EVMAddress]): [String] {
+        var result: [String] = []
+        for addr in addresses {
+            result.append(addr.toString())
+        }
+        return result
+    }
 
     /// @notice Converts a UInt256 amount from EVM to UFix64 for Cadence
     /// @dev For native FLOW: Uses 18 decimals (attoflow to FLOW conversion)
