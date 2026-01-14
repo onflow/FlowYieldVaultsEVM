@@ -7,9 +7,10 @@ import "../src/FlowYieldVaultsRequests.sol";
 contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
     constructor(address coaAddress, address wflowAddress) FlowYieldVaultsRequests(coaAddress, wflowAddress) {}
 
-    function testRegisterYieldVaultId(uint64 yieldVaultId, address owner) external {
+    function testRegisterYieldVaultId(uint64 yieldVaultId, address owner, address tokenAddress) external {
         validYieldVaultIds[yieldVaultId] = true;
         yieldVaultOwners[yieldVaultId] = owner;
+        yieldVaultTokens[yieldVaultId] = tokenAddress;
         // Track index for O(1) removal (matches _registerYieldVault behavior)
         _yieldVaultIndexInUserArray[owner][yieldVaultId] = yieldVaultsByUser[owner].length;
         yieldVaultsByUser[owner].push(yieldVaultId);
@@ -44,7 +45,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.deal(user, 100 ether);
         vm.deal(user2, 100 ether);
         c = new FlowYieldVaultsRequestsTestHelper(coa, WFLOW);
-        c.testRegisterYieldVaultId(42, user);
+        c.testRegisterYieldVaultId(42, user, NATIVE_FLOW);
     }
 
     // ============================================
@@ -72,6 +73,20 @@ contract FlowYieldVaultsRequestsTest is Test {
         FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
         assertEq(req.yieldVaultId, 42);
+        assertEq(req.tokenAddress, NATIVE_FLOW);
+    }
+
+    function test_DepositToYieldVault_RevertTokenMismatch() public {
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.YieldVaultTokenMismatch.selector,
+                uint64(42),
+                NATIVE_FLOW,
+                WFLOW
+            )
+        );
+        c.depositToYieldVault(42, WFLOW, 1 ether);
     }
 
     function test_WithdrawFromYieldVault() public {
@@ -81,6 +96,17 @@ contract FlowYieldVaultsRequestsTest is Test {
         FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.WITHDRAW_FROM_YIELDVAULT));
         assertEq(req.amount, 0.5 ether);
+        assertEq(req.tokenAddress, NATIVE_FLOW);
+    }
+
+    function test_WithdrawFromYieldVault_UsesStoredToken() public {
+        c.testRegisterYieldVaultId(43, user, WFLOW);
+
+        vm.prank(user);
+        uint256 reqId = c.withdrawFromYieldVault(43, 0.5 ether);
+
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(req.tokenAddress, WFLOW);
     }
 
     function test_CloseYieldVault() public {
@@ -90,6 +116,17 @@ contract FlowYieldVaultsRequestsTest is Test {
         FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.CLOSE_YIELDVAULT));
         assertEq(req.yieldVaultId, 42);
+        assertEq(req.tokenAddress, NATIVE_FLOW);
+    }
+
+    function test_CloseYieldVault_UsesStoredToken() public {
+        c.testRegisterYieldVaultId(44, user, WFLOW);
+
+        vm.prank(user);
+        uint256 reqId = c.closeYieldVault(44);
+
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(req.tokenAddress, WFLOW);
     }
 
     function test_CancelRequest_RefundsFunds() public {
