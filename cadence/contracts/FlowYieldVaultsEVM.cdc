@@ -454,7 +454,7 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Borrows the BetaBadge reference from the stored capability
         /// @dev Required for closed beta access to Flow YieldVaults protocol operations
         /// @return Authenticated reference to BetaBadge with Beta entitlement
-        access(self) view fun getBetaReference(): auth(FlowYieldVaultsClosedBeta.Beta) &FlowYieldVaultsClosedBeta.BetaBadge {
+        access(self) view fun getBetaRef(): auth(FlowYieldVaultsClosedBeta.Beta) &FlowYieldVaultsClosedBeta.BetaBadge {
             return self.betaBadgeCap.borrow()
                 ?? panic("Could not borrow beta badge capability (id: \(self.betaBadgeCap.id))")
         }
@@ -513,12 +513,36 @@ access(all) contract FlowYieldVaultsEVM {
         /// @param request The EVM request to process
         /// @return True if the request was processed successfully, false otherwise
         access(self) fun processRequestSafely(_ request: EVMRequest): Bool {
-            pre {
-                request.amount > 0 || request.requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue:
-                    "Request amount must be greater than 0 for requestType \(request.requestType) but got amount \(request.amount) (requestId: \(request.id))"
-                request.status == FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue:
-                    "Request must be in PENDING (0) status but got \(request.status) (requestId: \(request.id))"
+            // Validate amount - should already be validated by Solidity, but check defensively
+            // to prevent batch failure if edge case occurs
+            if request.requestType != FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue && request.amount == 0 {
+                emit RequestFailed(
+                    requestId: request.id,
+                    userAddress: request.user.toString(),
+                    requestType: request.requestType,
+                    tokenAddress: request.tokenAddress.toString(),
+                    amount: request.amount,
+                    yieldVaultId: request.yieldVaultId,
+                    reason: "Request amount must be greater than 0 for requestType \(request.requestType) (should have been caught by Solidity)"
+                )
+                return false
             }
+
+            // Validate status - should already be PENDING due to Solidity validation and startProcessing checks
+            // Check defensively to prevent batch failure if edge case occurs
+            if request.status != FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue {
+                emit RequestFailed(
+                    requestId: request.id,
+                    userAddress: request.user.toString(),
+                    requestType: request.requestType,
+                    tokenAddress: request.tokenAddress.toString(),
+                    amount: request.amount,
+                    yieldVaultId: request.yieldVaultId,
+                    reason: "Request must be in PENDING status but got \(request.status) (should have been caught by startProcessing)"
+                )
+                return false
+            }
+
             var success = false
             var yieldVaultId: UInt64 = FlowYieldVaultsEVM.noYieldVaultId
             var message = ""
@@ -573,10 +597,7 @@ access(all) contract FlowYieldVaultsEVM {
             // CREATE/DEPOSIT: startProcessing is called inside their respective process functions
             // (processCreateYieldVault, processDepositToYieldVault) or in the validation block above,
             // because they need to handle fund withdrawal from COA after startProcessing succeeds.
-            let needsStartProcessing = request.requestType == FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue
-                || request.requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue
-
-            if needsStartProcessing {
+            if (request.requestType == FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue || request.requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue) {
                 if !self.startProcessing(requestId: request.id) {
                     // WITHDRAW/CLOSE don't escrow deposits, so no refund needed on failure
                     if !self.completeProcessing(
@@ -743,7 +764,7 @@ access(all) contract FlowYieldVaultsEVM {
             // Note: strategyIdentifier already validated by validateCreateYieldVaultParameters
             let strategyType = CompositeType(strategyIdentifier)!
 
-            let betaRef = self.getBetaReference()
+            let betaRef = self.getBetaRef()
             let yieldVaultManager = self.getYieldVaultManagerRef()
 
             let yieldVaultId = yieldVaultManager.createYieldVault(
@@ -882,7 +903,7 @@ access(all) contract FlowYieldVaultsEVM {
             let vault <- vaultOptional!
 
             // Step 3: Deposit to YieldVault via YieldVaultManager
-            let betaRef = self.getBetaReference()
+            let betaRef = self.getBetaRef()
             self.getYieldVaultManagerRef().depositToYieldVault(betaRef: betaRef, request.yieldVaultId, from: <-vault)
 
             // Check if depositor is the owner for event emission
@@ -1326,6 +1347,8 @@ access(all) contract FlowYieldVaultsEVM {
         // ============================================
         // EVM Admin Functions
         // ============================================
+        // NOTE: These admin calls execute via the worker's COA.
+        // The COA must be the owner of the FlowYieldVaultsRequests EVM contract for these actions to succeed.
 
         /// @notice Enables or disables the allowlist on the EVM contract
         /// @param enabled True to enable, false to disable
@@ -1344,7 +1367,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("setAllowlistEnabled failed: ".concat(errorMsg))
+                panic("setAllowlistEnabled failed: \(errorMsg)")
             }
 
             emit EVMAllowlistStatusChanged(enabled: enabled)
@@ -1367,7 +1390,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("batchAddToAllowlist failed: ".concat(errorMsg))
+                panic("batchAddToAllowlist failed: \(errorMsg)")
             }
 
             emit EVMAllowlistUpdated(addresses: FlowYieldVaultsEVM.evmAddressesToStrings(addresses), added: true)
@@ -1390,7 +1413,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("batchRemoveFromAllowlist failed: ".concat(errorMsg))
+                panic("batchRemoveFromAllowlist failed: \(errorMsg)")
             }
 
             emit EVMAllowlistUpdated(addresses: FlowYieldVaultsEVM.evmAddressesToStrings(addresses), added: false)
@@ -1413,7 +1436,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("setBlocklistEnabled failed: ".concat(errorMsg))
+                panic("setBlocklistEnabled failed: \(errorMsg)")
             }
 
             emit EVMBlocklistStatusChanged(enabled: enabled)
@@ -1436,7 +1459,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("batchAddToBlocklist failed: ".concat(errorMsg))
+                panic("batchAddToBlocklist failed: \(errorMsg)")
             }
 
             emit EVMBlocklistUpdated(addresses: FlowYieldVaultsEVM.evmAddressesToStrings(addresses), added: true)
@@ -1459,7 +1482,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("batchRemoveFromBlocklist failed: ".concat(errorMsg))
+                panic("batchRemoveFromBlocklist failed: \(errorMsg)")
             }
 
             emit EVMBlocklistUpdated(addresses: FlowYieldVaultsEVM.evmAddressesToStrings(addresses), added: false)
@@ -1490,7 +1513,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("setTokenConfig failed: ".concat(errorMsg))
+                panic("setTokenConfig failed: \(errorMsg)")
             }
 
             emit EVMTokenConfigured(
@@ -1518,7 +1541,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("setAuthorizedCOA failed: ".concat(errorMsg))
+                panic("setAuthorizedCOA failed: \(errorMsg)")
             }
 
             emit EVMAuthorizedCOAUpdated(newCOA: coa.toString())
@@ -1541,7 +1564,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("setMaxPendingRequestsPerUser failed: ".concat(errorMsg))
+                panic("setMaxPendingRequestsPerUser failed: \(errorMsg)")
             }
 
             emit EVMMaxPendingRequestsPerUserUpdated(maxRequests: maxRequests)
@@ -1566,7 +1589,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("dropRequests failed: ".concat(errorMsg))
+                panic("dropRequests failed: \(errorMsg)")
             }
 
             emit EVMRequestsDropped(requestIds: requestIds)
@@ -1589,7 +1612,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                panic("cancelRequest failed: ".concat(errorMsg))
+                panic("cancelRequest failed: \(errorMsg)")
             }
 
             emit EVMRequestCancelled(requestId: requestId)
