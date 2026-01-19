@@ -179,12 +179,19 @@ const [
   messages,
   vaultIdentifiers,
   strategyIdentifiers,
-  pendingBalance,
-  claimableRefund,
+  balanceTokens,
+  pendingBalances,
+  claimableRefunds,
 ] = await contract.getPendingRequestsByUserUnpacked(userAddress);
-// pendingBalance = escrowed funds for active pending requests (native FLOW only)
-// claimableRefund = funds available to claim via claimRefund() (native FLOW only)
-// Use getUserPendingBalance/getClaimableRefund for a specific token
+
+// `balanceTokens` will contain `[NATIVE_FLOW, WFLOW]` when WFLOW is configured (otherwise `[NATIVE_FLOW]`).
+// The balance arrays are aligned by index.
+const pendingByToken = Object.fromEntries(
+  balanceTokens.map((token, i) => [token, pendingBalances[i]])
+);
+const claimableByToken = Object.fromEntries(
+  balanceTokens.map((token, i) => [token, claimableRefunds[i]])
+);
 ```
 
 #### Get All Pending Requests (Paginated, Admin)
