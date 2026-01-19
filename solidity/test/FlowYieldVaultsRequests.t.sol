@@ -332,6 +332,30 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
     }
 
+    function test_CompleteProcessing_FailureRefundsBalance_DepositToYieldVault() public {
+        vm.prank(user);
+        uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        // Escrowed balance is now 0 (funds sent to COA)
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 0);
+
+        // COA must return funds when completing with failure
+        c.completeProcessing{value: 1 ether}(reqId, false, 42, "Cadence error");
+        vm.stopPrank();
+
+        // Funds go to claimableRefunds (not pendingUserBalances)
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 1 ether);
+
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
+        assertEq(req.yieldVaultId, 42);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
+    }
+
     function test_CompleteProcessing_CloseYieldVaultRemovesOwnership() public {
         vm.prank(user);
         uint256 reqId = c.closeYieldVault(42);
