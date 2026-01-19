@@ -1362,8 +1362,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return messages Messages
     /// @return vaultIdentifiers Vault identifiers
     /// @return strategyIdentifiers Strategy identifiers
-    /// @return pendingBalance Escrowed balance for active pending requests (native FLOW only)
-    /// @return claimableRefund Claimable refund amount (native FLOW only)
+    /// @return balanceTokens Token addresses for balance arrays (NATIVE_FLOW, WFLOW)
+    /// @return pendingBalances Escrowed balances for active pending requests per token
+    /// @return claimableRefundsArray Claimable refund amounts per token
     function getPendingRequestsByUserUnpacked(
         address user
     )
@@ -1380,8 +1381,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             string[] memory messages,
             string[] memory vaultIdentifiers,
             string[] memory strategyIdentifiers,
-            uint256 pendingBalance,
-            uint256 claimableRefund
+            address[] memory balanceTokens,
+            uint256[] memory pendingBalances,
+            uint256[] memory claimableRefundsArray
         )
     {
         // Use the user's pending request IDs directly (O(1) lookup)
@@ -1418,9 +1420,24 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        // Get balances for native FLOW
-        pendingBalance = pendingUserBalances[user][NATIVE_FLOW];
-        claimableRefund = claimableRefunds[user][NATIVE_FLOW];
+        // Get balances for all supported tokens (NATIVE_FLOW and WFLOW)
+        // WFLOW address could be 0 if not configured, but we include it for completeness
+        uint256 tokenCount = WFLOW != address(0) ? 2 : 1;
+        balanceTokens = new address[](tokenCount);
+        pendingBalances = new uint256[](tokenCount);
+        claimableRefundsArray = new uint256[](tokenCount);
+
+        // Native FLOW balances
+        balanceTokens[0] = NATIVE_FLOW;
+        pendingBalances[0] = pendingUserBalances[user][NATIVE_FLOW];
+        claimableRefundsArray[0] = claimableRefunds[user][NATIVE_FLOW];
+
+        // WFLOW balances (if configured)
+        if (WFLOW != address(0)) {
+            balanceTokens[1] = WFLOW;
+            pendingBalances[1] = pendingUserBalances[user][WFLOW];
+            claimableRefundsArray[1] = claimableRefunds[user][WFLOW];
+        }
     }
 
     // ============================================

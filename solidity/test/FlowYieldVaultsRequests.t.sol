@@ -916,7 +916,8 @@ contract FlowYieldVaultsRequestsTest is Test {
             string[] memory messages,
             string[] memory vaultIdentifiers,
             string[] memory strategyIdentifiers,
-            uint256 pendingBalance,
+            address[] memory balanceTokens,
+            uint256[] memory pendingBalances,
         ) = c.getPendingRequestsByUserUnpacked(user);
 
         assertEq(ids.length, 2, "User should have 2 pending requests");
@@ -926,7 +927,8 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(requestTypes[1], uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
         assertEq(amounts[0], 1 ether);
         assertEq(amounts[1], 2 ether);
-        assertEq(pendingBalance, 3 ether, "Pending balance should be sum of amounts");
+        assertEq(balanceTokens[0], NATIVE_FLOW, "First balance token should be NATIVE_FLOW");
+        assertEq(pendingBalances[0], 3 ether, "Pending balance should be sum of amounts");
     }
 
     function test_GetPendingRequestsByUserUnpacked_MultipleUsers() public {
@@ -940,23 +942,23 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
 
         // Check user's requests
-        (uint256[] memory userIds, , , , , , , , , , uint256 userBalance, ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory userIds, , , , , , , , , , , uint256[] memory userBalances, ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(userIds.length, 2, "User should have 2 requests");
-        assertEq(userBalance, 4 ether, "User pending balance should be 4 ether");
+        assertEq(userBalances[0], 4 ether, "User pending balance should be 4 ether");
 
         // Check user2's requests
-        (uint256[] memory user2Ids, , , , , , , , , , uint256 user2Balance, ) = c.getPendingRequestsByUserUnpacked(user2);
+        (uint256[] memory user2Ids, , , , , , , , , , , uint256[] memory user2Balances, ) = c.getPendingRequestsByUserUnpacked(user2);
         assertEq(user2Ids.length, 1, "User2 should have 1 request");
-        assertEq(user2Balance, 2 ether, "User2 pending balance should be 2 ether");
+        assertEq(user2Balances[0], 2 ether, "User2 pending balance should be 2 ether");
     }
 
     function test_GetPendingRequestsByUserUnpacked_EmptyForNewUser() public {
         address newUser = makeAddr("newUser");
 
-        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(newUser);
+        (uint256[] memory ids, , , , , , , , , , , uint256[] memory pendingBalances, ) = c.getPendingRequestsByUserUnpacked(newUser);
 
         assertEq(ids.length, 0, "New user should have no pending requests");
-        assertEq(pendingBalance, 0, "New user should have 0 pending balance");
+        assertEq(pendingBalances[0], 0, "New user should have 0 pending balance");
     }
 
     function test_GetPendingRequestsByUserUnpacked_AfterProcessing() public {
@@ -973,13 +975,13 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // User should now have req1 and req3
-        (uint256[] memory ids, , , , uint256[] memory amounts, , , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , uint256[] memory amounts, , , , , , , uint256[] memory pendingBalances, ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 2, "User should have 2 remaining requests");
         // Note: Order in user array may change due to swap-and-pop optimization
         assertTrue(ids[0] == req1 || ids[0] == req3, "Should contain req1 or req3");
         assertTrue(ids[1] == req1 || ids[1] == req3, "Should contain req1 or req3");
         assertTrue(ids[0] != ids[1], "Should be different requests");
-        assertEq(pendingBalance, 4 ether, "Pending balance should be 4 ether");
+        assertEq(pendingBalances[0], 4 ether, "Pending balance should be 4 ether");
     }
 
     function test_GetPendingRequestsByUserUnpacked_AfterCancel() public {
@@ -991,13 +993,13 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.cancelRequest(req1);
         vm.stopPrank();
 
-        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance, uint256 claimableRefund) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , , , , , , , , uint256[] memory pendingBalances, uint256[] memory claimableRefundsArr) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 1, "User should have 1 remaining request");
         assertEq(ids[0], req2, "Remaining request should be req2");
         // pendingBalance = 2 ether (escrowed for req2 only)
         // claimableRefund = 1 ether (from cancelled req1)
-        assertEq(pendingBalance, 2 ether);
-        assertEq(claimableRefund, 1 ether);
+        assertEq(pendingBalances[0], 2 ether);
+        assertEq(claimableRefundsArr[0], 1 ether);
     }
 
     // ============================================
@@ -1031,16 +1033,16 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // Verify user1's remaining requests
-        (uint256[] memory u1Ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory u1Ids, , , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(u1Ids.length, 2, "User1 should have 2 requests");
 
         // Verify user2's requests unchanged
-        (uint256[] memory u2Ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user2);
+        (uint256[] memory u2Ids, , , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user2);
         assertEq(u2Ids.length, 1, "User2 should have 1 request");
         assertEq(u2Ids[0], u2r1);
 
         // Verify user3's requests unchanged
-        (uint256[] memory u3Ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user3);
+        (uint256[] memory u3Ids, , , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user3);
         assertEq(u3Ids.length, 1, "User3 should have 1 request");
         assertEq(u3Ids[0], u3r1);
     }
@@ -1058,9 +1060,9 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(req2, true, 101, "Created");
         vm.stopPrank();
 
-        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , , , , , , , , uint256[] memory pendingBalances, ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 0, "User should have no pending requests");
-        assertEq(pendingBalance, 0);
+        assertEq(pendingBalances[0], 0);
     }
 
     // ============================================
@@ -1222,7 +1224,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Verify all other users still have 3 requests
         for (uint256 i = 0; i < 5; i++) {
-            (uint256[] memory ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(users[i]);
+            (uint256[] memory ids, , , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(users[i]);
             if (i == 2) {
                 assertEq(ids.length, 2, "User 2 should have 2 requests");
             } else {
@@ -1246,7 +1248,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         assertEq(c.getPendingRequestCount(), 0);
 
-        (uint256[] memory ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 0);
     }
 
@@ -1264,13 +1266,13 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // req1 should still be removed from pending (it's marked FAILED)
-        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance, uint256 claimableRefund) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , , , , , , , , uint256[] memory pendingBalances, uint256[] memory claimableRefundsArr) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 1, "Should have 1 pending request");
         assertEq(ids[0], req2);
         // Escrowed balance only includes req2
-        assertEq(pendingBalance, 2 ether, "Escrowed balance should be req2 amount");
+        assertEq(pendingBalances[0], 2 ether, "Escrowed balance should be req2 amount");
         // Refunded amount is in claimableRefunds
-        assertEq(claimableRefund, 1 ether, "Claimable refund should be req1 amount");
+        assertEq(claimableRefundsArr[0], 1 ether, "Claimable refund should be req1 amount");
     }
 
     function test_CancelMiddleRequest_UpdatesIndexCorrectly() public {
@@ -1290,7 +1292,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(globalIds[1], req3, "Second should be req3");
 
         // Verify user's array
-        (uint256[] memory userIds, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory userIds, , , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(userIds.length, 2);
     }
 }

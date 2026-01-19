@@ -125,15 +125,17 @@ access(all) contract FlowYieldVaultsEVM {
     access(all) struct PendingRequestsInfo {
         access(all) let evmAddress: String
         access(all) let pendingCount: Int
-        access(all) let pendingBalance: UFix64
-        access(all) let claimableRefund: UFix64
+        /// @notice Pending balances per token address (maps token address string -> UFix64 balance)
+        access(all) let pendingBalances: {String: UFix64}
+        /// @notice Claimable refunds per token address (maps token address string -> UFix64 balance)
+        access(all) let claimableRefunds: {String: UFix64}
         access(all) let requests: [EVMRequest]
 
-        init(evmAddress: String, pendingCount: Int, pendingBalance: UFix64, claimableRefund: UFix64, requests: [EVMRequest]) {
+        init(evmAddress: String, pendingCount: Int, pendingBalances: {String: UFix64}, claimableRefunds: {String: UFix64}, requests: [EVMRequest]) {
             self.evmAddress = evmAddress
             self.pendingCount = pendingCount
-            self.pendingBalance = pendingBalance
-            self.claimableRefund = claimableRefund
+            self.pendingBalances = pendingBalances
+            self.claimableRefunds = claimableRefunds
             self.requests = requests
         }
     }
@@ -1703,8 +1705,9 @@ access(all) contract FlowYieldVaultsEVM {
                 Type<[String]>(),         // messages
                 Type<[String]>(),         // vaultIdentifiers
                 Type<[String]>(),         // strategyIdentifiers
-                Type<UInt256>(),          // pendingBalance
-                Type<UInt256>()           // claimableRefund
+                Type<[EVM.EVMAddress]>(), // balanceTokens
+                Type<[UInt256]>(),        // pendingBalances
+                Type<[UInt256]>()         // claimableRefundsArray
             ],
             data: callResult.data
         )
@@ -1719,12 +1722,20 @@ access(all) contract FlowYieldVaultsEVM {
         let messages = decoded[7] as! [String]
         let vaultIdentifiers = decoded[8] as! [String]
         let strategyIdentifiers = decoded[9] as! [String]
-        let pendingBalanceRaw = decoded[10] as! UInt256
-        let claimableRefundRaw = decoded[11] as! UInt256
+        let balanceTokens = decoded[10] as! [EVM.EVMAddress]
+        let pendingBalancesRaw = decoded[11] as! [UInt256]
+        let claimableRefundsRaw = decoded[12] as! [UInt256]
 
-        // Convert pending balance from wei to UFix64
-        let pendingBalance = FlowEVMBridgeUtils.uint256ToUFix64(value: pendingBalanceRaw, decimals: 18)
-        let claimableRefund = FlowEVMBridgeUtils.uint256ToUFix64(value: claimableRefundRaw, decimals: 18)
+        // Build per-token balance dictionaries
+        var pendingBalances: {String: UFix64} = {}
+        var claimableRefundsMap: {String: UFix64} = {}
+        var j = 0
+        while j < balanceTokens.length {
+            let tokenAddr = balanceTokens[j].toString()
+            pendingBalances[tokenAddr] = FlowEVMBridgeUtils.uint256ToUFix64(value: pendingBalancesRaw[j], decimals: 18)
+            claimableRefundsMap[tokenAddr] = FlowEVMBridgeUtils.uint256ToUFix64(value: claimableRefundsRaw[j], decimals: 18)
+            j = j + 1
+        }
 
         // Build request array
         var requests: [EVMRequest] = []
@@ -1750,8 +1761,8 @@ access(all) contract FlowYieldVaultsEVM {
         return PendingRequestsInfo(
             evmAddress: evmAddressHex,
             pendingCount: ids.length,
-            pendingBalance: pendingBalance,
-            claimableRefund: claimableRefund,
+            pendingBalances: pendingBalances,
+            claimableRefunds: claimableRefundsMap,
             requests: requests
         )
     }
