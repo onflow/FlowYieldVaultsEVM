@@ -66,6 +66,32 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(req.amount, 1 ether);
     }
 
+    function test_CreateYieldVault_UsesSentinelYieldVaultIdPlaceholder() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(
+            req.yieldVaultId,
+            sentinelYieldVaultId,
+            "CREATE should start with NO_YIELDVAULT_ID"
+        );
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        vm.expectRevert(
+            FlowYieldVaultsRequests.CannotRegisterSentinelYieldVaultId.selector
+        );
+        c.completeProcessing(
+            reqId,
+            true,
+            sentinelYieldVaultId,
+            "Invalid yieldVaultId"
+        );
+        vm.stopPrank();
+    }
+
     function test_DepositToYieldVault() public {
         vm.prank(user);
         uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
