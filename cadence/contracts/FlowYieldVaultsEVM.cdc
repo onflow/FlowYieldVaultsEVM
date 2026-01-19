@@ -24,6 +24,13 @@ import "FlowEVMBridgeConfig"
 ///      2. For each request, calls startProcessing() to mark as PROCESSING (deducts escrow for CREATE/DEPOSIT)
 ///      3. Executes Cadence-side operation (create/deposit/withdraw/close YieldVault)
 ///      4. Calls completeProcessing() to mark as COMPLETED or FAILED (refunds escrow for CREATE/DEPOSIT failures)
+///
+///      PRECISION NOTE:
+///      EVM uses uint256 with 18 decimals (wei), while Cadence uses UFix64 with 8 decimals.
+///      Converting between these formats truncates precision beyond 8 decimal places.
+///      For example: 1.123456789012345678 FLOW (EVM) becomes 1.12345678 FLOW (Cadence).
+///      This is not exploitable (users receive slightly less, not more) and the 1 FLOW
+///      minimum deposit makes any dust loss negligible (~0.0000001% maximum).
 access(all) contract FlowYieldVaultsEVM {
 
     // ============================================
@@ -1869,9 +1876,11 @@ access(all) contract FlowYieldVaultsEVM {
     /// @notice Converts a UInt256 amount from EVM to UFix64 for Cadence
     /// @dev For native FLOW: Uses 18 decimals (attoflow to FLOW conversion)
     ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals
+    ///      PRECISION WARNING: UFix64 has only 8 decimal places vs uint256's 18.
+    ///      Precision beyond 8 decimals is truncated (e.g., 1.123456789... → 1.12345678).
     /// @param value The amount in wei/smallest unit (UInt256)
     /// @param tokenAddress The token address to determine decimal conversion
-    /// @return The converted amount in UFix64 format
+    /// @return The converted amount in UFix64 format (truncated to 8 decimals)
     access(self) fun ufix64FromUInt256(_ value: UInt256, tokenAddress: EVM.EVMAddress): UFix64 {
         if tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString() {
             return FlowEVMBridgeUtils.uint256ToUFix64(value: value, decimals: 18)

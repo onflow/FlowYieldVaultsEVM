@@ -30,6 +30,11 @@ import {
  *      Processing uses atomic two-phase commit:
  *      - startProcessing(): Marks request as PROCESSING, deducts user balance
  *      - completeProcessing(): Marks as COMPLETED/FAILED, credits claimable refunds on failure
+ *
+ *      PRECISION NOTE: EVM uses uint256 with 18 decimals, while Cadence uses UFix64 with 8 decimals.
+ *      Amounts are truncated beyond 8 decimal places during cross-VM conversion.
+ *      Example: 1.123456789012345678 FLOW → 1.12345678 FLOW (loss of ~9e-9 FLOW).
+ *      This is not exploitable (truncation favors the protocol) and the minimum deposit mitigates dust.
  */
 contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
