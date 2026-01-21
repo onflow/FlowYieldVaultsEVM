@@ -39,9 +39,6 @@ fun testInvalidRequestType() {
     // Attempting to create request with invalid type (99) should fail at precondition
     // This validates that the EVMRequest struct enforces valid request types
     
-    // We can't directly test the failure in Cadence tests since it panics
-    // Instead, we verify that valid request types work correctly
-    
     // Test each valid request type
     let validTypes: [UInt8] = [
         FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
@@ -51,13 +48,18 @@ fun testInvalidRequestType() {
     ]
     
     for requestType in validTypes {
+        var amount = 1000000000000000000 as UInt256
+        if requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue {
+            amount = 0
+        }
+
         let validRequest = FlowYieldVaultsEVM.EVMRequest(
             id: UInt256(requestType),
             user: testUserEVM,
             requestType: requestType,
             status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
             tokenAddress: nativeFlowAddr,
-            amount: 1000000000000000000,
+            amount: amount,
             yieldVaultId: 0,
             timestamp: 0,
             message: "",
@@ -73,8 +75,21 @@ fun testInvalidRequestType() {
     Test.assertEqual(0 as UInt8, FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue)
     Test.assertEqual(3 as UInt8, FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue)
     
-    // Note: Invalid values like 99, 4, or 255 would fail at struct initialization
-    // with error: "Invalid request type: must be between 0 (CREATE_YIELDVAULT) and 3 (CLOSE_YIELDVAULT)"
+    Test.expectFailure(fun(): Void {
+        let closeWithPositiveAmount = FlowYieldVaultsEVM.EVMRequest(
+            id: 3,
+            user: testUserEVM,
+            requestType: 99,
+            status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
+            tokenAddress: nativeFlowAddr,
+            amount: 1100,
+            yieldVaultId: 1,
+            timestamp: 0,
+            message: "",
+            vaultIdentifier: "",
+            strategyIdentifier: ""
+        )
+    }, errorMessageSubstring: "Invalid request type: expected 0 (CREATE_YIELDVAULT) to 3 (CLOSE_YIELDVAULT) but got 99")
 }
 
 access(all)
@@ -98,6 +113,46 @@ fun testZeroAmountWithdrawal() {
     // --- assert ------------------------------------------------------------
     Test.assertEqual(0 as UInt256, closeWithZeroAmount.amount)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue, closeWithZeroAmount.requestType)
+
+    Test.expectFailure(fun(): Void {
+        let closeWithPositiveAmount = FlowYieldVaultsEVM.EVMRequest(
+            id: 3,
+            user: testUserEVM,
+            requestType: FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue,
+            status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
+            tokenAddress: nativeFlowAddr,
+            amount: 1100, // Positive amount not allowed for CLOSE_YIELDVAULT
+            yieldVaultId: 1,
+            timestamp: 0,
+            message: "",
+            vaultIdentifier: "",
+            strategyIdentifier: ""
+        )
+    }, errorMessageSubstring: "Amount must be equal to 0 for requestType 3 but got amount 1100")
+
+    let requestTypes: [UInt8] = [
+        FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
+        FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue,
+        FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue
+    ]
+
+    for requestType in requestTypes {
+        Test.expectFailure(fun(): Void {
+            let closeWithPositiveAmount = FlowYieldVaultsEVM.EVMRequest(
+                id: 3,
+                user: testUserEVM,
+                requestType: requestType,
+                status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
+                tokenAddress: nativeFlowAddr,
+                amount: 0, // Zero amount not allowed for create/deposit/withdraw requests
+                yieldVaultId: 1,
+                timestamp: 0,
+                message: "",
+                vaultIdentifier: "",
+                strategyIdentifier: ""
+            )
+        }, errorMessageSubstring: "Amount must be greater than 0 for requestType \(requestType) but got amount 0")
+    }
     
     // Note: Zero amounts for CREATE_YIELDVAULT, DEPOSIT_TO_YIELDVAULT, and WITHDRAW_FROM_YIELDVAULT
     // would fail at struct initialization with error:
