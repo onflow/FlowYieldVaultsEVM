@@ -503,7 +503,7 @@ import FlowYieldVaultsEVM from 0xdf111ffc5064198a
 access(all) fun main(): {String: AnyStruct} {
     return {
         "flowYieldVaultsRequestsAddress": FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()?.toString() ?? "not set",
-        "totalEVMUsers": FlowYieldVaultsEVM.yieldVaultsByEVMAddress.keys.length
+        "totalEVMUsers": FlowYieldVaultsEVM.yieldVaultOwnershipLookup.keys.length
     }
 }
 `;

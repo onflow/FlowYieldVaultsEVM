@@ -118,8 +118,8 @@ fun testWorkerCreationRequiresBetaBadge() {
 }
 
 access(all)
-fun testYieldVaultsByEVMAddressMapping() {
-    // Verify the yieldVaultsByEVMAddress mapping is accessible
+fun testYieldVaultOwnershipLookupMapping() {
+    // Verify the yieldVaultOwnershipLookup mapping is accessible
     let testAddress = "0x6666666666666666666666666666666666666666"
     let yieldVaultIds = FlowYieldVaultsEVM.getYieldVaultIdsForEVMAddress(testAddress)
     

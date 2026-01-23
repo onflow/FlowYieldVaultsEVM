@@ -54,7 +54,6 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │  │  └─────────────────────────────────────────────────────────────────┘ │  │
 │  │                                                                       │  │
 │  │  State:                                                               │  │
-│  │  - yieldVaultsByEVMAddress: {String: [UInt64]}                        │  │
 │  │  - yieldVaultOwnershipLookup: {String: {UInt64: Bool}}                │  │
 │  │  - flowYieldVaultsRequestsAddress: EVM.EVMAddress?                    │  │
 │  │  - maxRequestsPerTx: Int (default: 1)                                 │  │
@@ -132,7 +131,6 @@ Worker contract that processes EVM requests and manages YieldVault positions.
 **Key State:**
 ```cadence
 // YieldVault ownership tracking
-access(all) let yieldVaultsByEVMAddress: {String: [UInt64]}
 access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
 
 // Configuration (stored as contract-only vars; exposed via getters)
