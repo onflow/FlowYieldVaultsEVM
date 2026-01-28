@@ -1293,4 +1293,51 @@ contract FlowYieldVaultsRequestsTest is Test {
         (uint256[] memory userIds, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(userIds.length, 2);
     }
+
+    // Test that duplicate registration is blocked
+    function test_RegisterYieldVault_RevertAlreadyRegistered() public {
+        vm.startPrank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 100, "Created");
+
+        // Try to register same ID again (simulate COA bug)
+        uint256 reqId2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.startProcessing(reqId2);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.YieldVaultIdAlreadyRegistered.selector,
+            100
+        ));
+        c.completeProcessing(reqId2, true, 100, "Duplicate");
+        vm.stopPrank();
+    }
+
+    // Test that ID mismatch on DEPOSIT is blocked
+    function test_CompleteProcessing_RevertDepositIdMismatch() public {
+        vm.startPrank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 100, "Created");
+        vm.stopPrank();
+
+        // Try to deposit but COA provides wrong ID
+        vm.prank(user);
+        uint256 depositReq = c.depositToYieldVault{value: 1 ether}(100, NATIVE_FLOW, 1 ether);
+
+        vm.startPrank(coa);
+        c.startProcessing(depositReq);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.YieldVaultIdMismatch.selector,
+            100,  // expected
+            101   // provided (wrong)
+        ));
+        c.completeProcessing(depositReq, true, 101, "Wrong ID");
+        vm.stopPrank();
+    }
 }
