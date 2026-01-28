@@ -1296,9 +1296,8 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     // Test that duplicate registration is blocked
     function test_RegisterYieldVault_RevertAlreadyRegistered() public {
-        vm.startPrank(user);
+        vm.prank(user);
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
-        vm.stopPrank();
 
         vm.startPrank(coa);
         c.startProcessing(reqId);
@@ -1317,9 +1316,8 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     // Test that ID mismatch on DEPOSIT is blocked
     function test_CompleteProcessing_RevertDepositIdMismatch() public {
-        vm.startPrank(user);
+        vm.prank(user);
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
-        vm.stopPrank();
 
         vm.startPrank(coa);
         c.startProcessing(reqId);
@@ -1339,5 +1337,24 @@ contract FlowYieldVaultsRequestsTest is Test {
         ));
         c.completeProcessing(depositReq, true, 101, "Wrong ID");
         vm.stopPrank();
+    }
+
+    // Test for unregister with wrong user ownership
+    function test_CompleteProcessing_RevertInvalidYieldVaultId() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 100, "Created");
+        vm.stopPrank();
+
+        vm.prank(user2);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.InvalidYieldVaultId.selector,
+            100,
+            user2
+        ));
+        uint256 closeReq = c.closeYieldVault(100);
     }
 }
