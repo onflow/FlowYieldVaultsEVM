@@ -1125,8 +1125,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             revert YieldVaultIdMismatch(request.yieldVaultId, yieldVaultId);
         }
 
-        request.yieldVaultId = yieldVaultId;
-
         // === HANDLE REFUNDS FOR FAILED CREATE/DEPOSIT ===
         // COA must return the funds that were transferred in startProcessing
         if (
