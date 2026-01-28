@@ -1626,7 +1626,7 @@ access(all) contract FlowYieldVaultsEVM {
 
     /// @notice Gets all YieldVault Ids owned by an EVM address
     /// @param evmAddress The EVM address string to query
-    /// @return Array of YieldVault Ids owned by the address
+    /// @return Array of YieldVault Ids owned by the address (order is not guaranteed)
     access(all) view fun getYieldVaultIdsForEVMAddress(_ evmAddress: String): [UInt64] {
         if !self.yieldVaultOwnershipLookup.containsKey(evmAddress) {
             return []
