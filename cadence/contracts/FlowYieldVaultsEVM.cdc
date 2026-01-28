@@ -790,7 +790,7 @@ access(all) contract FlowYieldVaultsEVM {
             if FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] == nil {
                 FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] = {}
             }
-            FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.insert(key: yieldVaultId, true)
+            let _ = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.insert(key: yieldVaultId, true)
 
             emit YieldVaultCreatedForEVMUser(
                 requestId: request.id,
@@ -846,7 +846,11 @@ access(all) contract FlowYieldVaultsEVM {
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user, tokenAddress: request.tokenAddress)
 
             // Step 4: Remove yieldVaultId from ownership tracking
-            FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.remove(key: request.yieldVaultId)
+            let _ = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.remove(key: request.yieldVaultId)
+            // Clean up empty dictionaries to optimize storage costs
+            if FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.length == 0 {
+                let _ = FlowYieldVaultsEVM.yieldVaultOwnershipLookup.remove(key: evmAddr)
+            }
 
             emit YieldVaultClosedForEVMUser(
                 requestId: request.id,
