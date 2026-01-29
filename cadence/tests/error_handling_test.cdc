@@ -58,7 +58,7 @@ fun testInvalidRequestType() {
             status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
             tokenAddress: nativeFlowAddr,
             amount: 1000000000000000000,
-            yieldVaultId: 0,
+            yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
             timestamp: 0,
             message: "",
             vaultIdentifier: mockVaultIdentifier,

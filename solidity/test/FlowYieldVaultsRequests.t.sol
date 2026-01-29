@@ -92,6 +92,19 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
     }
 
+    function test_CreateYieldVault_CanRegisterZeroYieldVaultId() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 0, "YieldVault 0 created");
+        vm.stopPrank();
+
+        assertTrue(c.isYieldVaultIdValid(0), "YieldVault ID 0 should be valid");
+        assertTrue(c.doesUserOwnYieldVault(user, 0), "User should own YieldVault 0");
+    }
+
     function test_DepositToYieldVault() public {
         vm.prank(user);
         uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
@@ -215,8 +228,9 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
 
         // 3. COA fails and returns funds
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Failed");
+        c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed");
 
         // 4. User has refund in claimableRefunds (not pendingUserBalances)
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
@@ -248,8 +262,9 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Process and fail
         vm.prank(coa);
         c.startProcessing(reqId);
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 2 ether}(reqId, false, 0, "Failed");
+        c.completeProcessing{value: 2 ether}(reqId, false, sentinelYieldVaultId, "Failed");
 
         // Claim only NATIVE_FLOW
         uint256 balBefore = user.balance;
@@ -266,8 +281,9 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.prank(coa);
         c.startProcessing(reqId);
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Failed");
+        c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed");
 
         // RefundClaimed is emitted on claim (no BalanceUpdated since we use separate claimableRefunds mapping)
         vm.prank(user);
@@ -347,7 +363,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 0);
 
         // COA must return funds when completing with failure
-        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Cadence error");
+        c.completeProcessing{value: 1 ether}(reqId, false, c.NO_YIELDVAULT_ID(), "Cadence error");
         vm.stopPrank();
 
         // Funds go to claimableRefunds (not pendingUserBalances)
@@ -1286,7 +1302,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.startPrank(coa);
         c.startProcessing(req1);
         // COA must return funds when completing with failure
-        c.completeProcessing{value: 1 ether}(req1, false, 0, "Failed");
+        c.completeProcessing{value: 1 ether}(req1, false, c.NO_YIELDVAULT_ID(), "Failed");
         vm.stopPrank();
 
         // req1 should still be removed from pending (it's marked FAILED)
