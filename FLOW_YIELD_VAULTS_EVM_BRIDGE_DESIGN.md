@@ -195,7 +195,7 @@ struct Request {
     RequestStatus status;        // PENDING | PROCESSING | COMPLETED | FAILED
     address tokenAddress;        // NATIVE_FLOW (0xFFfF...FfFFFfF) or ERC20 address
     uint256 amount;              // Amount in wei (0 for CLOSE_YIELDVAULT)
-    uint64 yieldVaultId;               // Target YieldVault Id (0 for CREATE_YIELDVAULT until completed; NO_YIELDVAULT_ID on failed CREATE during processing; cancel/drop keep 0)
+    uint64 yieldVaultId;          // Target YieldVault Id (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed; for others set at request creation)
     uint256 timestamp;           // Block timestamp when created
     string message;              // Status message or error reason
     string vaultIdentifier;      // Cadence vault type (e.g., "A.xxx.FlowToken.Vault")
