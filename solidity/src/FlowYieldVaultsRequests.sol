@@ -61,7 +61,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param status Current status of the request
     /// @param tokenAddress Token being deposited/withdrawn (NATIVE_FLOW for native $FLOW)
     /// @param amount Amount of tokens involved
-    /// @param yieldVaultId Associated YieldVault Id (0 for CREATE_YIELDVAULT until completed; NO_YIELDVAULT_ID only on failed CREATE)
+    /// @param yieldVaultId Associated YieldVault Id (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until assigned by Cadence)
     /// @param timestamp Block timestamp when request was created
     /// @param message Status message or error reason
     /// @param vaultIdentifier Cadence vault type identifier for CREATE_YIELDVAULT
@@ -251,6 +251,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice YieldVault token is not set
     error YieldVaultTokenNotSet(uint64 yieldVaultId);
 
+    /// @notice Cannot register sentinel value NO_YIELDVAULT_ID as a valid YieldVault
+    error CannotRegisterSentinelYieldVaultId();
+
     /// @notice Token does not match YieldVault's configured token
     error YieldVaultTokenMismatch(
         uint64 yieldVaultId,
@@ -280,7 +283,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestType Type of operation requested
     /// @param tokenAddress Token involved in the request
     /// @param amount Amount of tokens
-    /// @param yieldVaultId Associated YieldVault Id (0 for CREATE_YIELDVAULT until assigned by Cadence; NO_YIELDVAULT_ID only on failed CREATE)
+    /// @param yieldVaultId Associated YieldVault Id (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until assigned by Cadence)
     /// @param timestamp Block timestamp when request was created
     /// @param vaultIdentifier Cadence vault type identifier (for CREATE_YIELDVAULT)
     /// @param strategyIdentifier Cadence strategy type identifier (for CREATE_YIELDVAULT)
@@ -798,7 +801,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 RequestType.CREATE_YIELDVAULT,
                 tokenAddress,
                 amount,
-                0,
+                NO_YIELDVAULT_ID,
                 vaultIdentifier,
                 strategyIdentifier
             );
@@ -1562,6 +1565,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (validYieldVaultIds[yieldVaultId]) {
             revert YieldVaultIdAlreadyRegistered(yieldVaultId);
         }
+        // Reject sentinel value to prevent corruption of "no yieldvault" semantics
+        if (yieldVaultId == NO_YIELDVAULT_ID) revert CannotRegisterSentinelYieldVaultId();
 
         // Mark YieldVault as valid and set owner
         validYieldVaultIds[yieldVaultId] = true;
@@ -1635,7 +1640,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @param requestType The type of request (CREATE, DEPOSIT, WITHDRAW, CLOSE).
      * @param tokenAddress The token involved in this request.
      * @param amount The amount of tokens involved (0 for CLOSE requests).
-     * @param yieldVaultId The YieldVault Id (0 for CREATE until assigned by Cadence; NO_YIELDVAULT_ID only on failed CREATE).
+     * @param yieldVaultId The YieldVault Id (NO_YIELDVAULT_ID for CREATE until assigned by Cadence).
      * @param vaultIdentifier Cadence vault type identifier (only for CREATE requests).
      * @param strategyIdentifier Cadence strategy type identifier (only for CREATE requests).
      * @return The newly created request ID.
