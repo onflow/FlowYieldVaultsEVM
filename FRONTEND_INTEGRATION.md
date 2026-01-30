@@ -607,9 +607,9 @@ if (wallet.type === "evm") {
 // Sentinel address for native FLOW token
 const NATIVE_FLOW = "0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF";
 
-// Sentinel value for "no YieldVault" (Cadence may return this on failed CREATE)
+// Sentinel value for "no YieldVault" (also used as placeholder for CREATE until processed)
 const NO_YIELDVAULT_ID = 18446744073709551615n; // type(uint64).max
-// CREATE requests start with yieldVaultId = 0 until processed
+// CREATE requests start with yieldVaultId = NO_YIELDVAULT_ID until processed
 
 // Request Types
 enum RequestType {

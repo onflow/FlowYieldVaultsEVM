@@ -84,10 +84,16 @@ access(all) contract FlowYieldVaultsEVM {
                 status >= FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue &&
                 status <= FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue:
                     "Invalid status: expected 0 (PENDING) to 3 (FAILED) but got \(status)"
-
-                requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue || amount > 0:
-                    "Amount must be greater than 0 for requestType \(requestType) but got amount \(amount)"
             }
+
+            if requestType != FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue && amount == 0 {
+                panic("Amount must be greater than 0 for requestType \(requestType) but got amount \(amount)")
+            }
+
+            if requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue && amount > 0 {
+                panic("Amount must be equal to 0 for requestType \(requestType) but got amount \(amount)")
+            }
+
             self.id = id
             self.user = user
             self.requestType = requestType

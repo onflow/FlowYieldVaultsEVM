@@ -66,6 +66,45 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(req.amount, 1 ether);
     }
 
+    function test_CreateYieldVault_UsesSentinelYieldVaultIdPlaceholder() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(
+            req.yieldVaultId,
+            sentinelYieldVaultId,
+            "CREATE should start with NO_YIELDVAULT_ID"
+        );
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        vm.expectRevert(
+            FlowYieldVaultsRequests.CannotRegisterSentinelYieldVaultId.selector
+        );
+        c.completeProcessing(
+            reqId,
+            true,
+            sentinelYieldVaultId,
+            "Invalid yieldVaultId"
+        );
+        vm.stopPrank();
+    }
+
+    function test_CreateYieldVault_CanRegisterZeroYieldVaultId() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 0, "YieldVault 0 created");
+        vm.stopPrank();
+
+        assertTrue(c.isYieldVaultIdValid(0), "YieldVault ID 0 should be valid");
+        assertTrue(c.doesUserOwnYieldVault(user, 0), "User should own YieldVault 0");
+    }
+
     function test_DepositToYieldVault() public {
         vm.prank(user);
         uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
@@ -189,8 +228,9 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
 
         // 3. COA fails and returns funds
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Failed");
+        c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed");
 
         // 4. User has refund in claimableRefunds (not pendingUserBalances)
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
@@ -222,8 +262,9 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Process and fail
         vm.prank(coa);
         c.startProcessing(reqId);
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 2 ether}(reqId, false, 0, "Failed");
+        c.completeProcessing{value: 2 ether}(reqId, false, sentinelYieldVaultId, "Failed");
 
         // Claim only NATIVE_FLOW
         uint256 balBefore = user.balance;
@@ -240,8 +281,9 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.prank(coa);
         c.startProcessing(reqId);
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Failed");
+        c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed");
 
         // RefundClaimed is emitted on claim (no BalanceUpdated since we use separate claimableRefunds mapping)
         vm.prank(user);
@@ -321,7 +363,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 0);
 
         // COA must return funds when completing with failure
-        c.completeProcessing{value: 1 ether}(reqId, false, 0, "Cadence error");
+        c.completeProcessing{value: 1 ether}(reqId, false, c.NO_YIELDVAULT_ID(), "Cadence error");
         vm.stopPrank();
 
         // Funds go to claimableRefunds (not pendingUserBalances)
@@ -1260,7 +1302,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.startPrank(coa);
         c.startProcessing(req1);
         // COA must return funds when completing with failure
-        c.completeProcessing{value: 1 ether}(req1, false, 0, "Failed");
+        c.completeProcessing{value: 1 ether}(req1, false, c.NO_YIELDVAULT_ID(), "Failed");
         vm.stopPrank();
 
         // req1 should still be removed from pending (it's marked FAILED)
@@ -1292,5 +1334,69 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Verify user's array
         (uint256[] memory userIds, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(userIds.length, 2);
+    }
+
+    // Test that duplicate registration is blocked
+    function test_RegisterYieldVault_RevertAlreadyRegistered() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 100, "Created");
+
+        // Try to register same ID again (simulate COA bug)
+        uint256 reqId2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        c.startProcessing(reqId2);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.YieldVaultIdAlreadyRegistered.selector,
+            100
+        ));
+        c.completeProcessing(reqId2, true, 100, "Duplicate");
+        vm.stopPrank();
+    }
+
+    // Test that ID mismatch on DEPOSIT is blocked
+    function test_CompleteProcessing_RevertDepositIdMismatch() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 100, "Created");
+        vm.stopPrank();
+
+        // Try to deposit but COA provides wrong ID
+        vm.prank(user);
+        uint256 depositReq = c.depositToYieldVault{value: 1 ether}(100, NATIVE_FLOW, 1 ether);
+
+        vm.startPrank(coa);
+        c.startProcessing(depositReq);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.YieldVaultIdMismatch.selector,
+            100,  // expected
+            101   // provided (wrong)
+        ));
+        c.completeProcessing(depositReq, true, 101, "Wrong ID");
+        vm.stopPrank();
+    }
+
+    // Test for unregister with wrong user ownership
+    function test_CompleteProcessing_RevertInvalidYieldVaultId() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        c.startProcessing(reqId);
+        c.completeProcessing(reqId, true, 100, "Created");
+        vm.stopPrank();
+
+        vm.prank(user2);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.InvalidYieldVaultId.selector,
+            100,
+            user2
+        ));
+        uint256 closeReq = c.closeYieldVault(100);
     }
 }

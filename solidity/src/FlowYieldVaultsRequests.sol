@@ -238,8 +238,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice YieldVault Id is invalid or not owned by user
     error InvalidYieldVaultId(uint64 yieldVaultId, address user);
 
+    /// @notice YieldVault Id has already been registered
+    error YieldVaultIdAlreadyRegistered(uint64 yieldVaultId);
+
+    /// @notice YieldVault Id does not match the request's value
+    error YieldVaultIdMismatch(uint64 expectedId, uint64 providedId);
+
     /// @notice YieldVault token is not set
     error YieldVaultTokenNotSet(uint64 yieldVaultId);
+
+    /// @notice Cannot register sentinel value NO_YIELDVAULT_ID as a valid YieldVault
+    error CannotRegisterSentinelYieldVaultId();
 
     /// @notice Token does not match YieldVault's configured token
     error YieldVaultTokenMismatch(
@@ -788,7 +797,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 RequestType.CREATE_YIELDVAULT,
                 tokenAddress,
                 amount,
-                0,
+                NO_YIELDVAULT_ID,
                 vaultIdentifier,
                 strategyIdentifier
             );
@@ -1137,7 +1146,14 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             : RequestStatus.FAILED;
         request.status = newStatus;
         request.message = message;
-        request.yieldVaultId = yieldVaultId;
+
+        // Enforce strong ID binding for DEPOSIT/WITHDRAW/CLOSE by requiring the
+        // supplied yieldVaultId matches the request's stored yieldVaultId
+        if (request.requestType == RequestType.CREATE_YIELDVAULT) {
+            request.yieldVaultId = yieldVaultId;
+        } else if (request.yieldVaultId != yieldVaultId) {
+            revert YieldVaultIdMismatch(request.yieldVaultId, yieldVaultId);
+        }
 
         // === HANDLE REFUNDS FOR FAILED CREATE/DEPOSIT ===
         // COA must return the funds that were transferred in startProcessing
@@ -1566,6 +1582,13 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         address tokenAddress,
         uint256 requestId
     ) internal {
+        // Uniqueness guard, reject registering an already-valid yieldVaultId
+        if (validYieldVaultIds[yieldVaultId]) {
+            revert YieldVaultIdAlreadyRegistered(yieldVaultId);
+        }
+        // Reject sentinel value to prevent corruption of "no yieldvault" semantics
+        if (yieldVaultId == NO_YIELDVAULT_ID) revert CannotRegisterSentinelYieldVaultId();
+
         // Mark YieldVault as valid and set owner
         validYieldVaultIds[yieldVaultId] = true;
         yieldVaultOwners[yieldVaultId] = user;
@@ -1591,6 +1614,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @param requestId The CLOSE_YIELDVAULT request ID that closed this YieldVault.
      */
     function _unregisterYieldVault(uint64 yieldVaultId, address user, uint256 requestId) internal {
+        // Prove the yieldVaultId is actually registered under the provided user
+        if (yieldVaultOwners[yieldVaultId] != user) {
+            revert InvalidYieldVaultId(yieldVaultId, user);
+        }
+
         uint64[] storage userYieldVaults = yieldVaultsByUser[user];
         uint256 indexToRemove = _yieldVaultIndexInUserArray[user][yieldVaultId];
 
