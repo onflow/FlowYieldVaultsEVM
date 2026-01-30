@@ -24,8 +24,8 @@
 				"testnet": "df111ffc5064198a"
 			}
 		},
-		"FlowYieldVaultsTransactionHandler": {
-			"source": "./cadence/contracts/FlowYieldVaultsTransactionHandler.cdc",
+		"FlowYieldVaultsEVMWorkerOps": {
+			"source": "./cadence/contracts/FlowYieldVaultsEVMWorkerOps.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",

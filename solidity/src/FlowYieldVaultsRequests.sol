@@ -1002,11 +1002,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     ) external onlyAuthorizedCOA nonReentrant {
 
         // === REJECTED REQUESTS ===
-        dropRequests(rejectedRequestIds)
+        dropRequests(rejectedRequestIds);
 
         // === SUCCESSFUL REQUESTS ===
         for (uint256 i = 0; i < successfulRequestIds.length; ) {
-            startProcessing(successfulRequestIds[i])
+            startProcessing(successfulRequestIds[i]);
 
             unchecked {
                 ++i;
