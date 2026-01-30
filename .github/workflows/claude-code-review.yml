@@ -10,6 +10,10 @@ on:
     #   - "src/**/*.js"
     #   - "src/**/*.jsx"
 
+concurrency:
+  group: claude-code-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   claude-review:
     # Optional: Filter by PR author
@@ -21,8 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
 
     steps:
@@ -49,9 +53,30 @@ jobs:
 
             Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            Post your review as a single updatable PR comment (do NOT create a new comment for every push).
+            Start the comment body with `<!-- claude-code-review -->`.
+            You MUST post the review with:
+            `gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file -`
+            Do NOT use `gh api` to post comments.
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+          use_sticky_comment: true
+          claude_args: '--allowed-tools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"'
 
+      - name: Verify Claude sticky comment exists
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          pr='${{ github.event.pull_request.number }}'
+
+          count="$(gh api "repos/${repo}/issues/${pr}/comments" --paginate --jq \
+            '[.[] | select(.user.login == "claude[bot]" and (.body | contains("<!-- claude-code-review -->")))] | length')"
+
+          if [ "${count}" -lt 1 ]; then
+            echo "::error::No Claude sticky review comment found (claude[bot] + marker)."
+            exit 1
+          fi
