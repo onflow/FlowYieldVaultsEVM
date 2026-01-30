@@ -555,7 +555,7 @@ access(all) contract FlowYieldVaultsEVM {
                 return ProcessResult(
                     success: false,
                     yieldVaultId: request.yieldVaultId,
-                    message: "Internal error: processRequestSafely returned nil for request ID \(request.id)"
+                    message: "Internal error: processResult is nil for request ID \(request.id)"
                 )
             }
 

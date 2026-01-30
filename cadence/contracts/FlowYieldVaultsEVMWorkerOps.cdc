@@ -231,8 +231,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             // Process assigned request
             if let request = data as? FlowYieldVaultsEVM.EVMRequest {
-                // TODO: expose processRequestSafely function in FlowYieldVaultsEVM contract
-                worker.processRequests([request])
+                let result = worker.processRequest(request)
+                if !result.success {
+                    emit ExecutionSkipped(transactionId: id, reason: "Processing failed: \(result.message)")
+                }
                 FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: request.id)
             } else {
                 emit ExecutionSkipped(transactionId: id, reason: "No valid EVMRequest found")
