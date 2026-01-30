@@ -61,7 +61,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param status Current status of the request
     /// @param tokenAddress Token being deposited/withdrawn (NATIVE_FLOW for native $FLOW)
     /// @param amount Amount of tokens involved
-    /// @param yieldVaultId Associated YieldVault Id (0 for CREATE_YIELDVAULT until completed; NO_YIELDVAULT_ID only on failed CREATE)
+    /// @param yieldVaultId Associated YieldVault Id
     /// @param timestamp Block timestamp when request was created
     /// @param message Status message or error reason
     /// @param vaultIdentifier Cadence vault type identifier for CREATE_YIELDVAULT
@@ -102,10 +102,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice WFLOW (Wrapped FLOW) ERC20 token address
     /// @dev On Cadence side, WFLOW is automatically unwrapped to native FlowToken by FlowEVMBridge
     address public immutable WFLOW;
-
-    /// @notice Sentinel value for "no yieldvault" (used when CREATE_YIELDVAULT fails before yieldvault is created)
-    /// @dev Uses type(uint64).max since valid yieldVaultIds can be 0. Matches FlowYieldVaultsEVM.noYieldVaultId
-    uint64 public constant NO_YIELDVAULT_ID = type(uint64).max;
 
     /// @dev Auto-incrementing counter for request IDs, starts at 1
     uint256 private _requestIdCounter;
@@ -274,7 +270,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestType Type of operation requested
     /// @param tokenAddress Token involved in the request
     /// @param amount Amount of tokens
-    /// @param yieldVaultId Associated YieldVault Id (0 for CREATE_YIELDVAULT until assigned by Cadence; NO_YIELDVAULT_ID only on failed CREATE)
+    /// @param yieldVaultId Associated YieldVault Id
     /// @param timestamp Block timestamp when request was created
     /// @param vaultIdentifier Cadence vault type identifier (for CREATE_YIELDVAULT)
     /// @param strategyIdentifier Cadence strategy type identifier (for CREATE_YIELDVAULT)
@@ -985,6 +981,31 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     // ============================================
 
     /**
+     * @notice Processes a batch of PENDING requests.
+     * @dev For successful requests, calls startProcessing to mark them as PROCESSING.
+     *      For rejected requests, calls dropRequests to mark them as FAILED.
+     * @param successfulRequestIds The request ids to start processing (PENDING -> PROCESSING)
+     * @param rejectedRequestIds The request ids to drop (PENDING -> FAILED)
+     */
+    function startProcessingBatch(
+        uint256[] successfulRequestIds,
+        uint256[] rejectedRequestIds
+    ) external onlyAuthorizedCOA nonReentrant {
+
+        // === REJECTED REQUESTS ===
+        dropRequests(rejectedRequestIds)
+
+        // === SUCCESSFUL REQUESTS ===
+        for (uint256 i = 0; i < successfulRequestIds.length; ) {
+            startProcessing(successfulRequestIds[i])
+
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
      * @notice Begins processing a request by transitioning it to PROCESSING status.
      * @dev This is the first phase of the two-phase commit pattern. Must be called by the
      *      authorized COA before executing Cadence-side operations.
@@ -1059,6 +1080,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 request.amount
             );
         }
+
+        // === CLEANUP PENDING STATE ===
+        if (userPendingRequestCount[request.user] > 0) {
+            userPendingRequestCount[request.user]--;
+        }
+        _removePendingRequest(requestId);
 
         emit RequestProcessed(
             requestId,
@@ -1159,12 +1186,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (success && request.requestType == RequestType.CLOSE_YIELDVAULT) {
             _unregisterYieldVault(yieldVaultId, request.user, requestId);
         }
-
-        // === CLEANUP PENDING STATE ===
-        if (userPendingRequestCount[request.user] > 0) {
-            userPendingRequestCount[request.user]--;
-        }
-        _removePendingRequest(requestId);
 
         emit RequestProcessed(requestId, request.user, request.requestType, newStatus, yieldVaultId, message);
     }
@@ -1612,7 +1633,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @param requestType The type of request (CREATE, DEPOSIT, WITHDRAW, CLOSE).
      * @param tokenAddress The token involved in this request.
      * @param amount The amount of tokens involved (0 for CLOSE requests).
-     * @param yieldVaultId The YieldVault Id (0 for CREATE until assigned by Cadence; NO_YIELDVAULT_ID only on failed CREATE).
+     * @param yieldVaultId The YieldVault Id
      * @param vaultIdentifier Cadence vault type identifier (only for CREATE requests).
      * @param strategyIdentifier Cadence strategy type identifier (only for CREATE requests).
      * @return The newly created request ID.

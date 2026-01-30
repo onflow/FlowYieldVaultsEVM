@@ -9,7 +9,6 @@ access(all) fun main(contractAddress: Address): {String: AnyStruct} {
     let result: {String: AnyStruct} = {}
 
     result["flowYieldVaultsRequestsAddress"] = FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()?.toString() ?? "Not set"
-    result["maxRequestsPerTx"] = FlowYieldVaultsEVM.getMaxRequestsPerTx()
     result["yieldVaultsByEVMAddress"] = FlowYieldVaultsEVM.yieldVaultsByEVMAddress
 
     result["WorkerStoragePath"] = FlowYieldVaultsEVM.WorkerStoragePath.toString()

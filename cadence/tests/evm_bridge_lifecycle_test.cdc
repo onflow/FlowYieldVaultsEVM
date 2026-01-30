@@ -23,14 +23,14 @@ access(all) let userEVMAddr2 = EVM.addressFromString("0x000000000000000000000000
 access(all)
 fun setup() {
     deployContracts()
-    
+
     // Setup worker with COA and beta badge
     let coaResult = setupCOA(admin)
     Test.expect(coaResult, Test.beSucceeded())
-    
+
     let workerResult = setupWorkerWithBadge(admin)
     Test.expect(workerResult, Test.beSucceeded())
-    
+
     // Set mock FlowYieldVaultsRequests address
     let setAddrResult = updateRequestsAddress(admin, mockRequestsAddr.toString())
     Test.expect(setAddrResult, Test.beSucceeded())
@@ -56,20 +56,20 @@ fun testCreateYieldVaultFromEVMRequest() {
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
-    
+
     // Verify no yieldvaults exist for this user initially
     let yieldVaultsBefore = FlowYieldVaultsEVM.getYieldVaultIdsForEVMAddress(userEVMAddr1.toString())
     Test.assertEqual(0, yieldVaultsBefore.length)
-    
+
     // --- act ---------------------------------------------------------------
     // In real scenario, processRequests() would read from EVM contract
     // For testing, we validate the request structure and processing logic
-    
+
     // Verify request created correctly
     Test.assertEqual(1 as UInt256, createRequest.id)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue, createRequest.requestType)
     Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue, createRequest.status)
-    
+
     // --- assert ------------------------------------------------------------
     // Verify the request structure is valid for processing
     Test.assert(createRequest.amount > 0, message: "Amount must be positive")
@@ -94,7 +94,7 @@ fun testDepositToExistingYieldVault() {
         vaultIdentifier: "", // Not needed for DEPOSIT
         strategyIdentifier: ""
     )
-    
+
     // --- assert ------------------------------------------------------------
     Test.assertEqual(2 as UInt256, depositRequest.id)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue, depositRequest.requestType)
@@ -118,7 +118,7 @@ fun testWithdrawFromYieldVault() {
         vaultIdentifier: "",
         strategyIdentifier: ""
     )
-    
+
     // --- assert ------------------------------------------------------------
     Test.assertEqual(3 as UInt256, withdrawRequest.id)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue, withdrawRequest.requestType)
@@ -142,7 +142,7 @@ fun testCloseYieldVaultComplete() {
         vaultIdentifier: "",
         strategyIdentifier: ""
     )
-    
+
     // --- assert ------------------------------------------------------------
     Test.assertEqual(4 as UInt256, closeRequest.id)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue, closeRequest.requestType)
@@ -152,7 +152,7 @@ fun testCloseYieldVaultComplete() {
 access(all)
 fun testRequestStatusTransitions() {
     // --- Test valid status transitions ---
-    
+
     // PENDING → COMPLETED
     let completedRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 5,
@@ -168,7 +168,7 @@ fun testRequestStatusTransitions() {
         strategyIdentifier: mockStrategyIdentifier
     )
     Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.COMPLETED.rawValue, completedRequest.status)
-    
+
     // PENDING → FAILED
     let failedRequest = FlowYieldVaultsEVM.EVMRequest(
         id: 6,
@@ -203,7 +203,7 @@ fun testMultipleUsersIndependentYieldVaults() {
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
-    
+
     let user2Request = FlowYieldVaultsEVM.EVMRequest(
         id: 8,
         user: userEVMAddr2,
@@ -217,14 +217,14 @@ fun testMultipleUsersIndependentYieldVaults() {
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
-    
+
     // --- assert ------------------------------------------------------------
     // Verify users are different
     Test.assert(
         user1Request.user.toString() != user2Request.user.toString(),
         message: "User addresses should be different"
     )
-    
+
     // Verify requests are independent
     Test.assert(user1Request.id != user2Request.id, message: "Request IDs should be unique")
     Test.assert(user1Request.amount != user2Request.amount, message: "Request amounts are different")
@@ -246,12 +246,12 @@ fun testProcessResultStructure() {
     // Test failure result (NO_YIELDVAULT_ID sentinel for "no yieldvault")
     let failureResult = FlowYieldVaultsEVM.ProcessResult(
         success: false,
-        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+        yieldVaultId: nil,
         message: "Insufficient COA balance"
     )
 
     Test.assert(!failureResult.success)
-    Test.assertEqual(FlowYieldVaultsEVM.noYieldVaultId, failureResult.yieldVaultId)
+    Test.assertEqual(nil, failureResult.yieldVaultId)
     Test.assertEqual("Insufficient COA balance", failureResult.message)
 }
 
@@ -260,7 +260,7 @@ fun testVaultAndStrategyIdentifiers() {
     // Test that vault and strategy identifiers are preserved correctly
     let customVaultId = "A.1234567890abcdef.CustomToken.Vault"
     let customStrategyId = "A.fedcba0987654321.CustomStrategy.Strategy"
-    
+
     let request = FlowYieldVaultsEVM.EVMRequest(
         id: 9,
         user: userEVMAddr1,
@@ -274,7 +274,7 @@ fun testVaultAndStrategyIdentifiers() {
         vaultIdentifier: customVaultId,
         strategyIdentifier: customStrategyId
     )
-    
+
     Test.assertEqual(customVaultId, request.vaultIdentifier)
     Test.assertEqual(customStrategyId, request.strategyIdentifier)
 }

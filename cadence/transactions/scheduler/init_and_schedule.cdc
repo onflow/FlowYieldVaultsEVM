@@ -17,6 +17,7 @@ transaction(
     delaySeconds: UFix64
 ) {
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
+        // TODO: update this
         if signer.storage.borrow<&FlowYieldVaultsEVM.Worker>(from: FlowYieldVaultsEVM.WorkerStoragePath) == nil {
             panic("FlowYieldVaultsEVM Worker not found. Please initialize Worker first.")
         }
@@ -54,7 +55,7 @@ transaction(
         let effortAndPriority = FlowYieldVaultsTransactionHandler.calculateExecutionEffortAndPriority(maxRequestsPerTx)
         let executionEffort = effortAndPriority["effort"]! as! UInt64
         let priorityRaw = effortAndPriority["priority"]! as! UInt8
-        
+
         let pr = priorityRaw == 0
             ? FlowTransactionScheduler.Priority.High
             : FlowTransactionScheduler.Priority.Medium
@@ -88,4 +89,35 @@ transaction(
             fees: <-fees
         )
     }
+
+}
+
+access(self) fun _scheduleTransaction(
+    manager: &{FlowTransactionSchedulerUtils.Manager},
+    handlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>,
+    feeVaultRef: auth(FungibleToken.Withdraw) &FlowToken.Vault,
+): UInt64 {
+    // Calculate the target execution timestamp
+    let future = getCurrentBlock().timestamp + 1.0
+
+    // Estimate fees and withdraw payment
+    let estimate = FlowTransactionScheduler.estimate(
+        data: nil,
+        timestamp: future,
+        priority: FlowTransactionScheduler.Priority.Medium,
+        executionEffort: 9999
+    )
+    let fees <- feeVaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
+
+    // Schedule the next execution
+    let transactionId = manager.schedule(
+        handlerCap: handlerCap,
+        data: nil,
+        timestamp: future,
+        priority: FlowTransactionScheduler.Priority.Medium,
+        executionEffort: 9999,
+        fees: <-fees
+    )
+
+    return transactionId
 }
