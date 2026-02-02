@@ -103,6 +103,10 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @dev On Cadence side, WFLOW is automatically unwrapped to native FlowToken by FlowEVMBridge
     address public immutable WFLOW;
 
+    /// @notice Sentinel value for "no yieldvault"
+    /// @dev Uses type(uint64).max since valid yieldVaultIds can be 0
+    uint64 public constant NO_YIELDVAULT_ID = type(uint64).max;
+
     /// @dev Auto-incrementing counter for request IDs, starts at 1
     uint256 private _requestIdCounter;
 
@@ -672,92 +676,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function dropRequests(
         uint256[] calldata requestIds
     ) external onlyOwner nonReentrant {
-        // Pre-allocate array for tracking successfully dropped request IDs
-        uint256[] memory droppedIds = new uint256[](requestIds.length);
-        uint256 droppedCount = 0;
-
-        // Process each request ID in the input array
-        for (uint256 i = 0; i < requestIds.length; ) {
-            uint256 requestId = requestIds[i];
-            Request storage request = requests[requestId];
-
-            // Only process valid requests that are still in PENDING status
-            // This check prevents double-processing and handles invalid IDs gracefully
-            if (
-                request.id == requestId &&
-                request.status == RequestStatus.PENDING
-            ) {
-                // Mark request as failed with admin message
-                request.status = RequestStatus.FAILED;
-                request.message = "Dropped by admin";
-
-                // For CREATE/DEPOSIT requests, move funds to claimableRefunds
-                // User must call claimRefund() to withdraw them (pull pattern)
-                // WITHDRAW/CLOSE requests don't escrow funds, so nothing to do
-                if (
-                    (request.requestType == RequestType.CREATE_YIELDVAULT ||
-                        request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
-                    request.amount > 0
-                ) {
-                    uint256 newBalance =
-                        pendingUserBalances[request.user][request.tokenAddress] -
-                            request.amount;
-                    pendingUserBalances[request.user][request.tokenAddress] = newBalance;
-                    emit BalanceUpdated(
-                        request.user,
-                        request.tokenAddress,
-                        newBalance
-                    );
-                    claimableRefunds[request.user][request.tokenAddress] += request.amount;
-                    emit RefundCredited(
-                        request.user,
-                        request.tokenAddress,
-                        request.amount,
-                        requestId
-                    );
-                }
-
-                // Update user's pending request count
-                if (userPendingRequestCount[request.user] > 0) {
-                    userPendingRequestCount[request.user]--;
-                }
-
-                // Remove from pending queues (both global and user-specific)
-                _removePendingRequest(requestId);
-
-                emit RequestProcessed(
-                    requestId,
-                    request.user,
-                    request.requestType,
-                    RequestStatus.FAILED,
-                    request.yieldVaultId,
-                    "Dropped by admin"
-                );
-
-                // Track this request as successfully dropped
-                droppedIds[droppedCount] = requestId;
-                unchecked {
-                    ++droppedCount;
-                }
-            }
-
-            unchecked {
-                ++i;
-            }
-        }
-
-        // Emit batch event only if requests were actually dropped
-        if (droppedCount > 0) {
-            // Create properly-sized array for the event
-            uint256[] memory actualDroppedIds = new uint256[](droppedCount);
-            for (uint256 j = 0; j < droppedCount; ) {
-                actualDroppedIds[j] = droppedIds[j];
-                unchecked {
-                    ++j;
-                }
-            }
-            emit RequestsDropped(actualDroppedIds, msg.sender);
-        }
+        _dropRequestsInternal(requestIds);
     }
 
     // ============================================
@@ -991,22 +910,22 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /**
      * @notice Processes a batch of PENDING requests.
-     * @dev For successful requests, calls startProcessing to mark them as PROCESSING.
-     *      For rejected requests, calls dropRequests to mark them as FAILED.
+     * @dev For successful requests, marks them as PROCESSING.
+     *      For rejected requests, marks them as FAILED.
      * @param successfulRequestIds The request ids to start processing (PENDING -> PROCESSING)
      * @param rejectedRequestIds The request ids to drop (PENDING -> FAILED)
      */
     function startProcessingBatch(
-        uint256[] successfulRequestIds,
-        uint256[] rejectedRequestIds
+        uint256[] calldata successfulRequestIds,
+        uint256[] calldata rejectedRequestIds
     ) external onlyAuthorizedCOA nonReentrant {
 
         // === REJECTED REQUESTS ===
-        dropRequests(rejectedRequestIds);
+        _dropRequestsInternal(rejectedRequestIds);
 
         // === SUCCESSFUL REQUESTS ===
         for (uint256 i = 0; i < successfulRequestIds.length; ) {
-            startProcessing(successfulRequestIds[i]);
+            _startProcessingInternal(successfulRequestIds[i]);
 
             unchecked {
                 ++i;
@@ -1032,79 +951,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @param requestId The unique identifier of the request to start processing.
      */
     function startProcessing(uint256 requestId) external onlyAuthorizedCOA nonReentrant {
-        Request storage request = requests[requestId];
-
-        // === VALIDATION ===
-        if (request.id != requestId) revert RequestNotFound();
-        if (request.status != RequestStatus.PENDING)
-            revert RequestAlreadyFinalized();
-
-        // === TRANSITION TO PROCESSING ===
-        // This prevents cancellation and ensures atomicity with completeProcessing
-        request.status = RequestStatus.PROCESSING;
-
-        // === HANDLE FUND TRANSFER FOR CREATE/DEPOSIT ===
-        // WITHDRAW/CLOSE don't have escrowed funds on EVM side
-        if (
-            request.requestType == RequestType.CREATE_YIELDVAULT ||
-            request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT
-        ) {
-            // Verify sufficient escrowed balance
-            uint256 currentBalance = pendingUserBalances[request.user][
-                request.tokenAddress
-            ];
-            if (currentBalance < request.amount) {
-                revert InsufficientBalance(
-                    request.tokenAddress,
-                    request.amount,
-                    currentBalance
-                );
-            }
-
-            // Deduct from user's escrowed balance
-            pendingUserBalances[request.user][request.tokenAddress] =
-                currentBalance -
-                request.amount;
-            emit BalanceUpdated(
-                request.user,
-                request.tokenAddress,
-                pendingUserBalances[request.user][request.tokenAddress]
-            );
-
-            // Transfer escrowed funds to COA for bridging to Cadence
-            if (isNativeFlow(request.tokenAddress)) {
-                // Native FLOW: send via low-level call
-                (bool success, ) = authorizedCOA.call{value: request.amount}("");
-                if (!success) revert TransferFailed();
-            } else {
-                // ERC20: use SafeERC20 transfer
-                IERC20(request.tokenAddress).safeTransfer(
-                    authorizedCOA,
-                    request.amount
-                );
-            }
-            emit FundsWithdrawn(
-                authorizedCOA,
-                request.tokenAddress,
-                request.amount
-            );
-        }
-
-        // === CLEANUP PENDING STATE ===
-        if (userPendingRequestCount[request.user] > 0) {
-            userPendingRequestCount[request.user]--;
-        }
-        _removePendingRequest(requestId);
-
-        emit RequestProcessed(
-            requestId,
-            request.user,
-            request.requestType,
-            RequestStatus.PROCESSING,
-            request.yieldVaultId,
-            "Processing started"
-        );
+        _startProcessingInternal(requestId);
     }
+
 
     /**
      * @notice Completes request processing by marking success/failure and handling refunds.
@@ -1463,6 +1312,181 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     // ============================================
     // Internal Functions
     // ============================================
+
+    /**
+     * @dev Internal implementation for dropping pending requests.
+     *      Silently skips requests that don't exist or aren't in PENDING status.
+     *      For CREATE/DEPOSIT requests, escrowed funds are moved to claimableRefunds.
+     * @param requestIds Array of request IDs to drop. Invalid/non-pending IDs are skipped.
+     */
+    function _dropRequestsInternal(uint256[] calldata requestIds) internal {
+        // Pre-allocate array for tracking successfully dropped request IDs
+        uint256[] memory droppedIds = new uint256[](requestIds.length);
+        uint256 droppedCount = 0;
+
+        // Process each request ID in the input array
+        for (uint256 i = 0; i < requestIds.length; ) {
+            uint256 requestId = requestIds[i];
+            Request storage request = requests[requestId];
+
+            // Only process valid requests that are still in PENDING status
+            // This check prevents double-processing and handles invalid IDs gracefully
+            if (
+                request.id == requestId &&
+                request.status == RequestStatus.PENDING
+            ) {
+                // Mark request as failed with admin message
+                request.status = RequestStatus.FAILED;
+                request.message = "Dropped by admin";
+
+                // For CREATE/DEPOSIT requests, move funds to claimableRefunds
+                // User must call claimRefund() to withdraw them (pull pattern)
+                // WITHDRAW/CLOSE requests don't escrow funds, so nothing to do
+                if (
+                    (request.requestType == RequestType.CREATE_YIELDVAULT ||
+                        request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
+                    request.amount > 0
+                ) {
+                    uint256 newBalance =
+                        pendingUserBalances[request.user][request.tokenAddress] -
+                            request.amount;
+                    pendingUserBalances[request.user][request.tokenAddress] = newBalance;
+                    emit BalanceUpdated(
+                        request.user,
+                        request.tokenAddress,
+                        newBalance
+                    );
+                    claimableRefunds[request.user][request.tokenAddress] += request.amount;
+                    emit RefundCredited(
+                        request.user,
+                        request.tokenAddress,
+                        request.amount,
+                        requestId
+                    );
+                }
+
+                // Update user's pending request count
+                if (userPendingRequestCount[request.user] > 0) {
+                    userPendingRequestCount[request.user]--;
+                }
+
+                // Remove from pending queues (both global and user-specific)
+                _removePendingRequest(requestId);
+
+                emit RequestProcessed(
+                    requestId,
+                    request.user,
+                    request.requestType,
+                    RequestStatus.FAILED,
+                    request.yieldVaultId,
+                    "Dropped by admin"
+                );
+
+                // Track this request as successfully dropped
+                droppedIds[droppedCount] = requestId;
+                unchecked {
+                    ++droppedCount;
+                }
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Emit batch event only if requests were actually dropped
+        if (droppedCount > 0) {
+            // Create properly-sized array for the event
+            uint256[] memory actualDroppedIds = new uint256[](droppedCount);
+            for (uint256 j = 0; j < droppedCount; ) {
+                actualDroppedIds[j] = droppedIds[j];
+                unchecked {
+                    ++j;
+                }
+            }
+            emit RequestsDropped(actualDroppedIds, msg.sender);
+        }
+    }
+
+    /**
+     * @dev Internal implementation for starting request processing.
+     *      Transitions request to PROCESSING status and handles fund transfers.
+     * @param requestId The unique identifier of the request to start processing.
+     */
+    function _startProcessingInternal(uint256 requestId) internal {
+        Request storage request = requests[requestId];
+
+        // === VALIDATION ===
+        if (request.id != requestId) revert RequestNotFound();
+        if (request.status != RequestStatus.PENDING)
+            revert RequestAlreadyFinalized();
+
+        // === TRANSITION TO PROCESSING ===
+        // This prevents cancellation and ensures atomicity with completeProcessing
+        request.status = RequestStatus.PROCESSING;
+
+        // === HANDLE FUND TRANSFER FOR CREATE/DEPOSIT ===
+        // WITHDRAW/CLOSE don't have escrowed funds on EVM side
+        if (
+            request.requestType == RequestType.CREATE_YIELDVAULT ||
+            request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT
+        ) {
+            // Verify sufficient escrowed balance
+            uint256 currentBalance = pendingUserBalances[request.user][
+                request.tokenAddress
+            ];
+            if (currentBalance < request.amount) {
+                revert InsufficientBalance(
+                    request.tokenAddress,
+                    request.amount,
+                    currentBalance
+                );
+            }
+
+            // Deduct from user's escrowed balance
+            pendingUserBalances[request.user][request.tokenAddress] =
+                currentBalance -
+                request.amount;
+            emit BalanceUpdated(
+                request.user,
+                request.tokenAddress,
+                pendingUserBalances[request.user][request.tokenAddress]
+            );
+
+            // Transfer escrowed funds to COA for bridging to Cadence
+            if (isNativeFlow(request.tokenAddress)) {
+                // Native FLOW: send via low-level call
+                (bool success, ) = authorizedCOA.call{value: request.amount}("");
+                if (!success) revert TransferFailed();
+            } else {
+                // ERC20: use SafeERC20 transfer
+                IERC20(request.tokenAddress).safeTransfer(
+                    authorizedCOA,
+                    request.amount
+                );
+            }
+            emit FundsWithdrawn(
+                authorizedCOA,
+                request.tokenAddress,
+                request.amount
+            );
+        }
+
+        // === CLEANUP PENDING STATE ===
+        if (userPendingRequestCount[request.user] > 0) {
+            userPendingRequestCount[request.user]--;
+        }
+        _removePendingRequest(requestId);
+
+        emit RequestProcessed(
+            requestId,
+            request.user,
+            request.requestType,
+            RequestStatus.PROCESSING,
+            request.yieldVaultId,
+            "Processing started"
+        );
+    }
 
     /**
      * @dev Validates deposit parameters and transfers tokens to this contract for escrow.
