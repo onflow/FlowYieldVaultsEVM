@@ -231,10 +231,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             // Process assigned request
             if let request = data as? FlowYieldVaultsEVM.EVMRequest {
-                let result = worker.processRequest(request)
-                if !result.success {
-                    emit ExecutionSkipped(transactionId: id, reason: "Processing failed: \(result.message)")
-                }
+                worker.processRequest(request)
                 FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: request.id)
             } else {
                 emit ExecutionSkipped(transactionId: id, reason: "No valid EVMRequest found")
@@ -289,7 +286,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // Run main scheduler logic
             if let errorMessage = self._runScheduler(manager: manager) {
                 // On error, only emit event
-                emit ExecutionSkipped(transactionId: id, reason: errorMessage)
+                emit ExecutionSkipped(transactionId: id, reason: "Scheduler error: \(errorMessage)")
             }
 
             // Schedule the next execution
@@ -344,9 +341,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 var successfulRequestIds: [UInt256] = []
                 var successfulRequests: [FlowYieldVaultsEVM.EVMRequest] = []
                 for request in pendingRequests {
-                    if let errorMessage = worker.preprocessRequest(request) {
-                        // TODO: errorMessage should be stored in EVM contract as a reason for the failure
-
+                    let result = worker.preprocessRequest(request)
+                    if !result.success {
                         failedRequestIds.append(request.id)
                     } else {
                         successfulRequestIds.append(request.id)
@@ -408,12 +404,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 if txStatus == nil || txStatus != FlowTransactionScheduler.Status.Scheduled {
 
                     // Fail request
-                    if let errorMessage = worker.markRequestAsFailed(
+                    worker.markRequestAsFailed(
                         request.request,
                         message: "Worker transaction reverted. Transaction ID: \(txId.toString())",
-                    ) {
-                        emit ExecutionSkipped(transactionId: txId, reason: errorMessage)
-                    }
+                    )
 
                     // Remove request from scheduledRequests
                     FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)

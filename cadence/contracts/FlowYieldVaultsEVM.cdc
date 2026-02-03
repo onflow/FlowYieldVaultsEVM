@@ -256,7 +256,7 @@ access(all) contract FlowYieldVaultsEVM {
         tokenAddress: String
     )
 
-    /// @notice Emitted when a request fails during processing
+    /// @notice Emitted when a request fails during processing or pre-processing
     /// @param requestId The failed request ID
     /// @param userAddress The EVM address of the user
     /// @param requestType The type of request that failed
@@ -451,16 +451,22 @@ access(all) contract FlowYieldVaultsEVM {
         ///      - Early validation for CREATE_YIELDVAULT requests - validate vaultIdentifier and strategyIdentifier
         /// @param request The EVM request to preprocess
         /// @return A string error message if the request is invalid, otherwise nil
-        access(all) fun preprocessRequest(_ request: EVMRequest): String? {
+        access(all) fun preprocessRequest(_ request: EVMRequest): ProcessResult {
             // Validate status - should be PENDING
             if request.status != FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue {
-                return "Request must be in PENDING status but got \(request.status)"
+                return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
+                    request,
+                    message: "Request must be in PENDING status but got \(request.status)"
+                )
             }
 
             // Validate amount - should already be validated by Solidity but check defensively
             if request.requestType != FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue
                  && request.amount == 0 {
-                return "Request amount must be greater than 0 for requestType \(request.requestType)"
+                return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
+                    request,
+                    message: "Request amount must be greater than 0 for requestType \(request.requestType)"
+                )
             }
 
             // Early validation for CREATE_YIELDVAULT requests
@@ -468,11 +474,19 @@ access(all) contract FlowYieldVaultsEVM {
             if request.requestType == FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue {
                 let validationResult = FlowYieldVaultsEVM.validateCreateYieldVaultParameters(request)
                 if !validationResult.success {
-                    return "Validation failed: \(validationResult.message)"
+                    return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
+                        request,
+                        message: "Validation failed: \(validationResult.message)"
+                    )
                 }
             }
 
-            return nil // success
+            // Successfully preprocessed
+            return ProcessResult(
+                success: true,
+                yieldVaultId: request.yieldVaultId,
+                message: "Request preprocessed successfully"
+            )
         }
 
         // ============================================
@@ -487,15 +501,6 @@ access(all) contract FlowYieldVaultsEVM {
             for request in requests {
                 let result = self.processRequest(request)
                 if !result.success {
-                    emit RequestFailed(
-                        requestId: request.id,
-                        userAddress: request.user.toString(),
-                        requestType: request.requestType,
-                        tokenAddress: request.tokenAddress.toString(),
-                        amount: request.amount,
-                        yieldVaultId: request.yieldVaultId,
-                        reason: result.message,
-                    )
                     failCount = failCount + 1
                 } else {
                     successCount = successCount + 1
@@ -521,9 +526,8 @@ access(all) contract FlowYieldVaultsEVM {
             // Validate status - should already be PROCESSING due to Solidity validation and startProcessing checks
             // Check defensively to prevent batch failure if edge case occurs
             if request.status != FlowYieldVaultsEVM.RequestStatus.PROCESSING.rawValue {
-                return ProcessResult(
-                    success: false,
-                    yieldVaultId: request.yieldVaultId,
+                return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
+                    request,
                     message: "Request must be in PROCESSING status but got \(request.status)"
                 )
             }
@@ -544,18 +548,16 @@ access(all) contract FlowYieldVaultsEVM {
                     result = self.processCloseYieldVault(request)
 
                 default:
-                    return ProcessResult(
-                        success: false,
-                        yieldVaultId: request.yieldVaultId,
-                        message: "Unknown request type: \(request.requestType) for request ID \(request.id)"
+                    return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
+                        request,
+                        message: "Unknown request type: \(request.requestType)"
                     )
             }
 
             if result == nil {
-                return ProcessResult(
-                    success: false,
-                    yieldVaultId: request.yieldVaultId,
-                    message: "Internal error: processResult is nil for request ID \(request.id)"
+                return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
+                    request,
+                    message: "Internal error: processResult is nil"
                 )
             }
 
@@ -570,18 +572,16 @@ access(all) contract FlowYieldVaultsEVM {
                 tokenAddress: request.tokenAddress,
                 requestType: request.requestType
             ) {
-                return ProcessResult(
-                    success: false,
-                    yieldVaultId: request.yieldVaultId,
-                    message: "Failed to complete processing for request ID \(request.id): \(result!.message)"
+                return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
+                    request,
+                    message: "Failed to complete processing: \(result!.message)"
                 )
             }
 
             if !result!.success {
-                return ProcessResult(
-                    success: false,
-                    yieldVaultId: request.yieldVaultId,
-                    message: "Processing failed for request ID \(request.id): \(result!.message)"
+                return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
+                    request,
+                    message: "Processing failed: \(result!.message)"
                 )
             }
 
@@ -596,8 +596,19 @@ access(all) contract FlowYieldVaultsEVM {
         access(all) fun markRequestAsFailed(
             _ request: EVMRequest,
             message: String
-        ): String? {
-            if !self.completeProcessing(
+        ): Bool {
+
+            emit RequestFailed(
+                requestId: request.id,
+                userAddress: request.user.toString(),
+                requestType: request.requestType,
+                tokenAddress: request.tokenAddress.toString(),
+                amount: request.amount,
+                yieldVaultId: request.yieldVaultId,
+                reason: message,
+            )
+
+            return self.completeProcessing(
                 requestId: request.id,
                 success: false,
                 yieldVaultId: request.yieldVaultId,
@@ -605,11 +616,7 @@ access(all) contract FlowYieldVaultsEVM {
                 refundAmount: request.amount,
                 tokenAddress: request.tokenAddress,
                 requestType: request.requestType,
-            ) {
-                return "Failed to mark request as failed for request ID \(request.id): \(message)"
-            }
-
-            return nil // success
+            )
         }
 
         /// @notice Starts processing a batch of requests
@@ -637,6 +644,8 @@ access(all) contract FlowYieldVaultsEVM {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
                 return "startProcessingBatch failed: \(errorMsg)"
             }
+
+            emit EVMRequestsDropped(requestIds: rejectedRequestIds)
 
             return nil // success
         }
@@ -1865,6 +1874,31 @@ access(all) contract FlowYieldVaultsEVM {
             }
         }
         return "EVM revert data: 0x\(String.encodeHex(data))"
+    }
+
+    /// @notice Emits the RequestFailed event and returns a ProcessResult with success=false
+    /// @dev This is a helper function to emit the RequestFailed event and return a ProcessResult with success=false
+    /// @param request The EVM request that failed
+    /// @param message The error message to include in the result
+    /// @return ProcessResult with success=false and the yieldVaultId and message
+    access(self) fun emitRequestFailedAndReturnProcessResult(
+        _ request: EVMRequest,
+        message: String,
+    ): ProcessResult {
+        emit RequestFailed(
+            requestId: request.id,
+            userAddress: request.user.toString(),
+            requestType: request.requestType,
+            tokenAddress: request.tokenAddress.toString(),
+            amount: request.amount,
+            yieldVaultId: request.yieldVaultId,
+            reason: message,
+        )
+        return ProcessResult(
+            success: false,
+            yieldVaultId: request.yieldVaultId,
+            message: "Request failed: \(message)",
+        )
     }
 
     // ============================================
