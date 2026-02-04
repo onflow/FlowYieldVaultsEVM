@@ -20,11 +20,11 @@ access(all) let testUserEVM = EVM.addressFromString("0x0000000000000000000000000
 access(all)
 fun setup() {
     deployContracts()
-    
+
     // Setup worker
     let coaResult = setupCOA(admin)
     Test.expect(coaResult, Test.beSucceeded())
-    
+
     let workerResult = setupWorkerWithBadge(admin)
     Test.expect(workerResult, Test.beSucceeded())
 }
@@ -38,7 +38,7 @@ fun testInvalidRequestType() {
     // --- arrange & act -----------------------------------------------------
     // Attempting to create request with invalid type (99) should fail at precondition
     // This validates that the EVMRequest struct enforces valid request types
-    
+
     // Test each valid request type
     let validTypes: [UInt8] = [
         FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
@@ -46,7 +46,7 @@ fun testInvalidRequestType() {
         FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue,
         FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue
     ]
-    
+
     for requestType in validTypes {
         var amount = 1000000000000000000 as UInt256
         if requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue {
@@ -60,21 +60,21 @@ fun testInvalidRequestType() {
             status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
             tokenAddress: nativeFlowAddr,
             amount: amount,
-            yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+            yieldVaultId: UInt64.max,
             timestamp: 0,
             message: "",
             vaultIdentifier: mockVaultIdentifier,
             strategyIdentifier: mockStrategyIdentifier
         )
-        
+
         Test.assertEqual(requestType, validRequest.requestType)
     }
-    
+
     // --- assert ------------------------------------------------------------
     // Verify boundary values (0 and 3 are valid, values outside should fail)
     Test.assertEqual(0 as UInt8, FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue)
     Test.assertEqual(3 as UInt8, FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue)
-    
+
     Test.expectFailure(fun(): Void {
         let closeWithPositiveAmount = FlowYieldVaultsEVM.EVMRequest(
             id: 3,
@@ -109,7 +109,7 @@ fun testZeroAmountWithdrawal() {
         vaultIdentifier: "",
         strategyIdentifier: ""
     )
-    
+
     // --- assert ------------------------------------------------------------
     Test.assertEqual(0 as UInt256, closeWithZeroAmount.amount)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue, closeWithZeroAmount.requestType)
@@ -153,7 +153,7 @@ fun testZeroAmountWithdrawal() {
             )
         }, errorMessageSubstring: "Amount must be greater than 0 for requestType \(requestType) but got amount 0")
     }
-    
+
     // Note: Zero amounts for CREATE_YIELDVAULT, DEPOSIT_TO_YIELDVAULT, and WITHDRAW_FROM_YIELDVAULT
     // would fail at struct initialization with error:
     // "Amount must be greater than 0 for CREATE_YIELDVAULT, DEPOSIT_TO_YIELDVAULT, and WITHDRAW_FROM_YIELDVAULT operations"
@@ -175,7 +175,7 @@ fun testRequestStatusCompletedStructure() {
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
-    
+
     Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.COMPLETED.rawValue, completedRequest.status)
     Test.assertEqual("Successfully created", completedRequest.message)
 }
@@ -196,7 +196,7 @@ fun testRequestStatusFailedStructure() {
         vaultIdentifier: "",
         strategyIdentifier: ""
     )
-    
+
     Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue, failedRequest.status)
     Test.assertEqual("Insufficient balance", failedRequest.message)
 }

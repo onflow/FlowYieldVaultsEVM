@@ -696,6 +696,75 @@
   },
   {
     "type": "function",
+    "name": "getRequestUnpacked",
+    "inputs": [
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "id",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "user",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "requestType",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "internalType": "uint8"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "yieldVaultId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "message",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "vaultIdentifier",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "strategyIdentifier",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getUserPendingBalance",
     "inputs": [
       {
@@ -1091,6 +1160,24 @@
   },
   {
     "type": "function",
+    "name": "startProcessingBatch",
+    "inputs": [
+      {
+        "name": "successfulRequestIds",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      },
+      {
+        "name": "rejectedRequestIds",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "transferOwnership",
     "inputs": [
       {
@@ -1198,6 +1285,25 @@
   {
     "type": "function",
     "name": "yieldVaultOwners",
+    "inputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "yieldVaultTokens",
     "inputs": [
       {
         "name": "",
@@ -1856,6 +1962,11 @@
   },
   {
     "type": "error",
+    "name": "CannotRegisterSentinelYieldVaultId",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "ContractPaused",
     "inputs": []
   },
@@ -2032,5 +2143,64 @@
     "type": "error",
     "name": "TransferFailed",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "YieldVaultIdAlreadyRegistered",
+    "inputs": [
+      {
+        "name": "yieldVaultId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "YieldVaultIdMismatch",
+    "inputs": [
+      {
+        "name": "expectedId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "providedId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "YieldVaultTokenMismatch",
+    "inputs": [
+      {
+        "name": "yieldVaultId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "expected",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "provided",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "YieldVaultTokenNotSet",
+    "inputs": [
+      {
+        "name": "yieldVaultId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
   }
 ]

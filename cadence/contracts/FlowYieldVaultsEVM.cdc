@@ -57,7 +57,7 @@ access(all) contract FlowYieldVaultsEVM {
         access(all) let status: UInt8
         access(all) let tokenAddress: EVM.EVMAddress
         access(all) let amount: UInt256
-        access(all) let yieldVaultId: UInt64
+        access(all) let yieldVaultId: UInt64?
         access(all) let timestamp: UInt256
         access(all) let message: String
         access(all) let vaultIdentifier: String
@@ -70,7 +70,7 @@ access(all) contract FlowYieldVaultsEVM {
             status: UInt8,
             tokenAddress: EVM.EVMAddress,
             amount: UInt256,
-            yieldVaultId: UInt64,
+            yieldVaultId: UInt64?,
             timestamp: UInt256,
             message: String,
             vaultIdentifier: String,
@@ -100,7 +100,12 @@ access(all) contract FlowYieldVaultsEVM {
             self.status = status
             self.tokenAddress = tokenAddress
             self.amount = amount
-            self.yieldVaultId = yieldVaultId
+            // EVM contract uses UInt64.max as sentinel for "no yieldvault"
+            if yieldVaultId == nil || yieldVaultId! == UInt64.max {
+                self.yieldVaultId = nil
+            } else {
+                self.yieldVaultId = yieldVaultId
+            }
             self.timestamp = timestamp
             self.message = message
             self.vaultIdentifier = vaultIdentifier
@@ -574,7 +579,7 @@ access(all) contract FlowYieldVaultsEVM {
             ) {
                 return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
                     request,
-                    message: "Failed to complete processing: \(result!.message)"
+                    message: "Failed to complete processing for request \(request.id)"
                 )
             }
 
@@ -636,7 +641,7 @@ access(all) contract FlowYieldVaultsEVM {
             let result = self.getCOARef().call(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
                 data: calldata,
-                gasLimit: 30_000_000,
+                gasLimit: 15_000_000,
                 value: EVM.Balance(attoflow: 0)
             )
 
@@ -645,7 +650,9 @@ access(all) contract FlowYieldVaultsEVM {
                 return "startProcessingBatch failed: \(errorMsg)"
             }
 
-            emit EVMRequestsDropped(requestIds: rejectedRequestIds)
+            if rejectedRequestIds.length > 0 {
+                emit EVMRequestsDropped(requestIds: rejectedRequestIds)
+            }
 
             return nil // success
         }
@@ -786,11 +793,11 @@ access(all) contract FlowYieldVaultsEVM {
 
             // Step 1: Validate user ownership of the YieldVault
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
-                if ownershipMap[request.yieldVaultId] != true {
+                if ownershipMap[request.yieldVaultId!] != true {
                     return ProcessResult(
                         success: false,
                         yieldVaultId: request.yieldVaultId,
-                        message: "User \(evmAddr) does not own YieldVault Id \(request.yieldVaultId)"
+                        message: "User \(evmAddr) does not own YieldVault Id \(request.yieldVaultId!)"
                     )
                 }
             } else {
@@ -802,22 +809,22 @@ access(all) contract FlowYieldVaultsEVM {
             }
 
             // Step 2: Close YieldVault and retrieve all funds
-            let vault <- self.getYieldVaultManagerRef().closeYieldVault(request.yieldVaultId)
+            let vault <- self.getYieldVaultManagerRef().closeYieldVault(request.yieldVaultId!)
             let amount = vault.balance
 
             // Step 3: Bridge funds back to user's EVM address
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user, tokenAddress: request.tokenAddress)
 
             // Step 4: Remove yieldVaultId from ownership tracking
-            if let index = FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddr]!.firstIndex(of: request.yieldVaultId) {
+            if let index = FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddr]!.firstIndex(of: request.yieldVaultId!) {
                 let _ = FlowYieldVaultsEVM.yieldVaultsByEVMAddress[evmAddr]!.remove(at: index)
             }
-            FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.remove(key: request.yieldVaultId)
+            FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.remove(key: request.yieldVaultId!)
 
             emit YieldVaultClosedForEVMUser(
                 requestId: request.id,
                 evmAddress: evmAddr,
-                yieldVaultId: request.yieldVaultId,
+                yieldVaultId: request.yieldVaultId!,
                 amountReturned: amount,
                 tokenAddress: request.tokenAddress.toString()
             )
@@ -825,7 +832,7 @@ access(all) contract FlowYieldVaultsEVM {
             return ProcessResult(
                 success: true,
                 yieldVaultId: request.yieldVaultId,
-                message: "YieldVault Id \(request.yieldVaultId) closed successfully, returned \(amount) FLOW"
+                message: "YieldVault Id \(request.yieldVaultId!) closed successfully, returned \(amount) FLOW"
             )
         }
 
@@ -861,17 +868,17 @@ access(all) contract FlowYieldVaultsEVM {
 
             // Step 2: Deposit to YieldVault via YieldVaultManager
             let betaRef = self.getBetaRef()
-            self.getYieldVaultManagerRef().depositToYieldVault(betaRef: betaRef, request.yieldVaultId, from: <-vault)
+            self.getYieldVaultManagerRef().depositToYieldVault(betaRef: betaRef, request.yieldVaultId!, from: <-vault)
 
             // Check if depositor is the owner for event emission
             var isYieldVaultOwner = false
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
-                isYieldVaultOwner = ownershipMap[request.yieldVaultId] ?? false
+                isYieldVaultOwner = ownershipMap[request.yieldVaultId!] ?? false
             }
             emit YieldVaultDepositedForEVMUser(
                 requestId: request.id,
                 evmAddress: evmAddr,
-                yieldVaultId: request.yieldVaultId,
+                yieldVaultId: request.yieldVaultId!,
                 amount: amount,
                 tokenAddress: request.tokenAddress.toString(),
                 isYieldVaultOwner: isYieldVaultOwner
@@ -880,7 +887,7 @@ access(all) contract FlowYieldVaultsEVM {
             return ProcessResult(
                 success: true,
                 yieldVaultId: request.yieldVaultId,
-                message: "Deposited \(amount) FLOW to YieldVault Id \(request.yieldVaultId)"
+                message: "Deposited \(amount) FLOW to YieldVault Id \(request.yieldVaultId!)"
             )
         }
 
@@ -898,11 +905,11 @@ access(all) contract FlowYieldVaultsEVM {
 
             // Step 1: Validate user ownership of the YieldVault
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
-                if ownershipMap[request.yieldVaultId] != true {
+                if ownershipMap[request.yieldVaultId!] != true {
                     return ProcessResult(
                         success: false,
                         yieldVaultId: request.yieldVaultId,
-                        message: "User \(evmAddr) does not own YieldVault Id \(request.yieldVaultId)"
+                        message: "User \(evmAddr) does not own YieldVault Id \(request.yieldVaultId!)"
                     )
                 }
             } else {
@@ -916,12 +923,12 @@ access(all) contract FlowYieldVaultsEVM {
             let amount = FlowYieldVaultsEVM.ufix64FromUInt256(request.amount, tokenAddress: request.tokenAddress)
 
             // Step 2: Pre-validate YieldVault exists and has sufficient balance
-            let yieldVaultRef = self.getYieldVaultManagerRef().borrowYieldVault(id: request.yieldVaultId)
+            let yieldVaultRef = self.getYieldVaultManagerRef().borrowYieldVault(id: request.yieldVaultId!)
             if yieldVaultRef == nil {
                 return ProcessResult(
                     success: false,
                     yieldVaultId: request.yieldVaultId,
-                    message: "YieldVault Id \(request.yieldVaultId) not found in manager"
+                    message: "YieldVault Id \(request.yieldVaultId!) not found in manager"
                 )
             }
             let availableBalance = yieldVaultRef!.getYieldVaultBalance()
@@ -934,7 +941,7 @@ access(all) contract FlowYieldVaultsEVM {
             }
 
             // Step 3: Withdraw funds from YieldVault
-            let vault <- self.getYieldVaultManagerRef().withdrawFromYieldVault(request.yieldVaultId, amount: amount)
+            let vault <- self.getYieldVaultManagerRef().withdrawFromYieldVault(request.yieldVaultId!, amount: amount)
 
             // Step 4: Bridge funds back to user's EVM address
             let actualAmount = vault.balance
@@ -943,7 +950,7 @@ access(all) contract FlowYieldVaultsEVM {
             emit YieldVaultWithdrawnForEVMUser(
                 requestId: request.id,
                 evmAddress: evmAddr,
-                yieldVaultId: request.yieldVaultId,
+                yieldVaultId: request.yieldVaultId!,
                 amount: actualAmount,
                 tokenAddress: request.tokenAddress.toString()
             )
@@ -951,7 +958,7 @@ access(all) contract FlowYieldVaultsEVM {
             return ProcessResult(
                 success: true,
                 yieldVaultId: request.yieldVaultId,
-                message: "Withdrew \(actualAmount) FLOW from YieldVault Id \(request.yieldVaultId)"
+                message: "Withdrew \(actualAmount) FLOW from YieldVault Id \(request.yieldVaultId!)"
             )
         }
 
@@ -1700,6 +1707,80 @@ access(all) contract FlowYieldVaultsEVM {
             claimableRefund: claimableRefund,
             requests: requests
         )
+    }
+
+    /// @notice Gets a specific request by ID in unpacked format (public query)
+    /// @dev Uses the contract account's public COA capability at /public/evm for read-only EVM calls.
+    /// @param requestId The request ID to fetch
+    /// @return EVMRequest containing request details
+    access(all) fun getRequestUnpacked(_ requestId: UInt256): EVMRequest {
+        pre {
+            self.flowYieldVaultsRequestsAddress != nil:
+                "FlowYieldVaultsRequests address not set - call Admin.setFlowYieldVaultsRequestsAddress() first"
+        }
+        let coaRef = self.account.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
+            ?? panic("Could not borrow public COA capability from /public/evm for contract account \(self.account.address)")
+
+        let calldata = EVM.encodeABIWithSignature(
+            "getRequestUnpacked(uint256)",
+            [requestId]
+        )
+
+        let callResult = coaRef.dryCall(
+            to: self.flowYieldVaultsRequestsAddress!,
+            data: calldata,
+            gasLimit: 15_000_000,
+            value: EVM.Balance(attoflow: 0)
+        )
+
+        if callResult.status != EVM.Status.successful {
+            let errorMsg = self.decodeEVMError(callResult.data)
+            panic("getRequestUnpacked call failed: \(errorMsg)")
+        }
+
+        let decoded = EVM.decodeABI(
+            types: [
+                Type<UInt256>(),          // id
+                Type<EVM.EVMAddress>(),   // user
+                Type<UInt8>(),            // requestType
+                Type<UInt8>(),            // status
+                Type<EVM.EVMAddress>(),   // tokenAddress
+                Type<UInt256>(),          // amount
+                Type<UInt64>(),           // yieldVaultId
+                Type<UInt256>(),          // timestamp
+                Type<String>(),           // message
+                Type<String>(),           // vaultIdentifier
+                Type<String>()           // strategyIdentifier
+            ],
+            data: callResult.data
+        )
+
+        let id = decoded[0] as! UInt256
+        let user = decoded[1] as! EVM.EVMAddress
+        let requestType = decoded[2] as! UInt8
+        let status = decoded[3] as! UInt8
+        let tokenAddress = decoded[4] as! EVM.EVMAddress
+        let amount = decoded[5] as! UInt256
+        let yieldVaultId = decoded[6] as! UInt64
+        let timestamp = decoded[7] as! UInt256
+        let message = decoded[8] as! String
+        let vaultIdentifier = decoded[9] as! String
+        let strategyIdentifier = decoded[10] as! String
+        // Build request array
+        let request = EVMRequest(
+            id: id,
+            user: user,
+            requestType: requestType,
+            status: status,
+            tokenAddress: tokenAddress,
+            amount: amount,
+            yieldVaultId: yieldVaultId,
+            timestamp: timestamp,
+            message: message,
+            vaultIdentifier: vaultIdentifier,
+            strategyIdentifier: strategyIdentifier
+            )
+        return request
     }
 
     /// @notice Gets the total count of pending requests (public query)

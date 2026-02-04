@@ -208,19 +208,21 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @notice Processes the assigned EVMRequest
         /// @dev This is scheduled by the SchedulerHandler
         /// @param id The transaction ID being executed
-        /// @param data - FlowYieldVaultsEVM.EVMRequest - The EVMRequest to process
+        /// @param data - UInt256 - The request ID to process
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
 
             // Get the worker capability
             let worker = self.workerCap.borrow()!
 
             // Process assigned request
-            if let request = data as? FlowYieldVaultsEVM.EVMRequest {
+            if let requestId = data as? UInt256 {
+                let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId)
                 worker.processRequest(request)
-                FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: request.id)
+                FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
             } else {
-                emit ExecutionSkipped(transactionId: id, reason: "No valid EVMRequest found")
+                emit ExecutionSkipped(transactionId: id, reason: "No valid request ID found")
             }
+
         }
 
         /// @notice Returns the view types supported by the WorkerHandler
@@ -300,7 +302,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @param manager The scheduler manager
         /// @return Error message if any error occurred, nil otherwise
         access(self) fun _runScheduler(
-            manager: &{FlowTransactionSchedulerUtils.Manager},
+            manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
         ): String? {
             // Check if scheduler is paused
             if FlowYieldVaultsEVMWorkerOps.isSchedulerPaused {
@@ -421,7 +423,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @param manager The scheduler manager
         access(self) fun _scheduleWorkerHandlersForRequests(
             requests: [FlowYieldVaultsEVM.EVMRequest],
-            manager: &{FlowTransactionSchedulerUtils.Manager},
+            manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
         ) {
             let workerHandler = FlowYieldVaultsEVMWorkerOps._getWorkerHandlerFromStorage()!
 
@@ -451,7 +453,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 let transactionId = self._scheduleTransaction(
                     manager: manager,
                     handlerTypeIdentifier: workerHandler.getType().identifier,
-                    data: request,
+                    data: request.id,
                     delay: delay,
                 )
 
@@ -469,7 +471,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @notice Schedules the next recurrent execution for SchedulerHandler
         /// @param manager The scheduler manager
         access(self) fun _scheduleNextSchedulerExecution(
-            manager: &{FlowTransactionSchedulerUtils.Manager}
+            manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
         ) {
             self._scheduleTransaction(
                 manager: manager,
@@ -487,7 +489,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @param delay The delay in seconds
         /// @return The transaction ID
         access(self) fun _scheduleTransaction(
-            manager: &{FlowTransactionSchedulerUtils.Manager},
+            manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
             handlerTypeIdentifier: String,
             data: AnyStruct?,
             delay: UFix64,
@@ -547,7 +549,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
     /// @notice Gets the Manager from contract storage for managing scheduled transactions
     /// @return The manager or nil if not found
-    access(self) view fun _getManagerFromStorage(): &{FlowTransactionSchedulerUtils.Manager}? {
+    access(self) view fun _getManagerFromStorage():
+     auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}? {
         return FlowYieldVaultsEVMWorkerOps.account.storage
             .borrow<auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}>
             (from: FlowTransactionSchedulerUtils.managerStoragePath)
@@ -563,7 +566,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
     /// @notice Gets the FlowToken vault from contract storage
     /// @return The FlowToken vault or nil if not found
-    access(self) view fun _getFlowTokenVaultFromStorage(): &FlowToken.Vault? {
+    access(self) view fun _getFlowTokenVaultFromStorage():
+     auth(FungibleToken.Withdraw) &FlowToken.Vault? {
         return FlowYieldVaultsEVMWorkerOps.account.storage
             .borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>
             (from: /storage/flowTokenVault)

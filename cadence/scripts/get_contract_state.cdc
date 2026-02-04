@@ -5,7 +5,7 @@ import "FlowYieldVaultsEVM"
 /// @param contractAddress The address where FlowYieldVaultsEVM is deployed (unused but kept for compatibility)
 /// @return Dictionary containing contract configuration and statistics
 ///
-access(all) fun main(contractAddress: Address): {String: AnyStruct} {
+access(all) fun main(): {String: AnyStruct} {
     let result: {String: AnyStruct} = {}
 
     result["flowYieldVaultsRequestsAddress"] = FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()?.toString() ?? "Not set"

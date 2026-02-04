@@ -50,7 +50,7 @@ fun testCreateYieldVaultFromEVMRequest() {
         status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000, // 1 FLOW in wei (10^18)
-        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId, // Placeholder until Cadence assigns a real ID
+        yieldVaultId: nil,
         timestamp: 0,
         message: "",
         vaultIdentifier: mockVaultIdentifier,
@@ -98,7 +98,7 @@ fun testDepositToExistingYieldVault() {
     // --- assert ------------------------------------------------------------
     Test.assertEqual(2 as UInt256, depositRequest.id)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue, depositRequest.requestType)
-    Test.assertEqual(1 as UInt64, depositRequest.yieldVaultId)
+    Test.assertEqual(1 as UInt64?, depositRequest.yieldVaultId)
     Test.assert(depositRequest.amount > 0, message: "Deposit amount must be positive")
 }
 
@@ -122,7 +122,7 @@ fun testWithdrawFromYieldVault() {
     // --- assert ------------------------------------------------------------
     Test.assertEqual(3 as UInt256, withdrawRequest.id)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue, withdrawRequest.requestType)
-    Test.assertEqual(1 as UInt64, withdrawRequest.yieldVaultId)
+    Test.assertEqual(1 as UInt64?, withdrawRequest.yieldVaultId)
     Test.assert(withdrawRequest.amount > 0, message: "Withdraw amount must be positive")
 }
 
@@ -146,7 +146,7 @@ fun testCloseYieldVaultComplete() {
     // --- assert ------------------------------------------------------------
     Test.assertEqual(4 as UInt256, closeRequest.id)
     Test.assertEqual(FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue, closeRequest.requestType)
-    Test.assertEqual(1 as UInt64, closeRequest.yieldVaultId)
+    Test.assertEqual(1 as UInt64?, closeRequest.yieldVaultId)
 }
 
 access(all)
@@ -161,7 +161,7 @@ fun testRequestStatusTransitions() {
         status: FlowYieldVaultsEVM.RequestStatus.COMPLETED.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000,
-        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+        yieldVaultId: nil,
         timestamp: 0,
         message: "",
         vaultIdentifier: mockVaultIdentifier,
@@ -177,7 +177,7 @@ fun testRequestStatusTransitions() {
         status: FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000,
-        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+        yieldVaultId: nil,
         timestamp: 0,
         message: "Insufficient balance",
         vaultIdentifier: mockVaultIdentifier,
@@ -197,7 +197,7 @@ fun testMultipleUsersIndependentYieldVaults() {
         status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000,
-        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+        yieldVaultId: nil,
         timestamp: 0,
         message: "",
         vaultIdentifier: mockVaultIdentifier,
@@ -211,7 +211,7 @@ fun testMultipleUsersIndependentYieldVaults() {
         status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 2000000000000000000,
-        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+        yieldVaultId: nil,
         timestamp: 0,
         message: "",
         vaultIdentifier: mockVaultIdentifier,
@@ -240,7 +240,7 @@ fun testProcessResultStructure() {
     )
 
     Test.assert(successResult.success)
-    Test.assertEqual(42 as UInt64, successResult.yieldVaultId)
+    Test.assertEqual(42 as UInt64?, successResult.yieldVaultId)
     Test.assertEqual("YieldVault created successfully", successResult.message)
 
     // Test failure result (NO_YIELDVAULT_ID sentinel for "no yieldvault")
@@ -268,7 +268,7 @@ fun testVaultAndStrategyIdentifiers() {
         status: FlowYieldVaultsEVM.RequestStatus.PENDING.rawValue,
         tokenAddress: nativeFlowAddr,
         amount: 1000000000000000000,
-        yieldVaultId: FlowYieldVaultsEVM.noYieldVaultId,
+        yieldVaultId: nil,
         timestamp: 0,
         message: "",
         vaultIdentifier: customVaultId,

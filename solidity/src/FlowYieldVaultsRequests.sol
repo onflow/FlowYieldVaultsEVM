@@ -1197,6 +1197,52 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         return requests[requestId];
     }
 
+    /// @notice Gets a specific request by ID in unpacked format (tuple)
+    /// @param requestId The request ID to fetch
+    /// @return id Request id
+    /// @return user User address
+    /// @return requestType Request type
+    /// @return status Request status
+    /// @return tokenAddress Token address
+    /// @return amount Amount
+    /// @return yieldVaultId YieldVault Id
+    /// @return timestamp Timestamp
+    /// @return message Status message
+    /// @return vaultIdentifier Vault identifier
+    /// @return strategyIdentifier Strategy identifier
+    function getRequestUnpacked(
+        uint256 requestId
+    )
+        external
+        view
+        returns (
+            uint256 id,
+            address user,
+            uint8 requestType,
+            uint8 status,
+            address tokenAddress,
+            uint256 amount,
+            uint64 yieldVaultId,
+            uint256 timestamp,
+            string memory message,
+            string memory vaultIdentifier,
+            string memory strategyIdentifier
+        )
+    {
+        Request storage req = requests[requestId];
+        id = req.id;
+        user = req.user;
+        requestType = uint8(req.requestType);
+        status = uint8(req.status);
+        tokenAddress = req.tokenAddress;
+        amount = req.amount;
+        yieldVaultId = req.yieldVaultId;
+        timestamp = req.timestamp;
+        message = req.message;
+        vaultIdentifier = req.vaultIdentifier;
+        strategyIdentifier = req.strategyIdentifier;
+    }
+
     /// @notice Checks if a YieldVault Id is valid
     /// @param yieldVaultId YieldVault Id to check
     /// @return True if valid

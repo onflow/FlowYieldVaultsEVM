@@ -31,7 +31,7 @@ access(all) fun main(contractAddr: Address, startIndex: Int, count: Int): {Strin
         "statusName": getStatusName(request.status),
         "tokenAddress": request.tokenAddress.toString(),
         "amount": request.amount.toString(),
-        "yieldVaultId": request.yieldVaultId.toString(),
+        "yieldVaultId": request.yieldVaultId?.toString() ?? "",
         "timestamp": request.timestamp.toString(),
         "message": request.message
     }
