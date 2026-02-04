@@ -2,38 +2,34 @@ import "FlowTransactionScheduler"
 import "FlowTransactionSchedulerUtils"
 import "FlowToken"
 import "FungibleToken"
-import "FlowYieldVaultsTransactionHandler"
+import "FlowYieldVaultsEVMWorkerOps"
 import "FlowYieldVaultsEVM"
 
-/// @title Initialize Handler and Schedule First Execution
-/// @notice Creates the transaction handler and schedules the first automated execution
-/// @dev Combines init_flow_vaults_transaction_handler and schedule_initial_flow_vaults_execution.
-///      Safe to run multiple times - will skip already-configured resources.
-///      Execution effort and priority are calculated dynamically based on FlowYieldVaultsEVM.maxRequestsPerTx.
+/// @title Initialize Handlers and Schedule First Execution
+/// @notice Creates the WorkerHandler and SchedulerHandler and schedules the first executions
+/// @dev Flow:
+///      1. Initialize the manager if it doesn't exist
+///      2. Initialize the WorkerHandler if it doesn't exist
+///      3. Initialize the SchedulerHandler if it doesn't exist
+///      4. Schedule the first dummy WorkerHandler transaction to register the WorkerHandler in the manager
+///      5. Schedule the scheduler
 ///
-/// @param delaySeconds Initial delay before first execution (e.g., 5.0)
-///
-transaction(
-    delaySeconds: UFix64
-) {
+transaction {
+
+    let workerHandlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>
+    let schedulerHandlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>
+    let manager: &{FlowTransactionSchedulerUtils.Manager}
+    let feeVaultRef: auth(FungibleToken.Withdraw) &FlowToken.Vault
+
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
-        // TODO: update this
-        if signer.storage.borrow<&FlowYieldVaultsEVM.Worker>(from: FlowYieldVaultsEVM.WorkerStoragePath) == nil {
-            panic("FlowYieldVaultsEVM Worker not found. Please initialize Worker first.")
+        pre {
+            signer.storage.borrow<&FlowYieldVaultsEVM.Admin>(from: FlowYieldVaultsEVM.AdminStoragePath) != nil:
+                "FlowYieldVaultsEVM Admin not found."
+            signer.storage.borrow<&FlowYieldVaultsEVM.Worker>(from: FlowYieldVaultsEVM.WorkerStoragePath) != nil:
+                "FlowYieldVaultsEVM Worker not found."
         }
 
-        if signer.storage.borrow<&AnyResource>(from: FlowYieldVaultsTransactionHandler.HandlerStoragePath) == nil {
-            let workerCap = signer.capabilities.storage
-                .issue<&FlowYieldVaultsEVM.Worker>(FlowYieldVaultsEVM.WorkerStoragePath)
-            let handler <- FlowYieldVaultsTransactionHandler.createHandler(workerCap: workerCap)
-            signer.storage.save(<-handler, to: FlowYieldVaultsTransactionHandler.HandlerStoragePath)
-        }
-
-        let handlerCap = signer.capabilities.storage
-            .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(
-                FlowYieldVaultsTransactionHandler.HandlerStoragePath
-            )
-
+        // Initialize the manager if it doesn't exist
         if signer.storage.borrow<&AnyResource>(from: FlowTransactionSchedulerUtils.managerStoragePath) == nil {
             let manager <- FlowTransactionSchedulerUtils.createManager()
             signer.storage.save(<-manager, to: FlowTransactionSchedulerUtils.managerStoragePath)
@@ -43,55 +39,82 @@ transaction(
             signer.capabilities.publish(managerCapPublic, at: FlowTransactionSchedulerUtils.managerPublicPath)
         }
 
-        let manager = signer.storage
+        // Load manager
+        self.manager = signer.storage
             .borrow<auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}>(
                 from: FlowTransactionSchedulerUtils.managerStoragePath
             ) ?? panic("Could not borrow Manager reference")
 
-        let future = getCurrentBlock().timestamp + delaySeconds
+        // Load WorkerOps Admin
+        let opsAdmin = signer.storage
+            .borrow<&FlowYieldVaultsEVMWorkerOps.Admin>
+            (from: FlowYieldVaultsEVMWorkerOps.AdminStoragePath)
+            ?? panic("Could not borrow FlowYieldVaultsEVMWorkerOps Admin")
 
-        // Calculate execution effort and priority dynamically based on maxRequestsPerTx
-        let maxRequestsPerTx = FlowYieldVaultsEVM.getMaxRequestsPerTx()
-        let effortAndPriority = FlowYieldVaultsTransactionHandler.calculateExecutionEffortAndPriority(maxRequestsPerTx)
-        let executionEffort = effortAndPriority["effort"]! as! UInt64
-        let priorityRaw = effortAndPriority["priority"]! as! UInt8
+        // Issue the worker capability for WorkerHandler resources
+        let workerCap = signer.capabilities.storage
+            .issue<&FlowYieldVaultsEVM.Worker>(FlowYieldVaultsEVM.WorkerStoragePath)
 
-        let pr = priorityRaw == 0
-            ? FlowTransactionScheduler.Priority.High
-            : FlowTransactionScheduler.Priority.Medium
-
-        let est = FlowTransactionScheduler.estimate(
-            data: [],
-            timestamp: future,
-            priority: pr,
-            executionEffort: executionEffort
-        )
-
-        let estimatedFee = est.flowFee ?? 0.0
-
-        if est.timestamp == nil && pr != FlowTransactionScheduler.Priority.Low {
-            let errorMsg = est.error ?? "estimation failed"
-            panic("Fee estimation failed: \(errorMsg)")
+        // Initialize SchedulerHandler resource if it doesn't exist
+        if signer.storage.borrow<&AnyResource>(from: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath) == nil {
+            let handler <- opsAdmin.createSchedulerHandler(workerCap: workerCap)
+            signer.storage.save(<-handler, to: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath)
         }
 
-        let vaultRef = signer.storage
+        // Initialize WorkerHandler resource if it doesn't exist
+        if signer.storage.borrow<&AnyResource>(from: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath) == nil {
+            let handler <- opsAdmin.createWorkerHandler(workerCap: workerCap)
+            signer.storage.save(<-handler, to: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath)
+        }
+
+        // Issue capability to SchedulerHandler for scheduling
+        self.schedulerHandlerCap = signer.capabilities.storage
+            .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(
+                FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath
+            )
+
+        // Issue capability to WorkerHandler for scheduling
+        self.workerHandlerCap = signer.capabilities.storage
+            .issue<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>(
+                FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath
+            )
+
+        // Load FlowToken vault for fees
+        self.feeVaultRef = signer.storage
             .borrow<auth(FungibleToken.Withdraw) &FlowToken.Vault>(from: /storage/flowTokenVault)
             ?? panic("Missing FlowToken vault")
 
-        let fees <- vaultRef.withdraw(amount: estimatedFee) as! @FlowToken.Vault
+    }
 
-        let transactionId = manager.schedule(
-            handlerCap: handlerCap,
-            data: [],
-            timestamp: future,
-            priority: pr,
-            executionEffort: executionEffort,
-            fees: <-fees
+    execute {
+
+        // Schedule first dummy WorkerHandler transaction to register the WorkerHandler in the manager
+        let transactionId = _scheduleTransaction(
+            manager: self.manager,
+            handlerCap: self.workerHandlerCap,
+            feeVaultRef: self.feeVaultRef
         )
+
+        // Schedule scheduler
+        let schedulerTransactionId = _scheduleTransaction(
+            manager: self.manager,
+            handlerCap: self.schedulerHandlerCap,
+            feeVaultRef: self.feeVaultRef
+        )
+
     }
 
 }
 
+/// @notice Helper function to schedule a transaction
+/// @dev Flow:
+///      1. Calculate the target execution timestamp
+///      2. Estimate fees and withdraw payment
+///      3. Schedule the transaction
+/// @param manager The manager
+/// @param handlerCap The capability to the handler
+/// @param feeVaultRef The vault to withdraw fees from
+/// @return The transaction ID
 access(self) fun _scheduleTransaction(
     manager: &{FlowTransactionSchedulerUtils.Manager},
     handlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>,

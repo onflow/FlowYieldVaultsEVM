@@ -79,15 +79,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     access(all) let AdminStoragePath: StoragePath
 
     // ============================================
-    // Internal Variables
-    // ============================================
-
-    /// @notice Capability to the Worker resource for processing requests
-    /// @dev Authorizes this contract to process requests in the FlowYieldVaultsEVM contract
-    ///      Required to be set by the admin before the SchedulerHandler can start processing requests
-    access(self) var workerCap: Capability<&FlowYieldVaultsEVM.Worker>?
-
-    // ============================================
     // Events
     // ============================================
 
@@ -136,37 +127,24 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         /// @notice Creates a new WorkerHandler resource
         /// @return The newly created WorkerHandler resource
-        access(all) fun createWorkerHandler(): @WorkerHandler {
+        access(all) fun createWorkerHandler(
+            workerCap: Capability<&FlowYieldVaultsEVM.Worker>,
+        ): @WorkerHandler {
             pre {
-                FlowYieldVaultsEVMWorkerOps.workerCap != nil:
-                    "Worker capability is not set"
-                FlowYieldVaultsEVMWorkerOps.workerCap!.check():
-                    "Worker capability is invalid (id: \(FlowYieldVaultsEVMWorkerOps.workerCap!.id))"
+                workerCap.check(): "Worker capability is invalid (id: \(workerCap.id))"
             }
-            return <- create WorkerHandler()
+            return <- create WorkerHandler(workerCap: workerCap)
         }
 
         /// @notice Creates a new SchedulerHandler resource
         /// @return The newly created SchedulerHandler resource
-        access(all) fun createSchedulerHandler(): @SchedulerHandler {
-            pre {
-                FlowYieldVaultsEVMWorkerOps.workerCap != nil:
-                    "Worker capability is not set"
-                FlowYieldVaultsEVMWorkerOps.workerCap!.check():
-                    "Worker capability is invalid (id: \(FlowYieldVaultsEVMWorkerOps.workerCap!.id))"
-            }
-            return <- create SchedulerHandler()
-        }
-
-        /// @notice Sets the Worker capability
-        /// @dev Authorizes this contract to process requests in the FlowYieldVaultsEVM contract
-        ///      Required to be set before the SchedulerHandler can start processing requests
-        /// @param workerCap Capability to the FlowYieldVaultsEVM.Worker resource
-        access(all) fun setWorkerCap(workerCap: Capability<&FlowYieldVaultsEVM.Worker>) {
+        access(all) fun createSchedulerHandler(
+            workerCap: Capability<&FlowYieldVaultsEVM.Worker>,
+        ): @SchedulerHandler {
             pre {
                 workerCap.check(): "Worker capability is invalid (id: \(workerCap.id))"
             }
-            FlowYieldVaultsEVMWorkerOps.workerCap = workerCap
+            return <- create SchedulerHandler(workerCap: workerCap)
         }
 
         /// @notice Stops all scheduled executions by pausing the SchedulerHandler and cancelling all pending transactions
@@ -214,20 +192,27 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @notice Handler that processes the given EVM requests
     access(all) resource WorkerHandler: FlowTransactionScheduler.TransactionHandler {
 
+        /// @notice Capability to the Worker resource for processing requests
+        access(self) let workerCap: Capability<&FlowYieldVaultsEVM.Worker>
+
         /// @notice Initializes the WorkerHandler
-        init() {}
+        init(
+            workerCap: Capability<&FlowYieldVaultsEVM.Worker>,
+        ) {
+            pre {
+                workerCap.check(): "Worker capability is invalid (id: \(workerCap.id))"
+            }
+            self.workerCap = workerCap
+        }
 
         /// @notice Processes the assigned EVMRequest
         /// @dev This is scheduled by the SchedulerHandler
         /// @param id The transaction ID being executed
         /// @param data - FlowYieldVaultsEVM.EVMRequest - The EVMRequest to process
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
-            pre {
-                FlowYieldVaultsEVMWorkerOps._getWorker() != nil: "Worker capability not found"
-            }
 
             // Get the worker capability
-            let worker = FlowYieldVaultsEVMWorkerOps._getWorker()!
+            let worker = self.workerCap.borrow()!
 
             // Process assigned request
             if let request = data as? FlowYieldVaultsEVM.EVMRequest {
@@ -266,8 +251,18 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @dev Also manages crash recovery for scheduled WorkerHandlers
     access(all) resource SchedulerHandler: FlowTransactionScheduler.TransactionHandler {
 
+        /// @notice Capability to the Worker resource for processing requests
+        access(self) let workerCap: Capability<&FlowYieldVaultsEVM.Worker>
+
         /// @notice Initializes the SchedulerHandler
-        init() {}
+        init(
+            workerCap: Capability<&FlowYieldVaultsEVM.Worker>,
+        ) {
+            pre {
+                workerCap.check(): "Worker capability is invalid (id: \(workerCap.id))"
+            }
+            self.workerCap = workerCap
+        }
 
         /// @notice Executes the recurrent scheduler logic
         /// @param id The transaction ID being executed
@@ -275,7 +270,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
             pre {
                 FlowYieldVaultsEVMWorkerOps._getManagerFromStorage() != nil: "Scheduler manager not found"
-                FlowYieldVaultsEVMWorkerOps._getWorker() != nil: "Worker capability not found"
                 FlowYieldVaultsEVMWorkerOps._getWorkerHandlerFromStorage() != nil: "WorkerHandler resource not found"
                 FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage() != nil: "FlowToken vault not found"
             }
@@ -314,7 +308,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             }
 
             // Check for failed worker requests
-            let worker = FlowYieldVaultsEVMWorkerOps._getWorker()!
+            let worker = self.workerCap.borrow()!
             self._checkForFailedWorkerRequests(manager: manager, worker: worker)
 
             // Calculate capacity
@@ -559,15 +553,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             (from: FlowTransactionSchedulerUtils.managerStoragePath)
     }
 
-    /// @notice Gets the worker capability
-    /// @return The worker capability or nil if not found
-    access(self) view fun _getWorker(): &FlowYieldVaultsEVM.Worker? {
-        if let workerCap = FlowYieldVaultsEVMWorkerOps.workerCap {
-            return workerCap.borrow()
-        }
-        return nil
-    }
-
     /// @notice Gets the WorkerHandler from contract storage
     /// @return The WorkerHandler or nil if not found
     access(self) view fun _getWorkerHandlerFromStorage(): &WorkerHandler? {
@@ -627,7 +612,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         self.SchedulerHandlerStoragePath = /storage/FlowYieldVaultsEVMWorkerOpsSchedulerHandler
         self.AdminStoragePath = /storage/FlowYieldVaultsEVMWorkerOpsAdmin
 
-        self.workerCap = nil
         self.scheduledRequests = {}
         self.isSchedulerPaused = false
 

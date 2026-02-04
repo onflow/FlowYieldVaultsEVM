@@ -13,6 +13,8 @@ transaction(requestIds: [UInt256]) {
             from: FlowYieldVaultsEVM.WorkerStoragePath
         ) ?? panic("Could not borrow FlowYieldVaultsEVM Worker resource")
 
-        worker.dropRequests(requestIds)
+        if let errorMsg = worker.dropRequests(requestIds) {
+            panic(errorMsg)
+        }
     }
 }

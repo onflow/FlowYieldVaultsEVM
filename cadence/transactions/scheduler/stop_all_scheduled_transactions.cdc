@@ -1,4 +1,4 @@
-import "FlowYieldVaultsTransactionHandler"
+import "FlowYieldVaultsEVMWorkerOps"
 
 /// @title Stop All Scheduled Transactions
 /// @notice Stops and cancels all scheduled transactions, pausing the handler and refunding fees
@@ -10,8 +10,8 @@ import "FlowYieldVaultsTransactionHandler"
 ///
 transaction() {
     prepare(signer: auth(BorrowValue) &Account) {
-        let admin = signer.storage.borrow<&FlowYieldVaultsTransactionHandler.Admin>(
-            from: FlowYieldVaultsTransactionHandler.AdminStoragePath
+        let admin = signer.storage.borrow<&FlowYieldVaultsEVMWorkerOps.Admin>(
+            from: FlowYieldVaultsEVMWorkerOps.AdminStoragePath
         ) ?? panic("Could not borrow Admin resource")
 
         admin.stopAll()

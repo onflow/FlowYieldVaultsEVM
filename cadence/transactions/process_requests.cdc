@@ -13,6 +13,11 @@ transaction(startIndex: Int, count: Int) {
             from: FlowYieldVaultsEVM.WorkerStoragePath
         ) ?? panic("Could not borrow Worker from storage")
 
-        worker.processRequests(startIndex: startIndex, count: count)
+        let requests = worker.getPendingRequestsFromEVM(
+            startIndex: startIndex,
+            count: count,
+        )
+
+        worker.processRequests(requests)
     }
 }
