@@ -46,7 +46,7 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 ### Cross-VM Request Flow
 
 1. **EVM User** calls `FlowYieldVaultsRequests.sol` (creates request, escrows funds)
-2. **FlowYieldVaultsTransactionHandler.cdc** triggers `Worker.processRequests()` on schedule
+2. **FlowYieldVaultsEVMWorkerOps.cdc** SchedulerHandler schedules WorkerHandlers to process requests
 3. **FlowYieldVaultsEVM.cdc** Worker fetches pending requests via `getPendingRequestsUnpacked()`
 4. **Two-phase commit**: `startProcessing()` marks PROCESSING and deducts balance, `completeProcessing()` marks COMPLETED/FAILED (refunds credited to `claimableRefunds` on failure)
 
@@ -56,15 +56,16 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 | --------------------------------------- | -------------------- | ----------------------------------- |
 | `FlowYieldVaultsRequests.sol`           | `solidity/src/`      | EVM request queue + fund escrow     |
 | `FlowYieldVaultsEVM.cdc`                | `cadence/contracts/` | Cadence worker processing requests  |
-| `FlowYieldVaultsTransactionHandler.cdc` | `cadence/contracts/` | Auto-scheduler with adaptive delays |
+| `FlowYieldVaultsEVMWorkerOps.cdc`       | `cadence/contracts/` | SchedulerHandler + WorkerHandler orchestration |
 
 ### Key Design Patterns
 
 - **COA Bridge**: Cadence Owned Account bridges funds between EVM and Cadence via FlowEVMBridge
 - **Sentinel Values**: `NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF`, `NO_YIELDVAULT_ID = type(uint64).max`
 - **Ownership Tracking**: Parallel mappings on both EVM (`userOwnsYieldVault`) and Cadence (`yieldVaultOwnershipLookup`) for O(1) lookups
-- **Adaptive Scheduling**: TransactionHandler adjusts delay based on pending count (3s for >10, 5s for >=5, 7s for >=1, 30s idle)
-- **Dynamic Execution Effort**: `baseEffortPerRequest * maxRequestsPerTx + baseOverhead`
+- **Scheduler/Worker Split**: SchedulerHandler runs at fixed interval, schedules WorkerHandlers for individual requests
+- **Batch Preprocessing**: SchedulerHandler validates requests before scheduling workers; invalid requests fail early
+- **Crash Recovery**: SchedulerHandler monitors WorkerHandler transactions and marks panicked requests as FAILED
 
 ### Request Types (must stay synchronized between contracts)
 
@@ -114,7 +115,7 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 | --------------------------------- | -------------------------------------------- |
 | FlowYieldVaultsRequests (EVM)     | `0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d` |
 | FlowYieldVaultsEVM (Cadence)      | `df111ffc5064198a`                           |
-| FlowYieldVaultsTransactionHandler | `df111ffc5064198a`                           |
+| FlowYieldVaultsEVMWorkerOps       | `df111ffc5064198a`                           |
 
 ## Dependencies
 

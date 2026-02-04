@@ -31,7 +31,8 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 │  └───────────────────────────────────────────────────────────────────────┘  │
 │                              ▲                                              │
 │  ┌───────────────────────────┴─────────────────────────────────────────┐    │
-│  │              FlowYieldVaultsTransactionHandler                      │    │
+│  │                   FlowYieldVaultsEVMWorkerOps                       │    │
+│  │  SchedulerHandler ──schedules──▶ WorkerHandler (per request)       │    │
 │  │       (Auto-scheduling with FlowTransactionScheduler)               │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
@@ -44,7 +45,7 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 |-----------|-------------|
 | **FlowYieldVaultsRequests** (Solidity) | Request queue and fund escrow on EVM. Accepts user requests and holds deposited funds until processed. |
 | **FlowYieldVaultsEVM** (Cadence) | Worker contract that processes EVM requests, manages YieldVault positions, and bridges funds via COA. |
-| **FlowYieldVaultsTransactionHandler** (Cadence) | Auto-scheduling handler that triggers request processing at adaptive intervals based on queue depth. |
+| **FlowYieldVaultsEVMWorkerOps** (Cadence) | Orchestration contract with SchedulerHandler (checks queue, schedules workers) and WorkerHandler (processes individual requests). Includes crash recovery for panicked workers. |
 | **COA** (Cadence Owned Account) | Bridge account controlled by the Worker that moves funds between EVM and Cadence. |
 
 ## Supported Operations
@@ -60,7 +61,7 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 
 1. **User submits request** on EVM with optional fund deposit
 2. **FlowYieldVaultsRequests** escrows funds and queues the request
-3. **FlowYieldVaultsTransactionHandler** triggers `worker.processRequests()` at scheduled intervals
+3. **FlowYieldVaultsEVMWorkerOps** SchedulerHandler schedules WorkerHandlers to process requests
 4. **Worker.processRequests()** fetches pending requests from EVM via `getPendingRequestsUnpacked()`
 5. **For each request**, two-phase commit:
    - `startProcessing()`: Marks request as PROCESSING, deducts user balance (for CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT)
@@ -188,7 +189,7 @@ forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYie
 |---------|----------|---------|
 | Testnet | FlowYieldVaultsRequests | `0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d` |
 | Testnet | FlowYieldVaultsEVM | Deployed on Cadence |
-| Testnet | FlowYieldVaultsTransactionHandler | Deployed on Cadence |
+| Testnet | FlowYieldVaultsEVMWorkerOps | Deployed on Cadence |
 
 Source of truth for published addresses: `deployments/contract-addresses.json`.
 
@@ -249,27 +250,13 @@ Testnet E2E uses `deployments/contract-addresses.json` to auto-load addresses (s
 | `maxPendingRequestsPerUser` | 10 | Max pending requests per user (0 = unlimited) |
 | `minimumBalance` | 1 FLOW | Minimum deposit for native $FLOW |
 
-### FlowYieldVaultsEVM (Cadence)
+### FlowYieldVaultsEVMWorkerOps (Cadence)
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `maxRequestsPerTx` | 1 | Requests processed per transaction (1-100) |
+| `schedulerWakeupInterval` | 2.0s | Fixed interval between scheduler executions |
+| `maxProcessingRequests` | 3 | Maximum concurrent WorkerHandlers |
 
-### FlowYieldVaultsTransactionHandler (Cadence)
-
-| Pending Requests | Delay | Description |
-|------------------|-------|-------------|
-| ≥11 | 3s | High load |
-| ≥5 | 5s | Medium load |
-| ≥1 | 7s | Low load |
-| 0 | 30s | Idle |
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `isPaused` | false | Pause/resume processing |
-| `baseEffortPerRequest` | 2000 | Execution effort per request |
-| `baseOverhead` | 3000 | Base overhead for transactions |
-| `idleExecutionEffort` | 5000 | Max effort cap when idle (for Medium priority) |
 
 ## Security
 

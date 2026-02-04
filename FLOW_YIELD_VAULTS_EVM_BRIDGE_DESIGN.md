@@ -46,29 +46,33 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │  │  │  - feeProviderCap (FungibleToken.Withdraw, FungibleToken.Provider)│ │  │
 │  │  │                                                                 │ │  │
 │  │  │  Functions:                                                     │ │  │
-│  │  │  - processRequests()                                            │ │  │
-│  │  │  - processCreateYieldVault()                                    │ │  │
-│  │  │  - processDepositToYieldVault()                                 │ │  │
-│  │  │  - processWithdrawFromYieldVault()                              │ │  │
-│  │  │  - processCloseYieldVault()                                     │ │  │
+│  │  │  - processRequest()                                             │ │  │
+│  │  │  - preprocessRequest()                                          │ │  │
+│  │  │  - startProcessingBatch()                                       │ │  │
+│  │  │  - markRequestAsFailed()                                        │ │  │
 │  │  └─────────────────────────────────────────────────────────────────┘ │  │
 │  │                                                                       │  │
 │  │  State:                                                               │  │
 │  │  - yieldVaultsByEVMAddress: {String: [UInt64]}                        │  │
 │  │  - yieldVaultOwnershipLookup: {String: {UInt64: Bool}}                │  │
 │  │  - flowYieldVaultsRequestsAddress: EVM.EVMAddress?                    │  │
-│  │  - maxRequestsPerTx: Int (default: 1)                                 │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 │                              ▲                                              │
 │                              │ triggers                                     │
 │  ┌───────────────────────────┴─────────────────────────────────────────┐   │
-│  │              FlowYieldVaultsTransactionHandler                       │   │
+│  │                   FlowYieldVaultsEVMWorkerOps                        │   │
 │  │                                                                      │   │
-│  │  - Implements FlowTransactionScheduler.TransactionHandler           │   │
-│  │  - Auto-schedules next execution after each run                     │   │
-│  │  - Adaptive delay based on pending request count                    │   │
-│  │  - Single scheduled execution                                       │   │
-│  │  - Pausable via Admin resource                                      │   │
+│  │  ┌─────────────────────┐    ┌─────────────────────────────────────┐ │   │
+│  │  │   SchedulerHandler  │───▶│         WorkerHandler               │ │   │
+│  │  │                     │    │                                     │ │   │
+│  │  │  - Recurrent job    │    │  - Processes single request         │ │   │
+│  │  │  - Schedules workers│    │  - Finalizes status on EVM          │ │   │
+│  │  │  - Crash recovery   │    │  - Removes from scheduledRequests   │ │   │
+│  │  │  - Preprocessing    │    └─────────────────────────────────────┘ │   │
+│  │  └─────────────────────┘                                            │   │
+│  │                                                                      │   │
+│  │  State: scheduledRequests, isSchedulerPaused                        │   │
+│  │  Config: schedulerWakeupInterval (2s), maxProcessingRequests (3)    │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -137,36 +141,47 @@ access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
 
 // Configuration (stored as contract-only vars; exposed via getters)
 var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
-var maxRequestsPerTx: Int  // Default: 1, max: 100
 
 // Constants
 access(all) let nativeFlowEVMAddress: EVM.EVMAddress  // 0xFFfF...FfFFFfF
 ```
 
-#### 3. FlowYieldVaultsTransactionHandler (Cadence)
+#### 3. FlowYieldVaultsEVMWorkerOps (Cadence)
 
-Scheduled transaction handler with auto-scheduling.
+Worker orchestration contract with auto-scheduling and crash recovery.
+
+**Resources:**
+- **WorkerHandler**: Processes individual requests. Scheduled by SchedulerHandler to handle one request at a time.
+- **SchedulerHandler**: Recurrent job that checks for pending requests and schedules WorkerHandlers based on available capacity.
 
 **Responsibilities:**
-- Implement `FlowTransactionScheduler.TransactionHandler` interface
-- Trigger Worker's `processRequests()` on scheduled execution
-- Auto-schedule next execution based on queue depth
-- Dynamic execution effort calculation based on request count
+- Implement `FlowTransactionScheduler.TransactionHandler` interface for both handlers
+- SchedulerHandler checks for pending requests at fixed intervals
+- SchedulerHandler preprocesses requests to fail invalid ones early (before scheduling workers)
+- SchedulerHandler schedules WorkerHandlers for valid requests (PENDING → PROCESSING via `startProcessingBatch`)
+- SchedulerHandler identifies panicked WorkerHandlers and marks requests as FAILED
+- WorkerHandler processes a single request and updates EVM state on completion
+- Sequential scheduling for same-user requests to avoid block ordering issues
 - Pausable for maintenance
 
 **Key State:**
 ```cadence
-// Delay configuration (pending count → delay in seconds)
-access(contract) var thresholdToDelay: {Int: UFix64}  // {11: 3.0, 5: 5.0, 1: 7.0, 0: 30.0}
-access(all) let defaultDelay: UFix64  // 30.0
+// In-flight request tracking
+access(self) var scheduledRequests: {UInt256: ScheduledEVMRequest}  // request id → tracking info
+access(self) var isSchedulerPaused: Bool
 
-// Execution effort parameters
-access(contract) var baseEffortPerRequest: UInt64  // Default: 2000
-access(contract) var baseOverhead: UInt64          // Default: 3000
-access(contract) var idleExecutionEffort: UInt64   // Default: 5000 (for Medium priority)
+// Configuration
+access(self) var schedulerWakeupInterval: UFix64  // Default: 2.0 seconds
+access(self) var maxProcessingRequests: Int       // Default: 3 concurrent workers
+```
 
-// Control
-access(contract) var isPaused: Bool
+**ScheduledEVMRequest:**
+```cadence
+access(all) struct ScheduledEVMRequest {
+    access(all) let request: FlowYieldVaultsEVM.EVMRequest
+    access(all) let workerTransactionId: UInt64
+    access(all) let workerScheduledTimestamp: UFix64
+}
 ```
 
 #### 4. COA (Cadence Owned Account)
@@ -420,62 +435,72 @@ function completeProcessing(
 
 ---
 
-## Adaptive Scheduling
+## Scheduling & Request Processing
 
-### Delay Thresholds
+### SchedulerHandler Workflow
 
-| Pending Requests | Delay (seconds) | Description |
-|------------------|-----------------|-------------|
-| >= 11 | 3 | High load - rapid processing |
-| >= 5 | 5 | Medium load |
-| >= 1 | 7 | Low load |
-| 0 | 30 | Idle - minimal overhead |
+The SchedulerHandler runs at a fixed interval (`schedulerWakeupInterval`, default 2 seconds) and performs the following:
 
-### Scheduling Logic
+1. **Check if paused** - Skip scheduling if `isSchedulerPaused` is true
+2. **Crash recovery** - Identify WorkerHandlers that panicked and mark their requests as FAILED
+3. **Check capacity** - Calculate available slots: `maxProcessingRequests - scheduledRequests.length`
+4. **Fetch pending requests** - Get up to `capacity` pending requests from EVM
+5. **Preprocess requests** - Validate each request; fail invalid ones immediately
+6. **Start processing batch** - Call `startProcessingBatch()` to mark valid requests as PROCESSING and invalid as FAILED
+7. **Schedule workers** - Create WorkerHandler transactions for each valid request
+8. **Auto-reschedule** - Schedule next SchedulerHandler execution
+
+### WorkerHandler Workflow
+
+Each WorkerHandler is scheduled to process a single request:
+
+1. **Process request** - Call `worker.processRequest(request)` which handles the actual operation
+2. **Remove from tracking** - Remove request from `scheduledRequests` dictionary
+3. **Finalize on EVM** - The worker calls `completeProcessing()` to mark COMPLETED or FAILED
+
+### Sequential Same-User Scheduling
+
+When multiple requests from the same EVM user are pending, they are scheduled with sequential delays to ensure ordering:
 
 ```cadence
-access(all) fun getDelayForPendingCount(_ pendingCount: Int): UFix64 {
-    // Find highest threshold that pendingCount meets
-    var bestThreshold: Int? = nil
-
-    for threshold in self.thresholdToDelay.keys {
-        if pendingCount >= threshold {
-            if bestThreshold == nil || threshold > bestThreshold! {
-                bestThreshold = threshold
-            }
-        }
+// Track user request count for scheduling offset
+let userScheduleOffset: {String: Int} = {}
+for request in requests {
+    let key = request.user.toString()
+    if userScheduleOffset[key] == nil {
+        userScheduleOffset[key] = 0
     }
+    userScheduleOffset[key] = userScheduleOffset[key]! + 1
 
-    return self.thresholdToDelay[bestThreshold] ?? self.defaultDelay
+    // Offset delay by user request count
+    delay = delay + userScheduleOffset[key]! as! UFix64
+
+    // Schedule with computed delay
+    // ...
 }
 ```
 
-### Execution Effort Calculation
+### Crash Recovery
 
-The handler dynamically calculates execution effort based on the maximum requests per transaction:
+The SchedulerHandler monitors scheduled WorkerHandlers for failures:
 
 ```cadence
-access(all) fun calculateExecutionEffortAndPriority(_ requestCount: Int): {String: AnyStruct} {
-    let calculated = self.baseEffortPerRequest * UInt64(requestCount) + self.baseOverhead
-    
-    // If calculated > 7500, need High priority (max 9999)
-    // Otherwise use Medium priority (max 7500)
-    if calculated > 7500 {
-        let capped = calculated < 9999 ? calculated : 9999
-        return {
-            "effort": capped,
-            "priority": 0 as UInt8  // High priority
-        }
-    } else {
-        return {
-            "effort": calculated,
-            "priority": 1 as UInt8  // Medium priority
-        }
-    }
-}
+// For each scheduled request:
+// 1. Check if scheduled timestamp has passed
+// 2. Get transaction status from manager
+// 3. If status is nil (cleaned up) or not Scheduled, the worker panicked
+// 4. Mark request as FAILED with error message
+// 5. Remove from scheduledRequests
 ```
 
-When idle (no pending requests), the handler uses Medium priority to ensure sufficient computation budget. The execution effort is set to the computed value (based on `maxRequestsPerTx`) but capped at `idleExecutionEffort` (5000, suitable for Medium priority). This ensures efficient handling of burst arrivals while providing adequate computation resources.
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `schedulerWakeupInterval` | 2.0s | Fixed interval between SchedulerHandler executions |
+| `maxProcessingRequests` | 3 | Maximum concurrent WorkerHandlers |
+| Execution Effort | 9999 | High execution effort for worker transactions |
+| Priority | Medium | All transactions use Medium priority |
 
 ---
 
@@ -539,9 +564,8 @@ access(all) fun getPendingRequestsForEVMAddress(_ evmAddressHex: String): Pendin
 // Total pending request count (public query)
 access(all) fun getPendingRequestCount(): Int
 
-// Handler execution statistics (FlowYieldVaultsTransactionHandler)
-access(all) view fun getStats(): {String: AnyStruct}
-// Returns: {"executionCount": UInt64, "lastExecutionTime": UFix64?}
+// Scheduler paused status (FlowYieldVaultsEVMWorkerOps)
+access(all) view fun getIsSchedulerPaused(): Bool
 ```
 
 ---
@@ -558,7 +582,7 @@ access(all) view fun getStats(): {String: AnyStruct}
 | FlowYieldVaultsRequests | `notBlocklisted` | Optional blacklist for users |
 | FlowYieldVaultsRequests | `whenNotPaused` | New request creation blocked when paused |
 | FlowYieldVaultsEVM | Capability-based | Worker requires valid COA, YieldVaultManager, BetaBadge caps |
-| FlowYieldVaultsTransactionHandler | Admin resource | Pause/unpause restricted to Admin holder |
+| FlowYieldVaultsEVMWorkerOps | Admin resource | Pause/unpause scheduler restricted to Admin holder |
 
 ### YieldVault Ownership Verification
 
@@ -643,7 +667,6 @@ pre {
 | `YieldVaultWithdrawnForEVMUser` | Withdrawal from YieldVault |
 | `YieldVaultClosedForEVMUser` | YieldVault closed |
 | `RequestFailed` | Request processing failed |
-| `MaxRequestsPerTxUpdated` | Configuration changed |
 | `WithdrawFundsFromEVMFailed` | Failed to withdraw funds from EVM |
 | `EVMAllowlistStatusChanged` | Allowlist status changed on EVM |
 | `EVMAllowlistUpdated` | Addresses added/removed from allowlist on EVM |
@@ -655,18 +678,14 @@ pre {
 | `EVMRequestsDropped` | Requests dropped on EVM |
 | `EVMRequestCancelled` | Request cancelled on EVM |
 
-### FlowYieldVaultsTransactionHandler (Cadence)
+### FlowYieldVaultsEVMWorkerOps (Cadence)
 
 | Event | Description |
 |-------|-------------|
-| `HandlerPaused` | Processing paused |
-| `HandlerUnpaused` | Processing resumed |
-| `ScheduledExecutionTriggered` | Handler executed |
-| `NextExecutionScheduled` | Next execution scheduled |
-| `ExecutionSkipped` | Execution skipped (paused or error) |
-| `AllExecutionsStopped` | All executions cancelled and fees refunded |
-| `ThresholdToDelayUpdated` | Threshold config change |
-| `ExecutionEffortParamsUpdated` | Execution effort parameters changed |
+| `SchedulerPaused` | Scheduler paused - no new workers scheduled |
+| `SchedulerUnpaused` | Scheduler resumed |
+| `ExecutionSkipped` | Execution skipped (paused, no capacity, or error) |
+| `AllExecutionsStopped` | All scheduled executions cancelled and fees refunded |
 
 ---
 
@@ -733,18 +752,17 @@ function dropRequests(uint256[] calldata requestIds) external onlyOwner;
 // Admin resource functions
 access(all) fun setFlowYieldVaultsRequestsAddress(_ address: EVM.EVMAddress)
 access(all) fun updateFlowYieldVaultsRequestsAddress(_ address: EVM.EVMAddress)
-access(all) fun updateMaxRequestsPerTx(_ newMax: Int)  // 1-100
 access(all) fun createWorker(...): @Worker
 ```
 
-#### FlowYieldVaultsTransactionHandler
+#### FlowYieldVaultsEVMWorkerOps
 
 ```cadence
 // Admin resource functions
-access(all) fun pause()
-access(all) fun unpause()
-access(all) fun setThresholdToDelay(newThresholds: {Int: UFix64})
-access(all) fun setExecutionEffortParams(baseEffortPerRequest: UInt64, baseOverhead: UInt64, idleExecutionEffort: UInt64)
+access(all) fun pauseScheduler()   // Stop scheduling new workers (in-flight workers continue)
+access(all) fun unpauseScheduler() // Resume scheduling
+access(all) fun createWorkerHandler(workerCap: ...) -> @WorkerHandler
+access(all) fun createSchedulerHandler(workerCap: ...) -> @SchedulerHandler
 access(all) fun stopAll()  // Emergency: pause + cancel all scheduled executions with refunds
 ```
 
@@ -780,12 +798,12 @@ access(all) fun stopAll()  // Emergency: pause + cancel all scheduled executions
 
 1. Deploy `FlowYieldVaultsRequests` on EVM with COA and WFLOW addresses
 2. Deploy `FlowYieldVaultsEVM` on Cadence
-3. Deploy `FlowYieldVaultsTransactionHandler` on Cadence
+3. Deploy `FlowYieldVaultsEVMWorkerOps` on Cadence
 4. Configure `FlowYieldVaultsEVM` with EVM contract address
-5. Create Worker with required capabilities
-6. Create Handler with Worker capability
-7. Register Handler with FlowTransactionScheduler
-8. Schedule initial execution
+5. Create Worker with required capabilities (COA, YieldVaultManager, BetaBadge, FeeProvider)
+6. Create WorkerHandler and SchedulerHandler via WorkerOps Admin
+7. Register handlers with FlowTransactionScheduler Manager
+8. Schedule initial WorkerHandler (for registration) and SchedulerHandler
 
 ---
 

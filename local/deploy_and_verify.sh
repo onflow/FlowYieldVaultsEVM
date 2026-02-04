@@ -103,10 +103,10 @@ DEPLOY_RESULT=$(flow transactions send "$PROJECT_ROOT/cadence/transactions/deplo
 # Extract the deployed address from the EVM.TransactionExecuted event
 # Structure: .events[].values.value.fields[] where name == "contractAddress"
 DEPLOYED_ADDRESS=$(echo "$DEPLOY_RESULT" | jq -r '
-    .events[] | 
-    select(.type | contains("EVM.TransactionExecuted")) | 
-    .values.value.fields[] | 
-    select(.name == "contractAddress") | 
+    .events[] |
+    select(.type | contains("EVM.TransactionExecuted")) |
+    .values.value.fields[] |
+    select(.name == "contractAddress") |
     .value.value
 ' 2>/dev/null | head -1)
 
@@ -181,12 +181,12 @@ echo "✅ Worker initialized and FlowYieldVaultsRequests address set"
 echo ""
 
 # ==========================================
-# Step 7: Initialize Transaction Handler & Schedule
+# Step 7: Initialize WorkerOps Handlers & Schedule
 # ==========================================
-echo "🔧 Step 7: Initializing FlowYieldVaultsTransactionHandler and scheduling initial execution..."
-echo "   - Delay: 10 seconds"
-echo "   - Priority: Calculated dynamically based on execution effort"
-echo "   - Execution Effort: Calculated dynamically based on maxRequestsPerTx"
+echo "🔧 Step 7: Initializing FlowYieldVaultsEVMWorkerOps handlers and scheduling initial execution..."
+echo "   - SchedulerHandler: Recurrent job at fixed interval"
+echo "   - WorkerHandler: Processes individual requests"
+echo "   - Execution Effort: 9999 (Medium priority)"
 
 flow transactions send "$PROJECT_ROOT/cadence/transactions/scheduler/init_and_schedule.cdc" \
     10.0 \
