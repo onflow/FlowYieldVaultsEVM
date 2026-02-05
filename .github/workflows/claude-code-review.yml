@@ -61,15 +61,17 @@ jobs:
 
             Requirements:
             - Always include the marker `<!-- claude-code-review -->` at the very top of the comment.
+            - IMPORTANT: You MUST use `gh pr comment` to post your review. Do NOT use `gh api` as it is not in your allowed tools and will fail silently.
             - Use `gh pr comment` with `--edit-last --create-if-none` so subsequent runs update the prior comment.
             - Replace the entire comment body each run (overwrite, don't append).
 
-            Command pattern:
-            - Recommended (handles multiline safely):
-              `gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file - <<'EOF'`
-              `<!-- claude-code-review -->`
-              `<YOUR REVIEW>`
-              `EOF`
+            Command (use exactly this pattern):
+            ```
+            gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file - <<'EOF'
+            <!-- claude-code-review -->
+            <YOUR REVIEW CONTENT HERE>
+            EOF
+            ```
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
