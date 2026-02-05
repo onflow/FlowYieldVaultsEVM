@@ -332,33 +332,14 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     count: fetchCount,
                 )
 
-                // Preprocess requests
-                var failedRequestIds: [UInt256] = []
-                var successfulRequestIds: [UInt256] = []
-                var successfulRequests: [FlowYieldVaultsEVM.EVMRequest] = []
-                for request in pendingRequests {
-                    let result = worker.preprocessRequest(request)
-                    if !result.success {
-                        failedRequestIds.append(request.id)
-                    } else {
-                        successfulRequestIds.append(request.id)
-                        successfulRequests.append(request)
-                    }
+                // Preprocess requests (PENDING -> PROCESSING)
+                if let successfulRequests = worker.preprocessRequests(pendingRequests) {
+                    // Schedule WorkerHandlers and assign request ids to them
+                    self._scheduleWorkerHandlersForRequests(
+                        requests: successfulRequests,
+                        manager: manager,
+                    )
                 }
-
-                // Start processing requests (PENDING -> PROCESSING)
-                if let errorMessage = worker.startProcessingBatch(
-                    successfulRequestIds: successfulRequestIds,
-                    rejectedRequestIds: failedRequestIds,
-                ) {
-                    return "Failed to start processing requests: \(errorMessage)"
-                }
-
-                // Schedule WorkerHandlers and assign request ids to them
-                self._scheduleWorkerHandlersForRequests(
-                    requests: successfulRequests,
-                    manager: manager,
-                )
             }
 
             return nil // no error
