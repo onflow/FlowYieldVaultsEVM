@@ -59,42 +59,7 @@ jobs:
 
             Post your review as a single updatable PR comment (do NOT create a new comment for every push).
 
-            Requirements:
-            - Always include the marker `<!-- claude-code-review -->` at the very top of the comment.
-            - IMPORTANT: You MUST use `gh pr comment` to post your review. Do NOT use `gh api` as it is not in your allowed tools and will fail silently.
-            - Use `gh pr comment` with `--edit-last --create-if-none` so subsequent runs update the prior comment.
-            - Replace the entire comment body each run (overwrite, don't append).
-
-            Command (use exactly this pattern):
-            ```
-            gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file - <<'EOF'
-            <!-- claude-code-review -->
-            <YOUR REVIEW CONTENT HERE>
-            EOF
-            ```
-
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          claude_args: '--allowed-tools "Bash(cat:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"'
-          
-      - name: Cleanup older Claude review comments
-        if: always()
-        run: |
-          set -euo pipefail
-          repo='${{ github.repository }}'
-          pr='${{ github.event.pull_request.number }}'
-
-          mapfile -t ids < <(
-            gh api "repos/${repo}/issues/${pr}/comments" --paginate --jq \
-              'map(select(.body | contains("<!-- claude-code-review -->"))) | sort_by(.created_at) | .[].id'
-          )
-
-          if [ "${#ids[@]}" -le 1 ]; then
-            echo "No duplicate Claude review comments found."
-            exit 0
-          fi
-
-          for ((i=0; i<${#ids[@]}-1; i++)); do
-            echo "Deleting old Claude review comment ${ids[$i]}"
-            gh api "repos/${repo}/issues/comments/${ids[$i]}" -X DELETE --silent
-          done
+          use_sticky_comment: true
+          claude_args: '--allowed-tools "Bash(gh pr diff:*),Bash(gh pr view:*)"'
