@@ -42,7 +42,11 @@ jobs:
           token: ${{ secrets.GH_PAT }}
 
       - name: Initialize submodules
-        run: git submodule update --init --recursive
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git submodule update --init --recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
