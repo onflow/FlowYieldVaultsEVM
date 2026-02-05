@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ github.token }}
+          token: ${{ secrets.GH_PAT }}
           submodules: recursive
 
       - name: Install Flow CLI
