@@ -18,7 +18,7 @@ transaction {
 
     let workerHandlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>
     let schedulerHandlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>
-    let manager: &{FlowTransactionSchedulerUtils.Manager}
+    let manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}
     let feeVaultRef: auth(FungibleToken.Withdraw) &FlowToken.Vault
 
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
@@ -58,7 +58,7 @@ transaction {
         // Initialize SchedulerHandler resource if it doesn't exist
         if signer.storage.borrow<&AnyResource>(from: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath) == nil {
             let handler <- opsAdmin.createSchedulerHandler(workerCap: workerCap)
-            signer.storage.save(<-handler, to: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath)
+            signer.storage.save(<-handler, to: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath)
         }
 
         // Initialize WorkerHandler resource if it doesn't exist
@@ -116,7 +116,7 @@ transaction {
 /// @param feeVaultRef The vault to withdraw fees from
 /// @return The transaction ID
 access(self) fun _scheduleTransaction(
-    manager: &{FlowTransactionSchedulerUtils.Manager},
+    manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
     handlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>,
     feeVaultRef: auth(FungibleToken.Withdraw) &FlowToken.Vault,
 ): UInt64 {
@@ -128,7 +128,7 @@ access(self) fun _scheduleTransaction(
         data: nil,
         timestamp: future,
         priority: FlowTransactionScheduler.Priority.Medium,
-        executionEffort: 9999
+        executionEffort: 7500
     )
     let fees <- feeVaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
 
@@ -138,7 +138,7 @@ access(self) fun _scheduleTransaction(
         data: nil,
         timestamp: future,
         priority: FlowTransactionScheduler.Priority.Medium,
-        executionEffort: 9999,
+        executionEffort: 7500,
         fees: <-fees
     )
 

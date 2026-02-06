@@ -5,5 +5,5 @@ import "FlowYieldVaultsEVMWorkerOps"
 /// @return True if paused, false otherwise
 ///
 access(all) fun main(): Bool {
-    return FlowYieldVaultsEVMWorkerOps.isSchedulerPaused
+    return FlowYieldVaultsEVMWorkerOps.getIsSchedulerPaused()
 }

@@ -499,7 +499,7 @@ The SchedulerHandler monitors scheduled WorkerHandlers for failures:
 |-----------|---------|-------------|
 | `schedulerWakeupInterval` | 2.0s | Fixed interval between SchedulerHandler executions |
 | `maxProcessingRequests` | 3 | Maximum concurrent WorkerHandlers |
-| Execution Effort | 9999 | High execution effort for worker transactions |
+| Execution Effort | 7500 | Medium execution effort for worker transactions |
 | Priority | Medium | All transactions use Medium priority |
 
 ---

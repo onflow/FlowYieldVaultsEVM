@@ -1758,7 +1758,7 @@ access(all) contract FlowYieldVaultsEVM {
     /// @dev Uses the contract account's public COA capability at /public/evm for read-only EVM calls.
     /// @param requestId The request ID to fetch
     /// @return EVMRequest containing request details
-    access(all) fun getRequestUnpacked(_ requestId: UInt256): EVMRequest {
+    access(all) fun getRequestUnpacked(_ requestId: UInt256): EVMRequest? {
         pre {
             self.flowYieldVaultsRequestsAddress != nil:
                 "FlowYieldVaultsRequests address not set - call Admin.setFlowYieldVaultsRequestsAddress() first"
@@ -1780,7 +1780,8 @@ access(all) contract FlowYieldVaultsEVM {
 
         if callResult.status != EVM.Status.successful {
             let errorMsg = self.decodeEVMError(callResult.data)
-            panic("getRequestUnpacked call failed: \(errorMsg)")
+            emit ErrorEncountered(message: "getRequestUnpacked call failed: \(errorMsg)")
+            return nil
         }
 
         let decoded = EVM.decodeABI(
@@ -1811,6 +1812,12 @@ access(all) contract FlowYieldVaultsEVM {
         let message = decoded[8] as! String
         let vaultIdentifier = decoded[9] as! String
         let strategyIdentifier = decoded[10] as! String
+
+        // Request not found
+        if timestamp == 0 {
+            return nil
+        }
+
         // Build request array
         let request = EVMRequest(
             id: id,

@@ -163,19 +163,18 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             let cancelledIds: [UInt64] = []
 
-            // Step 2: Get all scheduled transaction IDs and prepare for refunds
-            let transactionIds = manager.getTransactionIDs()
             var totalRefunded: UFix64 = 0.0
 
             // Borrow FlowToken vault to deposit refunded fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
 
-            // Step 3: Cancel each scheduled transaction and collect refunds
-            for id in transactionIds {
-                let refund <- manager.cancel(id: id)
+            // Step 2: Cancel each scheduled transaction and collect refunds
+            for scheduledRequestId in FlowYieldVaultsEVMWorkerOps.scheduledRequests.keys {
+                let request = FlowYieldVaultsEVMWorkerOps.scheduledRequests[scheduledRequestId]!
+                let refund <- manager.cancel(id: request.workerTransactionId)
                 totalRefunded = totalRefunded + refund.balance
                 vaultRef.deposit(from: <-refund)
-                cancelledIds.append(id)
+                cancelledIds.append(request.workerTransactionId)
             }
 
             emit AllExecutionsStopped(
@@ -216,9 +215,12 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             // Process assigned request
             if let requestId = data as? UInt256 {
-                let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId)
-                worker.processRequest(request)
-                FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                if let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId) {
+                    worker.processRequest(request)
+                    FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                } else {
+                    emit ExecutionSkipped(transactionId: id, reason: "Request not found: \(requestId.toString())")
+                }
             } else {
                 emit ExecutionSkipped(transactionId: id, reason: "No valid request ID found")
             }
@@ -383,7 +385,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     // Fail request
                     worker.markRequestAsFailed(
                         request.request,
-                        message: "Worker transaction reverted. Transaction ID: \(txId.toString())",
+                        message: "Worker transaction dit not execute successfully. Transaction ID: \(txId.toString())",
                     )
 
                     // Remove request from scheduledRequests
@@ -428,7 +430,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 // Offset delay by user request count
                 // We assume the original list is sorted by user action timestamp
                 // and no action changes order of requests
-                delay = delay + userScheduleOffset[key]! as! UFix64
+                delay = delay + UFix64(userScheduleOffset[key]!)
 
                 // Schedule transaction
                 let transactionId = self._scheduleTransaction(
@@ -486,7 +488,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 data: data,
                 timestamp: future,
                 priority: FlowTransactionScheduler.Priority.Medium,
-                executionEffort: 9999
+                executionEffort: 7500
             )
             let fees <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
 
@@ -497,7 +499,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 data: data,
                 timestamp: future,
                 priority: FlowTransactionScheduler.Priority.Medium,
-                executionEffort: 9999,
+                executionEffort: 7500,
                 fees: <-fees
             )
 
@@ -600,7 +602,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         self.scheduledRequests = {}
         self.isSchedulerPaused = false
 
-        self.schedulerWakeupInterval = 2.0
+        self.schedulerWakeupInterval = 1.0
         self.maxProcessingRequests = 3
 
         let admin <- create Admin()
