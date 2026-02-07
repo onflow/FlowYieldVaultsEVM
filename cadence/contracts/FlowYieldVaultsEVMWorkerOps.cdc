@@ -88,12 +88,51 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @notice Emitted when the SchedulerHandler is unpaused
     access(all) event SchedulerUnpaused()
 
-    /// @notice Emitted when execution is skipped due to an error
-    /// @param transactionId The transaction ID that was skipped
-    /// @param reason Why the execution was skipped
-    access(all) event ExecutionSkipped(
+    /// @notice Emitted when WorkerHandler has executed a request
+    /// @param transactionId The transaction ID that was executed
+    /// @param requestId The request ID that was processed
+    /// @param message The message from the WorkerHandler if error occurred
+    access(all) event WorkerHandlerExecuted(
         transactionId: UInt64,
-        reason: String
+        requestId: UInt256?,
+        processResult: FlowYieldVaultsEVM.ProcessResult?,
+        message: String,
+    )
+
+    /// @notice Emitted when WorkerHandler has executed a request
+    /// @param transactionId The transaction ID that was executed
+    /// @param nextTransactionId The transaction ID of the next SchedulerHandler execution
+    /// @param message The message from the SchedulerHandler if error occurred
+    access(all) event SchedulerHandlerExecuted(
+        transactionId: UInt64,
+        nextTransactionId: UInt64,
+        message: String,
+    )
+
+    /// @notice Emitted when a WorkerHandler has paniced and SchedulerHandler has marked the request as FAILED
+    /// @param status The status of the transaction (Unknown, Scheduled, Executed, Canceled)
+    /// @param markedAsFailed Whether the request was marked as FAILED
+    /// @param request The request that was marked as FAILED
+    access(all) event WorkerHandlerPanicDetected(
+        status: UInt8?,
+        markedAsFailed: Bool,
+        request: ScheduledEVMRequest,
+    )
+
+    /// @notice Emitted when a WorkerHandler has been scheduled to process a request
+    /// @param scheduledRequest The scheduled request
+    access(all) event WorkerHandlerScheduled(
+        scheduledRequest: ScheduledEVMRequest,
+    )
+
+    /// @notice Emitted when the SchedulerHandler fetches pending requests
+    /// @param pendingRequestCount The number of pending requests
+    /// @param fetchSize The number of requests to fetch and preprocess/process
+    /// @param successfulPreprocessedRequestCount The number of successful preprocessed requests
+    access(all) event SchedulerQueueUpdated(
+        pendingRequestCount: Int,
+        fetchSize: Int,
+        successfulPreprocessedRequestCount: Int,
     )
 
     /// @notice Emitted when all scheduled executions are stopped and cancelled
@@ -213,18 +252,28 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // Get the worker capability
             let worker = self.workerCap.borrow()!
 
+            var message = ""
+            var processResult: FlowYieldVaultsEVM.ProcessResult? = nil
+
             // Process assigned request
             if let requestId = data as? UInt256 {
                 if let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId) {
-                    worker.processRequest(request)
+                    processResult = worker.processRequest(request)
                     FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                    message = "successfully processed request"
                 } else {
-                    emit ExecutionSkipped(transactionId: id, reason: "Request not found: \(requestId.toString())")
+                    message = "Request not found: \(requestId.toString())"
                 }
             } else {
-                emit ExecutionSkipped(transactionId: id, reason: "No valid request ID found")
+                message = "No valid request ID found"
             }
 
+            emit WorkerHandlerExecuted(
+                transactionId: id,
+                requestId: data as? UInt256,
+                processResult: processResult,
+                message: message,
+            )
         }
 
         /// @notice Returns the view types supported by the WorkerHandler
@@ -281,14 +330,23 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // Load scheduler manager from storage
             let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
 
+            var message = ""
+
             // Run main scheduler logic
             if let errorMessage = self._runScheduler(manager: manager) {
-                // On error, only emit event
-                emit ExecutionSkipped(transactionId: id, reason: "Scheduler error: \(errorMessage)")
+                message = "Scheduler error: \(errorMessage)"
+            } else {
+                message = "Scheduler ran successfully"
             }
 
             // Schedule the next execution
-            self._scheduleNextSchedulerExecution(manager: manager)
+            let nextTransactionId = self._scheduleNextSchedulerExecution(manager: manager)
+
+            emit SchedulerHandlerExecuted(
+                transactionId: id,
+                nextTransactionId: nextTransactionId,
+                message: message,
+            )
         }
 
         /// @notice Main scheduler logic
@@ -335,13 +393,21 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 )
 
                 // Preprocess requests (PENDING -> PROCESSING)
+                var successCount = 0
                 if let successfulRequests = worker.preprocessRequests(pendingRequests) {
                     // Schedule WorkerHandlers and assign request ids to them
                     self._scheduleWorkerHandlersForRequests(
                         requests: successfulRequests,
                         manager: manager,
                     )
+                    successCount = successfulRequests.length
                 }
+
+                emit SchedulerQueueUpdated(
+                    pendingRequestCount: pendingRequestCount,
+                    fetchSize: fetchCount,
+                    successfulPreprocessedRequestCount: successCount,
+                )
             }
 
             return nil // no error
@@ -383,13 +449,19 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 if txStatus == nil || txStatus != FlowTransactionScheduler.Status.Scheduled {
 
                     // Fail request
-                    worker.markRequestAsFailed(
+                    let markedAsFailed = worker.markRequestAsFailed(
                         request.request,
                         message: "Worker transaction dit not execute successfully. Transaction ID: \(txId.toString())",
                     )
 
                     // Remove request from scheduledRequests
                     FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+
+                    emit WorkerHandlerPanicDetected(
+                        status: txStatus?.rawValue,
+                        markedAsFailed: markedAsFailed,
+                        request: request,
+                    )
                 }
             }
         }
@@ -446,6 +518,11 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     workerTransactionId: transactionId,
                     workerScheduledTimestamp: getCurrentBlock().timestamp + delay,
                 )
+
+                emit WorkerHandlerScheduled(
+                    scheduledRequest: scheduledRequest
+                )
+
                 FlowYieldVaultsEVMWorkerOps.scheduledRequests.insert(key: request.id, scheduledRequest)
 
             }
@@ -455,8 +532,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @param manager The scheduler manager
         access(self) fun _scheduleNextSchedulerExecution(
             manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
-        ) {
-            self._scheduleTransaction(
+        ): UInt64 {
+            return self._scheduleTransaction(
                 manager: manager,
                 handlerTypeIdentifier: self.getType().identifier,
                 data: nil,

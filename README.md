@@ -254,7 +254,7 @@ Testnet E2E uses `deployments/contract-addresses.json` to auto-load addresses (s
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `schedulerWakeupInterval` | 2.0s | Fixed interval between scheduler executions |
+| `schedulerWakeupInterval` | 1.0s | Fixed interval between scheduler executions |
 | `maxProcessingRequests` | 3 | Maximum concurrent WorkerHandlers |
 
 

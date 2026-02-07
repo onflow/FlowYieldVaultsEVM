@@ -71,7 +71,7 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │  │  └─────────────────────┘                                            │   │
 │  │                                                                      │   │
 │  │  State: scheduledRequests, isSchedulerPaused                        │   │
-│  │  Config: schedulerWakeupInterval (2s), maxProcessingRequests (3)    │   │
+│  │  Config: schedulerWakeupInterval (1s), maxProcessingRequests (3)    │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -170,7 +170,7 @@ access(self) var scheduledRequests: {UInt256: ScheduledEVMRequest}  // request i
 access(self) var isSchedulerPaused: Bool
 
 // Configuration
-access(self) var schedulerWakeupInterval: UFix64  // Default: 2.0 seconds
+access(self) var schedulerWakeupInterval: UFix64  // Default: 1.0 seconds
 access(self) var maxProcessingRequests: Int       // Default: 3 concurrent workers
 ```
 
@@ -438,7 +438,7 @@ function completeProcessing(
 
 ### SchedulerHandler Workflow
 
-The SchedulerHandler runs at a fixed interval (`schedulerWakeupInterval`, default 2 seconds) and performs the following:
+The SchedulerHandler runs at a fixed interval (`schedulerWakeupInterval`, default 1 second) and performs the following:
 
 1. **Check if paused** - Skip scheduling if `isSchedulerPaused` is true
 2. **Crash recovery** - Identify WorkerHandlers that panicked and mark their requests as FAILED
@@ -495,7 +495,7 @@ The SchedulerHandler monitors scheduled WorkerHandlers for failures:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `schedulerWakeupInterval` | 2.0s | Fixed interval between SchedulerHandler executions |
+| `schedulerWakeupInterval` | 1.0s | Fixed interval between SchedulerHandler executions |
 | `maxProcessingRequests` | 3 | Maximum concurrent WorkerHandlers |
 | Execution Effort | 7500 | Medium execution effort for worker transactions |
 | Priority | Medium | All transactions use Medium priority |
@@ -682,7 +682,11 @@ pre {
 |-------|-------------|
 | `SchedulerPaused` | Scheduler paused - no new workers scheduled |
 | `SchedulerUnpaused` | Scheduler resumed |
-| `ExecutionSkipped` | Execution skipped (paused, no capacity, or error) |
+| `WorkerHandlerExecuted` | WorkerHandler processed a request (includes result) |
+| `SchedulerHandlerExecuted` | SchedulerHandler completed execution cycle |
+| `WorkerHandlerPanicDetected` | WorkerHandler paniced, request marked as FAILED |
+| `WorkerHandlerScheduled` | WorkerHandler scheduled to process a request |
+| `SchedulerQueueUpdated` | Scheduler fetched and preprocessed pending requests |
 | `AllExecutionsStopped` | All scheduled executions cancelled and fees refunded |
 
 ---

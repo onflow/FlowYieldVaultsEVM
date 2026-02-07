@@ -669,40 +669,6 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
-        /// @notice Starts processing a batch of requests
-        /// @dev Calls startProcessingBatch to update the request statuses
-        /// @param successfulRequestIds The request ids to start processing (PENDING -> PROCESSING)
-        /// @param rejectedRequestIds The request ids to reject (PENDING -> FAILED)
-        /// @return String error message if the requests failed to be started, otherwise nil
-        access(all) fun startProcessingBatch(
-            successfulRequestIds: [UInt256],
-            rejectedRequestIds: [UInt256],
-        ): String? {
-            let calldata = EVM.encodeABIWithSignature(
-                "startProcessingBatch(uint256[],uint256[])",
-                [successfulRequestIds, rejectedRequestIds]
-            )
-
-            let result = self.getCOARef().call(
-                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
-                gasLimit: 15_000_000,
-                value: EVM.Balance(attoflow: 0)
-            )
-
-            if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                return "startProcessingBatch failed: \(errorMsg)"
-            }
-
-            if rejectedRequestIds.length > 0 {
-                emit EVMRequestsDropped(requestIds: rejectedRequestIds)
-            }
-
-            return nil // success
-        }
-
-
         // ============================================
         /// Internal Functions
         // ============================================
@@ -1028,6 +994,39 @@ access(all) contract FlowYieldVaultsEVM {
             if result.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
                 return "startProcessing failed: \(errorMsg)"
+            }
+
+            return nil // success
+        }
+
+        /// @notice Starts processing a batch of requests
+        /// @dev Calls startProcessingBatch to update the request statuses
+        /// @param successfulRequestIds The request ids to start processing (PENDING -> PROCESSING)
+        /// @param rejectedRequestIds The request ids to reject (PENDING -> FAILED)
+        /// @return String error message if the requests failed to be started, otherwise nil
+        access(self) fun startProcessingBatch(
+            successfulRequestIds: [UInt256],
+            rejectedRequestIds: [UInt256],
+        ): String? {
+            let calldata = EVM.encodeABIWithSignature(
+                "startProcessingBatch(uint256[],uint256[])",
+                [successfulRequestIds, rejectedRequestIds]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 15_000_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                return "startProcessingBatch failed: \(errorMsg)"
+            }
+
+            if rejectedRequestIds.length > 0 {
+                emit EVMRequestsDropped(requestIds: rejectedRequestIds)
             }
 
             return nil // success
