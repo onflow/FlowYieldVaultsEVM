@@ -47,8 +47,7 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │  │  │                                                                 │ │  │
 │  │  │  Functions:                                                     │ │  │
 │  │  │  - processRequest()                                             │ │  │
-│  │  │  - preprocessRequest()                                          │ │  │
-│  │  │  - startProcessingBatch()                                       │ │  │
+│  │  │  - preprocessRequests()                                         │ │  │
 │  │  │  - markRequestAsFailed()                                        │ │  │
 │  │  └─────────────────────────────────────────────────────────────────┘ │  │
 │  │                                                                       │  │
@@ -157,8 +156,8 @@ Worker orchestration contract with auto-scheduling and crash recovery.
 **Responsibilities:**
 - Implement `FlowTransactionScheduler.TransactionHandler` interface for both handlers
 - SchedulerHandler checks for pending requests at fixed intervals
-- SchedulerHandler preprocesses requests to fail invalid ones early (before scheduling workers)
-- SchedulerHandler schedules WorkerHandlers for valid requests (PENDING → PROCESSING via `startProcessingBatch`)
+- SchedulerHandler calls `preprocessRequests()` which validates and transitions requests (PENDING → PROCESSING/FAILED)
+- SchedulerHandler schedules WorkerHandlers for valid requests returned by `preprocessRequests()`
 - SchedulerHandler identifies panicked WorkerHandlers and marks requests as FAILED
 - WorkerHandler processes a single request and updates EVM state on completion
 - Sequential scheduling for same-user requests to avoid block ordering issues
@@ -445,10 +444,9 @@ The SchedulerHandler runs at a fixed interval (`schedulerWakeupInterval`, defaul
 2. **Crash recovery** - Identify WorkerHandlers that panicked and mark their requests as FAILED
 3. **Check capacity** - Calculate available slots: `maxProcessingRequests - scheduledRequests.length`
 4. **Fetch pending requests** - Get up to `capacity` pending requests from EVM
-5. **Preprocess requests** - Validate each request; fail invalid ones immediately
-6. **Start processing batch** - Call `startProcessingBatch()` to mark valid requests as PROCESSING and invalid as FAILED
-7. **Schedule workers** - Create WorkerHandler transactions for each valid request
-8. **Auto-reschedule** - Schedule next SchedulerHandler execution
+5. **Preprocess requests** - Call `preprocessRequests()` which validates each request, fails invalid ones, and transitions valid ones to PROCESSING
+6. **Schedule workers** - Create WorkerHandler transactions for each valid request
+7. **Auto-reschedule** - Schedule next SchedulerHandler execution
 
 ### WorkerHandler Workflow
 
@@ -815,3 +813,4 @@ access(all) fun stopAll()  // Emergency: pause + cancel all scheduled executions
 | 2.0 | - | Added two-phase commit |
 | 3.0 | Nov 2025 | Adaptive scheduling, O(1) ownership lookup |
 | 3.1 | Dec 2025 | Removed parallel processing, added dynamic execution effort calculation |
+| 3.2 | Feb 2026 | Refactored preprocessing into `preprocessRequests()`, WorkerHandler fetches request by ID |

@@ -61,13 +61,11 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 
 1. **User submits request** on EVM with optional fund deposit
 2. **FlowYieldVaultsRequests** escrows funds and queues the request
-3. **FlowYieldVaultsEVMWorkerOps** SchedulerHandler schedules WorkerHandlers to process requests
-4. **Worker.processRequests()** fetches pending requests from EVM via `getPendingRequestsUnpacked()`
-5. **For each request**, two-phase commit:
-   - `startProcessing()`: Marks request as PROCESSING, deducts user balance (for CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT)
+3. **SchedulerHandler** fetches pending requests, calls `preprocessRequests()` to validate and transition (PENDING → PROCESSING), then schedules WorkerHandlers
+4. **WorkerHandler** processes individual requests via `processRequest()`:
    - Execute Cadence operation (create/deposit/withdraw/close YieldVault)
    - `completeProcessing()`: Marks as COMPLETED or FAILED (on failure, credits `claimableRefunds`; user claims via `claimRefund`)
-6. **Funds bridged** to user on withdrawal/close operations
+5. **Funds bridged** to user on withdrawal/close operations
 
 ## Quick Start
 
@@ -101,6 +99,7 @@ Recommended sequence (run from repo root):
 2. `./local/deploy_full_stack.sh`
 3. `./local/run_e2e_tests.sh`
 4. `./local/run_admin_e2e_tests.sh`
+5. `./local/run_worker_tests.sh`
 
 Notes:
 - These scripts expect `flow`, `forge`, `cast`, `curl`, `bc`, `lsof`, and `git` on PATH.
@@ -112,6 +111,7 @@ Local script reference:
 - `./local/deploy_full_stack.sh`: Funds local EVM EOAs, deploys `FlowYieldVaultsRequests` to the local EVM, deploys Cadence contracts, sets up the Worker, and writes `./local/.deployed_contract_address`.
 - `./local/run_e2e_tests.sh`: Runs end-to-end user flows (create/deposit/withdraw/close/cancel). Requires emulator/gateway running and a deployed contract address.
 - `./local/run_admin_e2e_tests.sh`: Runs end-to-end admin flows (allowlist/blocklist, token config, max requests, admin cancel/drop). Requires emulator/gateway running and a deployed contract address.
+- `./local/run_worker_tests.sh`: Runs scheduled worker tests (SchedulerHandler, WorkerHandler, pause/unpause, crash recovery). Requires emulator/gateway running and a deployed contract address.
 - `./local/run_cadence_tests.sh`: Runs Cadence tests with `flow test`. Cleans `./db` and `./imports` first (stop emulator if you need to preserve state).
 - `./local/run_solidity_tests.sh`: Runs Solidity tests with `forge test`.
 - `./local/testnet-e2e.sh`: Testnet CLI for state checks and user/admin actions. Run `./local/testnet-e2e.sh --help` for commands. Uses `PRIVATE_KEY` and `TESTNET_RPC_URL` if set; admin commands require `testnet-account` in `flow.json`. Update the hardcoded `CONTRACT` address in the script when deploying a new version.

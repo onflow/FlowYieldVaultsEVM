@@ -68,6 +68,7 @@ local/
 ├── deploy_full_stack.sh        # Funds local EOAs, deploys EVM contract, configures Cadence Worker
 ├── run_e2e_tests.sh            # End-to-end user flows (create/deposit/withdraw/close/cancel)
 ├── run_admin_e2e_tests.sh      # End-to-end admin flows (allowlist/blocklist/token config/max requests)
+├── run_worker_tests.sh         # Scheduled worker tests
 ├── run_cadence_tests.sh         # Wrapper for flow test (cleans db/imports)
 ├── run_solidity_tests.sh        # Wrapper for forge test
 ├── testnet-e2e.sh              # Testnet CLI for state checks + user/admin actions
@@ -114,6 +115,15 @@ flow test cadence/tests/validation_test.cdc            # 3 tests
 for test in cadence/tests/*_test.cdc; do
     flow test "$test"
 done
+```
+
+### Scheduled Worker E2E (Emulator)
+
+```bash
+# Full local sequence
+./local/setup_and_run_emulator.sh
+./local/deploy_full_stack.sh
+./local/run_worker_tests.sh
 ```
 
 ### Local E2E (Emulator)
