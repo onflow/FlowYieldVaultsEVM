@@ -529,7 +529,8 @@ access(all) contract FlowYieldVaultsEVM {
                 rejectedRequestIds: failedRequestIds,
             ) {
                 emit ErrorEncountered(message: "Failed to start processing requests: \(errorMessage)")
-                // Don't panic, return nil to indicate failure
+                // This function doesn't have Cadence state side effects, so it's safe to return nil
+                // instead of panicing.
                 return nil
             }
 
@@ -630,10 +631,14 @@ access(all) contract FlowYieldVaultsEVM {
                 tokenAddress: request.tokenAddress,
                 requestType: request.requestType
             ) {
-                return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
-                    request,
-                    message: "Failed to complete processing for request \(request.id)"
-                )
+                let errorMessage = "Failed to complete processing for request \(request.id)"
+                // This function has Cadence state side effects, like creating new vaults and moving tokens
+                // between accounts. If the final EVM call fails, we need to panic to revert the transaction
+                // so the Cadence side effects are reverted too.
+                // In the future, we can eliminate this panic if we implement "reverse" for each process
+                // operation so we can revert it here and return failed result instead of panicing.
+                // Note that panicing is considered safe in the WorkerHandler but not safe in SchedulerHandler.
+                panic(errorMessage)
             }
 
             if !result!.success {
@@ -1257,7 +1262,7 @@ access(all) contract FlowYieldVaultsEVM {
 
         /// @notice Gets the count of pending requests from the EVM contract
         /// @return The number of pending requests
-        access(all) fun getPendingRequestCountFromEVM(): Int {
+        access(all) fun getPendingRequestCountFromEVM(): Int? {
             let calldata = EVM.encodeABIWithSignature("getPendingRequestCount()", [])
 
             let callResult = self.getCOARef().dryCall(
@@ -1269,7 +1274,10 @@ access(all) contract FlowYieldVaultsEVM {
 
             if callResult.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(callResult.data)
-                panic("getPendingRequestCount call failed: \(errorMsg)")
+                emit ErrorEncountered(
+                    message: "getPendingRequestCount call failed: \(errorMsg)"
+                )
+                return nil
             }
 
             let decoded = EVM.decodeABI(

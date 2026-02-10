@@ -382,32 +382,32 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             }
 
             // Check pending request count
-            let pendingRequestCount = worker.getPendingRequestCountFromEVM()
-            if pendingRequestCount > 0 {
-
-                // Fetch pending requests from EVM contract based on capacity
-                let fetchCount = pendingRequestCount > capacity ? capacity : pendingRequestCount
-                let pendingRequests = worker.getPendingRequestsFromEVM(
-                    startIndex: 0,
-                    count: fetchCount,
-                )
-
-                // Preprocess requests (PENDING -> PROCESSING)
-                var successCount = 0
-                if let successfulRequests = worker.preprocessRequests(pendingRequests) {
-                    // Schedule WorkerHandlers and assign request ids to them
-                    self._scheduleWorkerHandlersForRequests(
-                        requests: successfulRequests,
-                        manager: manager,
+            if let pendingRequestCount = worker.getPendingRequestCountFromEVM() {
+                if pendingRequestCount > 0 {
+                    // Fetch pending requests from EVM contract based on capacity
+                    let fetchCount = pendingRequestCount > capacity ? capacity : pendingRequestCount
+                    let pendingRequests = worker.getPendingRequestsFromEVM(
+                        startIndex: 0,
+                        count: fetchCount,
                     )
-                    successCount = successfulRequests.length
-                }
 
-                emit SchedulerQueueUpdated(
-                    pendingRequestCount: pendingRequestCount,
-                    fetchSize: fetchCount,
-                    successfulPreprocessedRequestCount: successCount,
-                )
+                    // Preprocess requests (PENDING -> PROCESSING)
+                    var successCount = 0
+                    if let successfulRequests = worker.preprocessRequests(pendingRequests) {
+                        // Schedule WorkerHandlers and assign request ids to them
+                        self._scheduleWorkerHandlersForRequests(
+                            requests: successfulRequests,
+                            manager: manager,
+                        )
+                        successCount = successfulRequests.length
+                    }
+
+                    emit SchedulerQueueUpdated(
+                        pendingRequestCount: pendingRequestCount,
+                        fetchSize: fetchCount,
+                        successfulPreprocessedRequestCount: successCount,
+                    )
+                }
             }
 
             return nil // no error
@@ -449,17 +449,19 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 if txStatus == nil || txStatus != FlowTransactionScheduler.Status.Scheduled {
 
                     // Fail request
-                    let markedAsFailed = worker.markRequestAsFailed(
+                    let success = worker.markRequestAsFailed(
                         request.request,
                         message: "Worker transaction dit not execute successfully. Transaction ID: \(txId.toString())",
                     )
 
                     // Remove request from scheduledRequests
-                    FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                    if success {
+                        FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                    }
 
                     emit WorkerHandlerPanicDetected(
                         status: txStatus?.rawValue,
-                        markedAsFailed: markedAsFailed,
+                        markedAsFailed: success,
                         request: request,
                     )
                 }
