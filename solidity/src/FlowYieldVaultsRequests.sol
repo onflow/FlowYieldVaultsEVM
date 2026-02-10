@@ -221,7 +221,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     error CanOnlyCancelPending();
 
     /// @notice Request is not in expected status for this operation
-    error RequestAlreadyFinalized();
+    error InvalidRequestState();
 
     /// @notice Insufficient balance for withdrawal
     error InsufficientBalance(
@@ -987,7 +987,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (request.id != requestId) revert RequestNotFound();
         // Only PROCESSING requests can be completed (must call startProcessing first)
         if (request.status != RequestStatus.PROCESSING)
-            revert RequestAlreadyFinalized();
+            revert InvalidRequestState();
 
         // === UPDATE REQUEST STATUS ===
         RequestStatus newStatus = success
@@ -1465,7 +1465,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         // === VALIDATION ===
         if (request.id != requestId) revert RequestNotFound();
         if (request.status != RequestStatus.PENDING)
-            revert RequestAlreadyFinalized();
+            revert InvalidRequestState();
 
         // === TRANSITION TO PROCESSING ===
         // This prevents cancellation and ensures atomicity with completeProcessing

@@ -1993,7 +1993,7 @@
   },
   {
     "type": "error",
-    "name": "RequestAlreadyFinalized",
+    "name": "InvalidRequestState",
     "inputs": []
   },
   {

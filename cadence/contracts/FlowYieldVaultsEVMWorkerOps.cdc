@@ -19,7 +19,7 @@ import "FungibleToken"
 ///      - SchedulerHandler is always scheduled to run at the configured interval. It checks if there are any
 ///        pending requests in the EVM contract. If there are, it will schedule multiple WorkerHandlers to process the
 ///        requests based on available capacity.
-///      - SchedulerHandler also identifies WorkerHandlers that paniced and handles the failure state changes accordingly.
+///      - SchedulerHandler also identifies WorkerHandlers that panicked and handles the failure state changes accordingly.
 ///      - SchedulerHandler preprocesses requests before scheduling WorkerHandlers to identify and fail invalid requests.
 ///      - SchedulerHandler will schedule multiple WorkerHandlers for the same immediate height. If an EVM address has
 ///        multiple pending requests, they will be offsetted sequentially to avoid randomization in the same block.
@@ -38,7 +38,7 @@ import "FungibleToken"
 ///        - WorkerHandler has processed the request successfully and no failure occurred
 ///      - FAILED:
 ///        - WorkerHandler has processed the request successfully but it failed gracefully returning an error message
-///        - WorkerHandler has paniced and SchedulerHandler has marked the request as FAILED
+///        - WorkerHandler has panicked and SchedulerHandler has marked the request as FAILED
 ///        - Request was dropped or cancelled through the EVM contract
 ///
 access(all) contract FlowYieldVaultsEVMWorkerOps {
@@ -109,7 +109,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         message: String,
     )
 
-    /// @notice Emitted when a WorkerHandler has paniced and SchedulerHandler has marked the request as FAILED
+    /// @notice Emitted when a WorkerHandler has panicked and SchedulerHandler has marked the request as FAILED
     /// @param status The status of the transaction (Unknown, Scheduled, Executed, Canceled)
     /// @param markedAsFailed Whether the request was marked as FAILED
     /// @param request The request that was marked as FAILED
@@ -164,6 +164,22 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             emit SchedulerUnpaused()
         }
 
+        /// @notice Sets the maximum number of WorkerHandlers to be scheduled simultaneously
+        access(all) fun setMaxProcessingRequests(maxProcessingRequests: Int) {
+            pre {
+                maxProcessingRequests > 0: "Max processing requests must be greater than 0"
+            }
+            FlowYieldVaultsEVMWorkerOps.maxProcessingRequests = maxProcessingRequests
+        }
+
+        /// @notice Sets the interval at which the SchedulerHandler will be executed recurrently
+        access(all) fun setSchedulerWakeupInterval(schedulerWakeupInterval: UFix64) {
+            pre {
+                schedulerWakeupInterval > 0.0: "Scheduler wakeup interval must be greater than 0.0"
+            }
+            FlowYieldVaultsEVMWorkerOps.schedulerWakeupInterval = schedulerWakeupInterval
+        }
+
         /// @notice Creates a new WorkerHandler resource
         /// @return The newly created WorkerHandler resource
         access(all) fun createWorkerHandler(
@@ -214,6 +230,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 totalRefunded = totalRefunded + refund.balance
                 vaultRef.deposit(from: <-refund)
                 cancelledIds.append(request.workerTransactionId)
+                FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: scheduledRequestId)
             }
 
             emit AllExecutionsStopped(
@@ -451,7 +468,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     // Fail request
                     let success = worker.markRequestAsFailed(
                         request.request,
-                        message: "Worker transaction dit not execute successfully. Transaction ID: \(txId.toString())",
+                        message: "Worker transaction did not execute successfully. Transaction ID: \(txId.toString())",
                     )
 
                     // Remove request from scheduledRequests
@@ -497,9 +514,12 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 // Count user requests for scheduling
                 let key = request.user.toString()
                 if userScheduleOffset[key] == nil {
+                    // first request for user is scheduled immediately
                     userScheduleOffset[key] = 0
+                } else {
+                    // subsequent requests are scheduled with an offset
+                    userScheduleOffset[key] = userScheduleOffset[key]! + 1
                 }
-                userScheduleOffset[key] = userScheduleOffset[key]! + 1
 
                 // Offset delay by user request count
                 // We assume the original list is sorted by user action timestamp

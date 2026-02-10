@@ -319,7 +319,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.startPrank(coa);
         c.startProcessing(reqId);
 
-        vm.expectRevert(FlowYieldVaultsRequests.RequestAlreadyFinalized.selector);
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidRequestState.selector);
         c.startProcessing(reqId);
         vm.stopPrank();
     }
@@ -392,7 +392,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(coa);
-        vm.expectRevert(FlowYieldVaultsRequests.RequestAlreadyFinalized.selector);
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidRequestState.selector);
         c.completeProcessing(reqId, true, 100, "Should fail");
     }
 

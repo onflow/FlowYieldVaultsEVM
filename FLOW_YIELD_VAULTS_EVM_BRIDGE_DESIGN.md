@@ -684,7 +684,7 @@ pre {
 | `SchedulerUnpaused` | Scheduler resumed |
 | `WorkerHandlerExecuted` | WorkerHandler processed a request (includes result) |
 | `SchedulerHandlerExecuted` | SchedulerHandler completed execution cycle |
-| `WorkerHandlerPanicDetected` | WorkerHandler paniced, request marked as FAILED |
+| `WorkerHandlerPanicDetected` | WorkerHandler panicked, request marked as FAILED |
 | `WorkerHandlerScheduled` | WorkerHandler scheduled to process a request |
 | `SchedulerQueueUpdated` | Scheduler fetched and preprocessed pending requests |
 | `AllExecutionsStopped` | All scheduled executions cancelled and fees refunded |
@@ -706,7 +706,7 @@ pre {
 | `RequestNotFound` | Invalid request ID |
 | `NotRequestOwner` | Cancelling another user's request |
 | `CanOnlyCancelPending` | Cancelling non-pending request |
-| `RequestAlreadyFinalized` | Processing completed request |
+| `InvalidRequestState` | Request is not in correct state |
 | `InsufficientBalance` | Not enough funds |
 | `BelowMinimumBalance` | Deposit below minimum |
 | `TooManyPendingRequests` | User at limit |
