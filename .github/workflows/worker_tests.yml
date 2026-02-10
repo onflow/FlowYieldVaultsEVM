@@ -1,0 +1,60 @@
+name: Worker Operations CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  worker-tests:
+    name: Worker Operations Tests
+    runs-on: ubuntu-latest
+    steps:
+      # === COMMON SETUP ===
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+          submodules: recursive
+
+      - name: Install Flow CLI
+        run: sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
+
+      - name: Update PATH
+        run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify Flow CLI Installation
+        run: flow version
+
+      - name: Initialize submodules
+        run: git submodule update --init --recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install Solidity dependencies
+        working-directory: ./solidity
+        run: forge install --no-git
+
+      - name: Make scripts executable
+        run: |
+          chmod +x ./local/setup_and_run_emulator.sh
+          chmod +x ./local/deploy_full_stack.sh
+          chmod +x ./local/run_worker_tests.sh
+
+      # === INFRASTRUCTURE SETUP ===
+      - name: Setup and Run Emulator
+        run: |
+          ./local/setup_and_run_emulator.sh &
+          sleep 80  # Wait for the emulator to be fully up
+
+      - name: Deploy Full Stack
+        run: ./local/deploy_full_stack.sh
+
+      # === RUN WORKER TESTS ===
+      - name: Run Worker Tests
+        run: ./local/run_worker_tests.sh
