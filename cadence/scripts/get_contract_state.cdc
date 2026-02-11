@@ -19,8 +19,8 @@ access(all) fun main(contractAddress: Address): {String: AnyStruct} {
     var totalEVMAddresses = 0
     for evmAddress in FlowYieldVaultsEVM.yieldVaultOwnershipLookup.keys {
         totalEVMAddresses = totalEVMAddresses + 1
-        let yieldVaultIds = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddress]!
-        totalYieldVaults = totalYieldVaults + yieldVaultIds.keys.length
+        let yieldVaultOwnershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddress]!
+        totalYieldVaults = totalYieldVaults + yieldVaultOwnershipMap.keys.length
     }
 
     result["totalEVMAddresses"] = totalEVMAddresses

@@ -914,7 +914,7 @@ access(all) contract FlowYieldVaultsEVM {
             // Check if depositor is the owner for event emission
             var isYieldVaultOwner = false
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
-                isYieldVaultOwner = ownershipMap[request.yieldVaultId] ?? false
+                isYieldVaultOwner = ownershipMap.containsKey(request.yieldVaultId)
             }
             emit YieldVaultDepositedForEVMUser(
                 requestId: request.id,
@@ -946,7 +946,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             // Step 1: Validate user ownership of the YieldVault
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
-                if ownershipMap[request.yieldVaultId] != true {
+                if !ownershipMap.containsKey(request.yieldVaultId) {
                     return ProcessResult(
                         success: false,
                         yieldVaultId: request.yieldVaultId,
