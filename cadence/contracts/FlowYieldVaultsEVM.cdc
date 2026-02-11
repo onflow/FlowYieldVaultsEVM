@@ -163,9 +163,10 @@ access(all) contract FlowYieldVaultsEVM {
     /// @notice Storage path for Admin resource
     access(all) let AdminStoragePath: StoragePath
 
-    /// @notice O(1) lookup for yieldvault ownership verification
+    /// @notice Registry of EVM addresses and their owned yield vault IDs
+    /// Allows O(1) lookup for yield vault ownership verification
     /// @dev Maps EVM address string to {yieldVaultId: true} for fast ownership checks
-    access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
+    access(all) let yieldVaultRegistry: {String: {UInt64: Bool}}
 
     /// @notice Address of the FlowYieldVaultsRequests contract on EVM
     access(contract) var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
@@ -726,7 +727,7 @@ access(all) contract FlowYieldVaultsEVM {
         ///      2. Withdraws funds from COA (bridging ERC20 if needed)
         ///      3. Validates vault type matches the requested vaultIdentifier
         ///      4. Creates YieldVault via YieldVaultManager
-        ///      5. Records ownership in yieldVaultOwnershipLookup
+        ///      5. Records ownership in yieldVaultRegistry
         /// @param request The CREATE_YIELDVAULT request containing vault/strategy identifiers and amount
         /// @return ProcessResult with success status, created yieldVaultId, and status message
         access(self) fun processCreateYieldVault(_ request: EVMRequest): ProcessResult {
@@ -787,10 +788,10 @@ access(all) contract FlowYieldVaultsEVM {
             let evmAddr = request.user.toString()
 
             // Initialize ownership map for this address if needed
-            if FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] == nil {
-                FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] = {}
+            if FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] == nil {
+                FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] = {}
             }
-            let _ = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.insert(key: yieldVaultId, true)
+            let _ = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr]!.insert(key: yieldVaultId, true)
 
             emit YieldVaultCreatedForEVMUser(
                 requestId: request.id,
@@ -822,7 +823,7 @@ access(all) contract FlowYieldVaultsEVM {
             let evmAddr = request.user.toString()
 
             // Step 1: Validate user ownership of the YieldVault
-            if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
+            if let ownershipMap = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] {
                 if ownershipMap[request.yieldVaultId] != true {
                     return ProcessResult(
                         success: false,
@@ -845,11 +846,11 @@ access(all) contract FlowYieldVaultsEVM {
             // Step 3: Bridge funds back to user's EVM address
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user, tokenAddress: request.tokenAddress)
 
-            // Step 4: Remove yieldVaultId from ownership tracking
-            let _ = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.remove(key: request.yieldVaultId)
+            // Step 4: Remove yieldVaultId from registry mapping
+            let _ = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr]!.remove(key: request.yieldVaultId)
             // Clean up empty dictionaries to optimize storage costs
-            if FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr]!.length == 0 {
-                let _ = FlowYieldVaultsEVM.yieldVaultOwnershipLookup.remove(key: evmAddr)
+            if FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr]!.length == 0 {
+                let _ = FlowYieldVaultsEVM.yieldVaultRegistry.remove(key: evmAddr)
             }
 
             emit YieldVaultClosedForEVMUser(
@@ -911,9 +912,9 @@ access(all) contract FlowYieldVaultsEVM {
             let betaRef = self.getBetaRef()
             self.getYieldVaultManagerRef().depositToYieldVault(betaRef: betaRef, request.yieldVaultId, from: <-vault)
 
-            // Check if depositor is the owner for event emission
+            // Check if depositor is the yield vault owner for event emission
             var isYieldVaultOwner = false
-            if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
+            if let ownershipMap = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] {
                 isYieldVaultOwner = ownershipMap.containsKey(request.yieldVaultId)
             }
             emit YieldVaultDepositedForEVMUser(
@@ -945,7 +946,7 @@ access(all) contract FlowYieldVaultsEVM {
             let evmAddr = request.user.toString()
 
             // Step 1: Validate user ownership of the YieldVault
-            if let ownershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddr] {
+            if let ownershipMap = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] {
                 if !ownershipMap.containsKey(request.yieldVaultId) {
                     return ProcessResult(
                         success: false,
@@ -1628,15 +1629,15 @@ access(all) contract FlowYieldVaultsEVM {
     // Public Functions
     // ============================================
 
-    /// @notice Gets all YieldVault Ids owned by an EVM address
+    /// @notice Gets all YieldVault Ids registered to an EVM address
     /// @param evmAddress The EVM address string to query
     /// @return Array of YieldVault Ids owned by the address (order is not guaranteed)
     access(all) view fun getYieldVaultIdsForEVMAddress(_ evmAddress: String): [UInt64] {
-        if !self.yieldVaultOwnershipLookup.containsKey(evmAddress) {
+        if !self.yieldVaultRegistry.containsKey(evmAddress) {
             return []
         }
 
-        return self.yieldVaultOwnershipLookup[evmAddress]!.keys
+        return self.yieldVaultRegistry[evmAddress]!.keys
     }
 
     /// @notice Checks if an EVM address owns a specific YieldVault Id (O(1) lookup)
@@ -1644,11 +1645,11 @@ access(all) contract FlowYieldVaultsEVM {
     /// @param yieldVaultId The YieldVault Id to verify ownership of
     /// @return True if the address owns the YieldVault, false otherwise
     access(all) view fun doesEVMAddressOwnYieldVault(evmAddress: String, yieldVaultId: UInt64): Bool {
-        if !self.yieldVaultOwnershipLookup.containsKey(evmAddress) {
+        if !self.yieldVaultRegistry.containsKey(evmAddress) {
             return false
         }
 
-        return self.yieldVaultOwnershipLookup[evmAddress]!.containsKey(yieldVaultId)
+        return self.yieldVaultRegistry[evmAddress]!.containsKey(yieldVaultId)
     }
 
     /// @notice Gets the configured FlowYieldVaultsRequests contract address
@@ -1942,7 +1943,7 @@ access(all) contract FlowYieldVaultsEVM {
         self.WorkerStoragePath = /storage/flowYieldVaultsEVM
         self.AdminStoragePath = /storage/flowYieldVaultsEVMAdmin
         self.maxRequestsPerTx = 1
-        self.yieldVaultOwnershipLookup = {}
+        self.yieldVaultRegistry = {}
         self.flowYieldVaultsRequestsAddress = nil
 
         let admin <- create Admin()

@@ -20,7 +20,7 @@ access(all) fun main(accountAddress: Address): {String: AnyStruct} {
     paths["yieldVaultManagerPublic"] = FlowYieldVaults.YieldVaultManagerPublicPath.toString()
     result["paths"] = paths
 
-    let yieldVaultsByEVM = FlowYieldVaultsEVM.yieldVaultOwnershipLookup
+    let yieldVaultsByEVM = FlowYieldVaultsEVM.yieldVaultRegistry
     result["totalEVMAddresses"] = yieldVaultsByEVM.keys.length
 
     var totalYieldVaultsMapped = 0

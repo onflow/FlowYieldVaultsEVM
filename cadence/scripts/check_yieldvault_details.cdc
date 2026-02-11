@@ -12,7 +12,7 @@ access(all) fun main(account: Address): {String: AnyStruct} {
     result["contractAddress"] = account.toString()
     result["flowYieldVaultsRequestsAddress"] = FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()?.toString() ?? "not set"
 
-    let yieldVaultsByEVM = FlowYieldVaultsEVM.yieldVaultOwnershipLookup
+    let yieldVaultsByEVM = FlowYieldVaultsEVM.yieldVaultRegistry
     result["totalEVMAddresses"] = yieldVaultsByEVM.keys.length
 
     let allYieldVaultIds: [UInt64] = []

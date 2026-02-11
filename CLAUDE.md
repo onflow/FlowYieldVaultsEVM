@@ -62,7 +62,7 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 
 - **COA Bridge**: Cadence Owned Account bridges funds between EVM and Cadence via FlowEVMBridge
 - **Sentinel Values**: `NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF`, `NO_YIELDVAULT_ID = type(uint64).max`
-- **Ownership Tracking**: Parallel mappings on both EVM (`userOwnsYieldVault`) and Cadence (`yieldVaultOwnershipLookup`) for O(1) lookups
+- **Ownership Tracking**: Parallel mappings on both EVM (`userOwnsYieldVault`) and Cadence (`yieldVaultRegistry`) for O(1) lookups
 - **Adaptive Scheduling**: TransactionHandler adjusts delay based on pending count (3s for >10, 5s for >=5, 7s for >=1, 30s idle)
 - **Dynamic Execution Effort**: `baseEffortPerRequest * maxRequestsPerTx + baseOverhead`
 

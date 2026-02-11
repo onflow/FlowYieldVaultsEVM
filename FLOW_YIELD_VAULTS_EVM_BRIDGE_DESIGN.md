@@ -54,7 +54,7 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │  │  └─────────────────────────────────────────────────────────────────┘ │  │
 │  │                                                                       │  │
 │  │  State:                                                               │  │
-│  │  - yieldVaultOwnershipLookup: {String: {UInt64: Bool}}                │  │
+│  │  - yieldVaultRegistry: {String: {UInt64: Bool}}                │  │
 │  │  - flowYieldVaultsRequestsAddress: EVM.EVMAddress?                    │  │
 │  │  - maxRequestsPerTx: Int (default: 1)                                 │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
@@ -131,7 +131,7 @@ Worker contract that processes EVM requests and manages YieldVault positions.
 **Key State:**
 ```cadence
 // YieldVault ownership tracking
-access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
+access(all) let yieldVaultRegistry: {String: {UInt64: Bool}}
 
 // Configuration (stored as contract-only vars; exposed via getters)
 var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
@@ -569,7 +569,7 @@ mapping(address => mapping(uint64 => bool)) public userOwnsYieldVault;
 
 ```cadence
 // Cadence
-access(all) let yieldVaultOwnershipLookup: {String: {UInt64: Bool}}
+access(all) let yieldVaultRegistry: {String: {UInt64: Bool}}
 ```
 
 Ownership is verified for WITHDRAW/CLOSE on both EVM and Cadence. Deposits are permissionless; CREATE only validates identifiers.

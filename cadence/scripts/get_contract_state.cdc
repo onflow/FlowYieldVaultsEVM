@@ -10,16 +10,16 @@ access(all) fun main(contractAddress: Address): {String: AnyStruct} {
 
     result["flowYieldVaultsRequestsAddress"] = FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()?.toString() ?? "Not set"
     result["maxRequestsPerTx"] = FlowYieldVaultsEVM.getMaxRequestsPerTx()
-    result["yieldVaultOwnershipLookup"] = FlowYieldVaultsEVM.yieldVaultOwnershipLookup
+    result["yieldVaultRegistry"] = FlowYieldVaultsEVM.yieldVaultRegistry
 
     result["WorkerStoragePath"] = FlowYieldVaultsEVM.WorkerStoragePath.toString()
     result["AdminStoragePath"] = FlowYieldVaultsEVM.AdminStoragePath.toString()
 
     var totalYieldVaults = 0
     var totalEVMAddresses = 0
-    for evmAddress in FlowYieldVaultsEVM.yieldVaultOwnershipLookup.keys {
+    for evmAddress in FlowYieldVaultsEVM.yieldVaultRegistry.keys {
         totalEVMAddresses = totalEVMAddresses + 1
-        let yieldVaultOwnershipMap = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddress]!
+        let yieldVaultOwnershipMap = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddress]!
         totalYieldVaults = totalYieldVaults + yieldVaultOwnershipMap.keys.length
     }
 
@@ -27,8 +27,8 @@ access(all) fun main(contractAddress: Address): {String: AnyStruct} {
     result["totalYieldVaults"] = totalYieldVaults
 
     let evmAddressDetails: {String: Int} = {}
-    for evmAddress in FlowYieldVaultsEVM.yieldVaultOwnershipLookup.keys {
-        evmAddressDetails[evmAddress] = FlowYieldVaultsEVM.yieldVaultOwnershipLookup[evmAddress]!.length
+    for evmAddress in FlowYieldVaultsEVM.yieldVaultRegistry.keys {
+        evmAddressDetails[evmAddress] = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddress]!.length
     }
     result["evmAddressDetails"] = evmAddressDetails
 

@@ -118,8 +118,8 @@ fun testWorkerCreationRequiresBetaBadge() {
 }
 
 access(all)
-fun testYieldVaultOwnershipLookupMapping() {
-    // Verify the yieldVaultOwnershipLookup mapping is accessible
+fun testYieldVaultRegistryMapping() {
+    // Verify the cadence/tests/access_control_test.cdc:122 mapping is accessible
     let testAddress = "0x6666666666666666666666666666666666666666"
     let yieldVaultIds = FlowYieldVaultsEVM.getYieldVaultIdsForEVMAddress(testAddress)
     
