@@ -117,6 +117,41 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 | FlowYieldVaultsEVM (Cadence)      | `df111ffc5064198a`                           |
 | FlowYieldVaultsEVMWorkerOps       | `df111ffc5064198a`                           |
 
+## Blockchain Execution Model (Critical for Code Review)
+
+When reviewing this codebase, keep these fundamental blockchain properties in mind:
+
+### Transaction Atomicity
+
+**All blockchain transactions are atomic.** If any operation within a transaction panics/reverts, ALL state changes made during that transaction are rolled back completely. There is no "partial completion" scenario.
+
+- In Cadence: `panic()` reverts all state changes in the transaction
+- In Solidity: `revert()` or failed `require()` reverts all state changes
+- This is **by design** and is the correct way to ensure data consistency
+
+Therefore, patterns like:
+```cadence
+// This is SAFE - if processRequest panics, the remove never happened
+scheduledRequests.remove(key: requestId)
+processResult = worker.processRequest(request)  // if this panics, the line above reverts too
+```
+
+### Sequential Execution (No On-Chain Race Conditions)
+
+**Blockchain transactions execute one at a time in a deterministic order.** There is no parallel execution within the same blockchain execution environment.
+
+- Transactions are ordered within blocks and executed sequentially
+- Two transactions cannot "race" against each other simultaneously
+- What might look like a "race condition" is actually just transaction ordering, which is well-defined behavior
+
+This means scenarios like "Transaction A completes but Transaction B sees stale state" are **impossible** within the same execution context. By the time Transaction B executes, Transaction A has either fully committed or fully reverted.
+
+### Implications for This Codebase
+
+1. **WorkerHandler/SchedulerHandler coordination** is safe because they run in separate transactions that execute sequentially
+2. **Panic-based error handling** in `processRequest()` is the correct pattern - it ensures atomicity across Cadence and EVM state
+3. **State removal before vs after processing** doesn't create race conditions - if processing fails, the entire transaction (including removal) reverts
+
 ## Dependencies
 
 This project depends on `lib/FlowYieldVaults` (git submodule) which contains the core YieldVaults Cadence protocol including `FlowYieldVaults.cdc` and `FlowYieldVaultsClosedBeta.cdc`.

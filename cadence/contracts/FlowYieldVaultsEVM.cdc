@@ -549,6 +549,7 @@ access(all) contract FlowYieldVaultsEVM {
         // ============================================
 
         /// @notice Processes the given request ids
+        /// @dev This function might panic if the request processing fails.
         /// @param requestIds Request ids to process.
         access(all) fun processRequests(_ requests: [EVMRequest]) {
             var successCount = 0
@@ -570,6 +571,7 @@ access(all) contract FlowYieldVaultsEVM {
         }
 
         /// @notice Processes a single request
+        /// @dev This function might panic if the request processing fails.
         /// @dev This is the main dispatcher that:
         ///      1. Validates request status - should be PROCESSING
         ///      2. Dispatches to the appropriate process function based on request type
@@ -632,12 +634,11 @@ access(all) contract FlowYieldVaultsEVM {
                 requestType: request.requestType
             ) {
                 let errorMessage = "Failed to complete processing for request \(request.id)"
-                // This function has Cadence state side effects, like creating new vaults and moving tokens
-                // between accounts. If the final EVM call fails, we need to panic to revert the transaction
-                // so the Cadence side effects are reverted too.
-                // In the future, we can eliminate this panic if we implement "reverse" for each process
-                // operation so we can revert it here and return failed result instead of panicing.
-                // Note that panicing is considered safe in the WorkerHandler but not safe in SchedulerHandler.
+                // processRequest() performs Cadence-side state changes, such as creating vaults and transferring tokens.
+                // If the final EVM call fails, it panics to ensure that all Cadence state changes are reverted as well.
+                // In the future, this panic can be replaced by an explicit "reverse" function that handles all request types.
+                // This will enable the function to revert changes and return a failed result instead of panicking.
+                // Note: In the WorkerHandler context, panicking is safe and ensures atomicity for failed requests.
                 panic(errorMessage)
             }
 

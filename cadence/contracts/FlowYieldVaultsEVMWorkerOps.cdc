@@ -502,7 +502,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             let workerHandler = FlowYieldVaultsEVMWorkerOps._getWorkerHandlerFromStorage()!
 
             // Base delay for worker startup
-            var delay = 1.0
+            let baseDelay = 1.0
 
             // Borrow FlowToken vault to pay scheduling fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
@@ -524,7 +524,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 // Offset delay by user request count
                 // We assume the original list is sorted by user action timestamp
                 // and no action changes order of requests
-                delay = delay + UFix64(userScheduleOffset[key]!)
+                let delay = baseDelay + UFix64(userScheduleOffset[key]!)
 
                 // Schedule transaction
                 let transactionId = self._scheduleTransaction(
@@ -582,12 +582,16 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // Borrow FlowToken vault to pay scheduling fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
 
+            let priority = FlowTransactionScheduler.Priority.Medium
+            // Maximum execution effort for medium priority transactions
+            let mediumExecutionEffort = 7500 as UInt64
+
             // Estimate fees and withdraw payment
             let estimate = FlowTransactionScheduler.estimate(
                 data: data,
                 timestamp: future,
-                priority: FlowTransactionScheduler.Priority.Medium,
-                executionEffort: 7500
+                priority: priority,
+                executionEffort: mediumExecutionEffort
             )
             let fees <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
 
@@ -597,8 +601,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 handlerUUID: nil,
                 data: data,
                 timestamp: future,
-                priority: FlowTransactionScheduler.Priority.Medium,
-                executionEffort: 7500,
+                priority: priority,
+                executionEffort: mediumExecutionEffort,
                 fees: <-fees
             )
 
