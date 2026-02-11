@@ -119,7 +119,7 @@ fun testWorkerCreationRequiresBetaBadge() {
 
 access(all)
 fun testYieldVaultRegistryMapping() {
-    // Verify the cadence/tests/access_control_test.cdc:122 mapping is accessible
+    // Verify the yieldVaultRegistry mapping is accessible
     let testAddress = "0x6666666666666666666666666666666666666666"
     let yieldVaultIds = FlowYieldVaultsEVM.getYieldVaultIdsForEVMAddress(testAddress)
     

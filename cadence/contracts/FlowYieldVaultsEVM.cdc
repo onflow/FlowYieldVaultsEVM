@@ -824,7 +824,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             // Step 1: Validate user ownership of the YieldVault
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] {
-                if ownershipMap[request.yieldVaultId] != true {
+                if !ownershipMap.containsKey(request.yieldVaultId) {
                     return ProcessResult(
                         success: false,
                         yieldVaultId: request.yieldVaultId,
