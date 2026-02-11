@@ -237,7 +237,7 @@ const userRequests = ids.filter(
 | Scenario                  | What Happens                                  | User Action                      |
 | ------------------------- | --------------------------------------------- | -------------------------------- |
 | Request cancelled by user | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
-| Request dropped by admin  | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
+| Request dropped  | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
 | Cadence processing fails  | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
 
 **Important:** `claimRefund()` only withdraws actual refunds. It does NOT touch funds escrowed for active pending requests. WITHDRAW/CLOSE requests never escrow funds and never generate refunds.

@@ -434,7 +434,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestId Request ID that closed this YieldVault
     event YieldVaultIdUnregistered(uint64 indexed yieldVaultId, address indexed owner, uint256 indexed requestId);
 
-    /// @notice Emitted when requests are dropped by admin
+    /// @notice Emitted when requests are dropped
     /// @param requestIds Dropped request IDs
     /// @param droppedBy Admin who dropped the requests
     event RequestsDropped(uint256[] requestIds, address indexed droppedBy);
@@ -1383,7 +1383,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             ) {
                 // Mark request as failed with admin message
                 request.status = RequestStatus.FAILED;
-                request.message = "Dropped by admin";
+                request.message = "Dropped";
 
                 // For CREATE/DEPOSIT requests, move funds to claimableRefunds
                 // User must call claimRefund() to withdraw them (pull pattern)
@@ -1425,7 +1425,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                     request.requestType,
                     RequestStatus.FAILED,
                     request.yieldVaultId,
-                    "Dropped by admin"
+                    "Dropped"
                 );
 
                 // Track this request as successfully dropped

@@ -277,7 +277,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 if let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId) {
                     processResult = worker.processRequest(request)
                     FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
-                    message = "successfully processed request"
+                    message = "Successfully processed request"
                 } else {
                     message = "Request not found: \(requestId.toString())"
                 }
