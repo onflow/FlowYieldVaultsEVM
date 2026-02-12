@@ -252,7 +252,7 @@ access_control_test.cdc: 7 tests PASS
 - testRequestsAddressCanBeUpdated
 - testWorkerCreationRequiresCOA
 - testWorkerCreationRequiresBetaBadge
-- testYieldVaultOwnershipLookupMapping
+- testYieldVaultRegistryMapping
 
 error_handling_test.cdc: 4 tests PASS
 - testInvalidRequestType
