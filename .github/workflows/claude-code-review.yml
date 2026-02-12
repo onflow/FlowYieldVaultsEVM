@@ -74,9 +74,9 @@ jobs:
           pr='${{ github.event.pull_request.number }}'
 
           count="$(gh api "repos/${repo}/issues/${pr}/comments" --paginate --jq \
-            '[.[] | select(.user.login == "claude[bot]" and (.body | contains("<!-- claude-code-review -->")))] | length')"
+            '[.[] | select((.user.login == "claude[bot]" or .user.login == "claude") and (.body | contains("<!-- claude-code-review -->")))] | length')"
 
           if [ "${count}" -lt 1 ]; then
-            echo "::error::No Claude sticky review comment found (claude[bot] + marker)."
+            echo "::error::No Claude sticky review comment found (claude or claude[bot] + marker)."
             exit 1
           fi
