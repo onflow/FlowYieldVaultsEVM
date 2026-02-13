@@ -350,7 +350,7 @@ fcl.config({
 });
 
 // Contract addresses (testnet)
-const FLOW_YIELD_VAULTS_EVM_ADDRESS = "0xdf111ffc5064198a"; // FlowYieldVaultsEVM
+const FLOW_YIELD_VAULTS_EVM_ADDRESS = "0x764bdff06a0ee77e"; // FlowYieldVaultsEVM
 const FLOW_YIELD_VAULTS_ADDRESS = "0xd2580caf2ef07c2f"; // FlowYieldVaults
 ```
 
@@ -358,7 +358,7 @@ const FLOW_YIELD_VAULTS_ADDRESS = "0xd2580caf2ef07c2f"; // FlowYieldVaults
 
 ```typescript
 const GET_USER_YIELDVAULTS = `
-import FlowYieldVaultsEVM from 0xdf111ffc5064198a
+import FlowYieldVaultsEVM from 0x764bdff06a0ee77e
 
 access(all) fun main(evmAddress: String): [UInt64] {
     var normalizedAddress = evmAddress.toLower()
@@ -498,7 +498,7 @@ const strategies = await fcl.query({ cadence: GET_SUPPORTED_STRATEGIES });
 
 ```typescript
 const CHECK_SYSTEM_STATUS = `
-import FlowYieldVaultsEVM from 0xdf111ffc5064198a
+import FlowYieldVaultsEVM from 0x764bdff06a0ee77e
 
 access(all) fun main(): {String: AnyStruct} {
     return {

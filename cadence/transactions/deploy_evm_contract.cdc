@@ -18,7 +18,7 @@ transaction(bytecode: String, gasLimit: UInt64) {
     execute {
         // Convert hex string to bytes
         let bytecodeBytes = bytecode.decodeHex()
-        
+
         // Deploy the contract
         let result = self.coa.deploy(
             code: bytecodeBytes,
@@ -27,6 +27,8 @@ transaction(bytecode: String, gasLimit: UInt64) {
         )
 
         // Check if deployment was successful
-        assert(result.status == EVM.Status.successful, message: "EVM contract deployment failed")
+        if result.status != EVM.Status.successful {
+            panic("EVM contract deployment failed: \(result.errorMessage)")
+        }
     }
 }

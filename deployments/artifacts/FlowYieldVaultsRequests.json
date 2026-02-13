@@ -2013,6 +2013,11 @@
   },
   {
     "type": "error",
+    "name": "InvalidRequestState",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "InvalidYieldVaultId",
     "inputs": [
       {
@@ -2100,11 +2105,6 @@
   {
     "type": "error",
     "name": "ReentrancyGuardReentrantCall",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "InvalidRequestState",
     "inputs": []
   },
   {

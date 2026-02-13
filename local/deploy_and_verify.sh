@@ -31,7 +31,7 @@ flow transactions send "$PROJECT_ROOT/cadence/transactions/setup_coa.cdc" \
     --compute-limit 9999
 
 # Get the COA address
-COA_ADDRESS=$(flow scripts execute "$PROJECT_ROOT/cadence/scripts/get_coa_address.cdc" 0xdf111ffc5064198a --network testnet --output json | jq -r '.value')
+COA_ADDRESS=$(flow scripts execute "$PROJECT_ROOT/cadence/scripts/get_coa_address.cdc" $TESTNET_ACCOUNT_ADDRESS --network testnet --output json | jq -r '.value')
 
 if [ -z "$COA_ADDRESS" ] || [ "$COA_ADDRESS" == "null" ]; then
     echo "❌ Error: Could not get COA address"
@@ -89,7 +89,7 @@ echo "   Bytecode length: ${#FULL_BYTECODE} characters"
 echo ""
 
 # Deploy via COA (signed with Google KMS through Cadence)
-GAS_LIMIT=5000000
+GAS_LIMIT=10000000
 
 echo "   Deploying via COA (Google KMS signed)..."
 DEPLOY_RESULT=$(flow transactions send "$PROJECT_ROOT/cadence/transactions/deploy_evm_contract.cdc" \
@@ -189,7 +189,6 @@ echo "   - WorkerHandler: Processes individual requests"
 echo "   - Execution Effort: 9999 (Medium priority)"
 
 flow transactions send "$PROJECT_ROOT/cadence/transactions/scheduler/init_and_schedule.cdc" \
-    10.0 \
     --network testnet \
     --signer testnet-account \
     --compute-limit 9999
@@ -248,8 +247,8 @@ echo "   https://evm-testnet.flowscan.io/address/$DEPLOYED_ADDRESS"
 echo ""
 echo "🔍 Useful Commands:"
 echo "   - Check pending requests:"
-echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc 0xdf111ffc5064198a --network testnet"
+echo "     flow scripts execute cadence/scripts/check_pending_requests.cdc $TESTNET_ACCOUNT_ADDRESS 0 10 --network testnet"
 echo ""
 echo "   - Check handler status:"
-echo "     flow scripts execute cadence/scripts/check_yieldvaultmanager_status.cdc 0xdf111ffc5064198a --network testnet"
+echo "     flow scripts execute cadence/scripts/check_yieldvaultmanager_status.cdc $TESTNET_ACCOUNT_ADDRESS --network testnet"
 echo ""

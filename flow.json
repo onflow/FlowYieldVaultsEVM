@@ -21,7 +21,7 @@
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
-				"testnet": "df111ffc5064198a"
+				"testnet": "764bdff06a0ee77e"
 			}
 		},
 		"FlowYieldVaultsEVMWorkerOps": {
@@ -29,7 +29,7 @@
 			"aliases": {
 				"emulator": "045a1763c93006ca",
 				"testing": "0000000000000007",
-				"testnet": "df111ffc5064198a"
+				"testnet": "764bdff06a0ee77e"
 			}
 		}
 	},
@@ -528,7 +528,7 @@
 			}
 		},
 		"testnet-account": {
-			"address": "df111ffc5064198a",
+			"address": "764bdff06a0ee77e",
 			"key": {
 				"type": "google-kms",
 				"hashAlgorithm": "SHA2_256",
