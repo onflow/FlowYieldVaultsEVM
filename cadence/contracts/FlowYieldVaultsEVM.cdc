@@ -801,7 +801,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             // Step 1: Validate user ownership of the YieldVault
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] {
-                if !ownershipMap.containsKey(request.yieldVaultId) {
+                if !ownershipMap.containsKey(request.yieldVaultId!) {
                     return ProcessResult(
                         success: false,
                         yieldVaultId: request.yieldVaultId,
@@ -824,7 +824,7 @@ access(all) contract FlowYieldVaultsEVM {
             self.bridgeFundsToEVMUser(vault: <-vault, recipient: request.user, tokenAddress: request.tokenAddress)
 
             // Step 4: Remove yieldVaultId from registry mapping
-            let _ = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr]!.remove(key: request.yieldVaultId)
+            let _ = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr]!.remove(key: request.yieldVaultId!)
             // Clean up empty dictionaries to optimize storage costs
             if FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr]!.length == 0 {
                 let _ = FlowYieldVaultsEVM.yieldVaultRegistry.remove(key: evmAddr)
@@ -882,7 +882,7 @@ access(all) contract FlowYieldVaultsEVM {
             // Check if depositor is the yield vault owner for event emission
             var isYieldVaultOwner = false
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] {
-                isYieldVaultOwner = ownershipMap.containsKey(request.yieldVaultId)
+                isYieldVaultOwner = ownershipMap.containsKey(request.yieldVaultId!)
             }
             emit YieldVaultDepositedForEVMUser(
                 requestId: request.id,
@@ -914,7 +914,7 @@ access(all) contract FlowYieldVaultsEVM {
 
             // Step 1: Validate user ownership of the YieldVault
             if let ownershipMap = FlowYieldVaultsEVM.yieldVaultRegistry[evmAddr] {
-                if !ownershipMap.containsKey(request.yieldVaultId) {
+                if !ownershipMap.containsKey(request.yieldVaultId!) {
                     return ProcessResult(
                         success: false,
                         yieldVaultId: request.yieldVaultId,
@@ -2058,7 +2058,6 @@ access(all) contract FlowYieldVaultsEVM {
         self.nativeFlowEVMAddress = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF")
         self.WorkerStoragePath = /storage/flowYieldVaultsEVM
         self.AdminStoragePath = /storage/flowYieldVaultsEVMAdmin
-        self.maxRequestsPerTx = 1
         self.yieldVaultRegistry = {}
         self.flowYieldVaultsRequestsAddress = nil
 
