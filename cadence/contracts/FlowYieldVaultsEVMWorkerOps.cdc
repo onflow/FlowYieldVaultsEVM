@@ -86,7 +86,9 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     access(all) event SchedulerPaused()
 
     /// @notice Emitted when the SchedulerHandler is unpaused
-    access(all) event SchedulerUnpaused()
+    access(all) event SchedulerUnpaused(
+        nextTransactionId: UInt64,
+    )
 
     /// @notice Emitted when WorkerHandler has executed a request
     /// @param transactionId The transaction ID that was executed
@@ -105,7 +107,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @param message The message from the SchedulerHandler if error occurred
     access(all) event SchedulerHandlerExecuted(
         transactionId: UInt64,
-        nextTransactionId: UInt64,
+        nextTransactionId: UInt64?,
         message: String,
     )
 
@@ -160,8 +162,17 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         /// @notice Unpauses the SchedulerHandler, resuming scheduling pending requests
         access(all) fun unpauseScheduler() {
+            pre {
+                FlowYieldVaultsEVMWorkerOps._getManagerFromStorage() != nil: "Scheduler manager not found"
+                FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage() != nil: "SchedulerHandler resource not found"
+            }
             FlowYieldVaultsEVMWorkerOps.isSchedulerPaused = false
-            emit SchedulerUnpaused()
+            let schedulerHandler = FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage()!
+            let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
+            let txId = schedulerHandler.scheduleNextSchedulerExecution(manager: manager)
+            emit SchedulerUnpaused(
+                nextTransactionId: txId,
+            )
         }
 
         /// @notice Sets the maximum number of WorkerHandlers to be scheduled simultaneously
@@ -276,11 +287,11 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             if let requestId = data as? UInt256 {
                 if let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId) {
                     processResult = worker.processRequest(request)
-                    FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
                     message = "Successfully processed request"
                 } else {
                     message = "Request not found: \(requestId.toString())"
                 }
+                FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
             } else {
                 message = "No valid request ID found"
             }
@@ -348,6 +359,18 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage() != nil: "FlowToken vault not found"
             }
 
+            // Check if scheduler is paused
+            if FlowYieldVaultsEVMWorkerOps.isSchedulerPaused {
+                emit SchedulerHandlerExecuted(
+                    transactionId: id,
+                    nextTransactionId: nil,
+                    message: "Scheduler is paused",
+                )
+                // Return without executing the main scheduler logic
+                // No further scheduler executions will be scheduled to save fees during paused state
+                return
+            }
+
             // Load scheduler manager from storage
             let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
 
@@ -361,7 +384,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             }
 
             // Schedule the next execution
-            let nextTransactionId = self._scheduleNextSchedulerExecution(manager: manager)
+            let nextTransactionId = self.scheduleNextSchedulerExecution(manager: manager)
             self.nextSchedulerTransactionId = nextTransactionId
 
             emit SchedulerHandlerExecuted(
@@ -386,11 +409,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         access(self) fun _runScheduler(
             manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
         ): String? {
-            // Check if scheduler is paused
-            if FlowYieldVaultsEVMWorkerOps.isSchedulerPaused {
-                return "Scheduler is paused"
-            }
-
             // Check for failed worker requests
             let worker = self.workerCap.borrow()!
             self._checkForFailedWorkerRequests(manager: manager, worker: worker)
@@ -477,9 +495,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     )
 
                     // Remove request from scheduledRequests
-                    if success {
-                        FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
-                    }
+                    // Success is not checked because errors are not considered transient
+                    FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
 
                     emit WorkerHandlerPanicDetected(
                         status: txStatus?.rawValue,
@@ -561,7 +578,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         /// @notice Schedules the next recurrent execution for SchedulerHandler
         /// @param manager The scheduler manager
-        access(self) fun _scheduleNextSchedulerExecution(
+        access(contract) fun scheduleNextSchedulerExecution(
             manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
         ): UInt64 {
             // Scheduler parameters
@@ -670,6 +687,14 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         return FlowYieldVaultsEVMWorkerOps.account.storage
             .borrow<&WorkerHandler>
             (from: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath)
+    }
+
+    /// @notice Gets the SchedulerHandler from contract storage
+    /// @return The SchedulerHandler or nil if not found
+    access(self) view fun _getSchedulerHandlerFromStorage(): &SchedulerHandler? {
+        return FlowYieldVaultsEVMWorkerOps.account.storage
+            .borrow<&SchedulerHandler>
+            (from: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath)
     }
 
     /// @notice Gets the FlowToken vault from contract storage
