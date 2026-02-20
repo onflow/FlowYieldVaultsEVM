@@ -1,11 +1,9 @@
 import "FlowYieldVaultsEVM"
 
 /// @title Get Request Details
-/// @notice Returns details of the first pending request from FlowYieldVaultsRequests
-/// @param contractAddr The address where FlowYieldVaultsEVM Worker is stored
-/// @param startIndex The index to start fetching requests from
-/// @param count The number of requests to fetch
-/// @return Dictionary with request details or empty message if none pending
+/// @notice Returns details for a specific request ID from FlowYieldVaultsRequests
+/// @param requestId The request ID to fetch
+/// @return Dictionary with request details
 ///
 access(all) fun main(requestId: UInt256): {String: AnyStruct} {
 
