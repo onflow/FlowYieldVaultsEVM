@@ -16,14 +16,15 @@ import "FlowEVMBridgeConfig"
 ///
 ///      Key architecture:
 ///      - Worker resource: Holds COA capability and YieldVaultManager, processes requests
-///      - Admin resource: Manages contract configuration (requests address, batch size)
-///      - Two-phase processing: Uses startProcessing() and completeProcessing() to coordinate EVM and Cadence state
+///      - Admin resource: Manages contract configuration (requests address)
+///      - Two-phase processing: Uses preprocessRequests() and processRequests() to coordinate EVM and Cadence state
 ///
-///      Request flow:
-///      1. Worker fetches pending requests from FlowYieldVaultsRequests (EVM)
-///      2. For each request, calls startProcessing() to mark as PROCESSING (deducts escrow for CREATE/DEPOSIT)
-///      3. Executes Cadence-side operation (create/deposit/withdraw/close YieldVault)
-///      4. Calls completeProcessing() to mark as COMPLETED or FAILED (refunds escrow for CREATE/DEPOSIT failures)
+///      Request flow (two-phase):
+///      1. Preprocessing: preprocessRequests() validates requests and calls startProcessingBatch() to
+///         batch-update statuses (PENDING -> PROCESSING for valid, PENDING -> FAILED for invalid)
+///      2. Processing: For each PROCESSING request, executes Cadence-side operation
+///         (create/deposit/withdraw/close YieldVault), then calls completeProcessing() to mark
+///         as COMPLETED or FAILED (with refund to EVM contract on CREATE/DEPOSIT failure)
 access(all) contract FlowYieldVaultsEVM {
 
     // ============================================
@@ -969,32 +970,6 @@ access(all) contract FlowYieldVaultsEVM {
                 yieldVaultId: request.yieldVaultId,
                 message: "Withdrew \(actualAmount) FLOW from YieldVault Id \(request.yieldVaultId!)"
             )
-        }
-
-        /// @notice Marks a request as PROCESSING and transfers escrowed funds to COA
-        /// @dev For CREATE/DEPOSIT: deducts user balance and transfers funds to COA for bridging.
-        ///      For WITHDRAW/CLOSE: only updates status (no balance change).
-        /// @param requestId The request ID to start processing
-        /// @return String error message if the request failed to be started, otherwise nil
-        access(self) fun startProcessing(requestId: UInt256): String? {
-            let calldata = EVM.encodeABIWithSignature(
-                "startProcessing(uint256)",
-                [requestId]
-            )
-
-            let result = self.getCOARef().call(
-                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
-                gasLimit: 15_000_000,
-                value: EVM.Balance(attoflow: 0)
-            )
-
-            if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
-                return "startProcessing failed: \(errorMsg)"
-            }
-
-            return nil // success
         }
 
         /// @notice Starts processing a batch of requests

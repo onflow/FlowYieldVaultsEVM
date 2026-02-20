@@ -20,6 +20,8 @@ transaction {
     let schedulerHandlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>
     let manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager}
     let feeVaultRef: auth(FungibleToken.Withdraw) &FlowToken.Vault
+    let workerHandlerTypeIdentifier: String
+    let schedulerHandler: &FlowYieldVaultsEVMWorkerOps.SchedulerHandler
 
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
         pre {
@@ -60,11 +62,18 @@ transaction {
             let handler <- opsAdmin.createSchedulerHandler(workerCap: workerCap)
             signer.storage.save(<-handler, to: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath)
         }
+        self.schedulerHandler = signer.storage
+                .borrow<&FlowYieldVaultsEVMWorkerOps.SchedulerHandler>(from: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath)!
 
         // Initialize WorkerHandler resource if it doesn't exist
         if signer.storage.borrow<&AnyResource>(from: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath) == nil {
             let handler <- opsAdmin.createWorkerHandler(workerCap: workerCap)
+            self.workerHandlerTypeIdentifier = handler.getType().identifier
             signer.storage.save(<-handler, to: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath)
+        } else {
+            self.workerHandlerTypeIdentifier = signer.storage
+                .borrow<&FlowYieldVaultsEVMWorkerOps.WorkerHandler>(from: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath)!
+                .getType().identifier
         }
 
         // Issue capability to SchedulerHandler for scheduling
@@ -88,20 +97,47 @@ transaction {
 
     execute {
 
-        // Schedule first dummy WorkerHandler transaction to register the WorkerHandler in the manager
-        let transactionId = _scheduleTransaction(
-            manager: self.manager,
-            handlerCap: self.workerHandlerCap,
-            feeVaultRef: self.feeVaultRef
-        )
+        // Make sure WorkerHandler is registered in the manager
+        if self.manager.getHandlerTypeIdentifiers()[self.workerHandlerTypeIdentifier] == nil {
+            // Schedule dummy (data=nil) WorkerHandler transaction to register the WorkerHandler in the manager
+            let workerHandlerPriority = FlowTransactionScheduler.Priority.Medium
+            let workerHandlerExecutionEffort = 5000 as UInt64
+            let transactionId = _scheduleTransaction(
+                manager: self.manager,
+                handlerCap: self.workerHandlerCap,
+                feeVaultRef: self.feeVaultRef,
+                priority: workerHandlerPriority,
+                executionEffort: workerHandlerExecutionEffort
+            )
+            log("\(self.workerHandlerTypeIdentifier) successfully registered in the manager")
+        } else {
+            log("\(self.workerHandlerTypeIdentifier) is already registered in the manager, skipped")
+        }
+
+        // Check if scheduler is running
+        var schedulerRunning = false
+        if let nextTx = self.schedulerHandler.nextSchedulerTransactionId {
+            // Check nextTx status
+            let status = self.manager.getTransactionStatus(id: nextTx)
+            if status == FlowTransactionScheduler.Status.Scheduled {
+                schedulerRunning = true
+                log("Scheduler is already running: \(nextTx)")
+            }
+        }
 
         // Schedule scheduler
-        let schedulerTransactionId = _scheduleTransaction(
-            manager: self.manager,
-            handlerCap: self.schedulerHandlerCap,
-            feeVaultRef: self.feeVaultRef
-        )
-
+        if !schedulerRunning {
+            let schedulerPriority = FlowTransactionScheduler.Priority.Medium
+            let schedulerExecutionEffort = 5000 as UInt64
+            let schedulerTransactionId = _scheduleTransaction(
+                manager: self.manager,
+                handlerCap: self.schedulerHandlerCap,
+                feeVaultRef: self.feeVaultRef,
+                priority: schedulerPriority,
+                executionEffort: schedulerExecutionEffort
+            )
+            log("Scheduler started: \(schedulerTransactionId)")
+        }
     }
 
 }
@@ -119,16 +155,25 @@ access(self) fun _scheduleTransaction(
     manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
     handlerCap: Capability<auth(FlowTransactionScheduler.Execute) &{FlowTransactionScheduler.TransactionHandler}>,
     feeVaultRef: auth(FungibleToken.Withdraw) &FlowToken.Vault,
+    priority: FlowTransactionScheduler.Priority,
+    executionEffort: UInt64,
 ): UInt64 {
     // Calculate the target execution timestamp
     let future = getCurrentBlock().timestamp + 1.0
 
     // Estimate fees and withdraw payment
+    // calculateFee() is not supported by Flow emulator. When emulator is updated, following code can be uncommented.
+    // let fee = FlowTransactionScheduler.calculateFee(
+    //     executionEffort: executionEffort,
+    //     priority: priority,
+    //     dataSizeMB: 0.0, // nil
+    // )
+    // let fees <- feeVaultRef.withdraw(amount: fee) as! @FlowToken.Vault
     let estimate = FlowTransactionScheduler.estimate(
         data: nil,
         timestamp: future,
-        priority: FlowTransactionScheduler.Priority.Medium,
-        executionEffort: 7500
+        priority: priority,
+        executionEffort: executionEffort
     )
     let fees <- feeVaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
 
@@ -137,8 +182,8 @@ access(self) fun _scheduleTransaction(
         handlerCap: handlerCap,
         data: nil,
         timestamp: future,
-        priority: FlowTransactionScheduler.Priority.Medium,
-        executionEffort: 7500,
+        priority: priority,
+        executionEffort: executionEffort,
         fees: <-fees
     )
 

@@ -84,11 +84,10 @@
 #
 # Expected behavior:
 #   1. Request created with status PENDING (EVM contract doesn't validate identifiers)
-#   2. TransactionHandler picks up request
-#   3. startProcessing() called - funds moved from Contract to COA
-#   4. Worker attempts to parse identifiers on Cadence side
+#   2. SchedulerHandler picks up request
+#   4. Preprocessing: preprocessRequests() attempts to parse identifiers on Cadence side
 #   5. Validation fails: "Invalid vaultIdentifier/strategyIdentifier: X is not a valid Cadence type"
-#   6. completeProcessing(FAILED) called - credits claimableRefunds
+#   6. PENDING -> FAILED
 #   7. No YieldVault created, yieldVaultId set to NO_YIELDVAULT_ID (max uint64)
 #
 # Balance changes:
@@ -100,9 +99,9 @@
 #
 # REFUND MECHANISM:
 # -----------------
-# When a CREATE/DEPOSIT request fails after startProcessing():
-#   1. startProcessing() transfers funds: Contract -> COA
-#   2. Cadence worker detects validation failure
+# When a CREATE/DEPOSIT request fails/panics after PROCESSING state:
+#   1. PROCESSING state transfers funds: Contract -> COA
+#   2. SchedulerHandler detects validation failure in case of panic
 #   3. completeProcessing(FAILED) is called with refund:
 #      - Native FLOW: COA sends funds back via msg.value
 #      - ERC20 (WFLOW): COA approves contract, then contract pulls via transferFrom

@@ -186,7 +186,6 @@ echo ""
 echo "🔧 Step 7: Initializing FlowYieldVaultsEVMWorkerOps handlers and scheduling initial execution..."
 echo "   - SchedulerHandler: Recurrent job at fixed interval"
 echo "   - WorkerHandler: Processes individual requests"
-echo "   - Execution Effort: 9999 (Medium priority)"
 
 flow transactions send "$PROJECT_ROOT/cadence/transactions/scheduler/init_and_schedule.cdc" \
     --network testnet \

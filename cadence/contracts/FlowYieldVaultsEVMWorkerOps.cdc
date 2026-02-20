@@ -99,7 +99,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         message: String,
     )
 
-    /// @notice Emitted when WorkerHandler has executed a request
+    /// @notice Emitted when SchedulerHandler has executed a request
     /// @param transactionId The transaction ID that was executed
     /// @param nextTransactionId The transaction ID of the next SchedulerHandler execution
     /// @param message The message from the SchedulerHandler if error occurred
@@ -324,6 +324,9 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @notice Capability to the Worker resource for processing requests
         access(self) let workerCap: Capability<&FlowYieldVaultsEVM.Worker>
 
+        /// @notice Transaction ID of the next scheduled SchedulerHandler execution
+        access(all) var nextSchedulerTransactionId: UInt64?
+
         /// @notice Initializes the SchedulerHandler
         init(
             workerCap: Capability<&FlowYieldVaultsEVM.Worker>,
@@ -332,6 +335,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 workerCap.check(): "Worker capability is invalid (id: \(workerCap.id))"
             }
             self.workerCap = workerCap
+            self.nextSchedulerTransactionId = nil
         }
 
         /// @notice Executes the recurrent scheduler logic
@@ -358,6 +362,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             // Schedule the next execution
             let nextTransactionId = self._scheduleNextSchedulerExecution(manager: manager)
+            self.nextSchedulerTransactionId = nextTransactionId
 
             emit SchedulerHandlerExecuted(
                 transactionId: id,
@@ -501,8 +506,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         ) {
             let workerHandler = FlowYieldVaultsEVMWorkerOps._getWorkerHandlerFromStorage()!
 
-            // Base delay for worker startup
+            // WorkerHandler scheduling parameters
             let baseDelay = 1.0
+            let priority = FlowTransactionScheduler.Priority.Medium
+            let executionEffort = 5000 as UInt64
 
             // Borrow FlowToken vault to pay scheduling fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
@@ -532,6 +539,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     handlerTypeIdentifier: workerHandler.getType().identifier,
                     data: request.id,
                     delay: delay,
+                    priority: priority,
+                    executionEffort: executionEffort,
                 )
 
                 // Track scheduled request in contract state
@@ -555,11 +564,17 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         access(self) fun _scheduleNextSchedulerExecution(
             manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
         ): UInt64 {
+            // Scheduler parameters
+            let priority = FlowTransactionScheduler.Priority.Medium
+            let executionEffort = 5000 as UInt64
+
             return self._scheduleTransaction(
                 manager: manager,
                 handlerTypeIdentifier: self.getType().identifier,
                 data: nil,
                 delay: FlowYieldVaultsEVMWorkerOps.schedulerWakeupInterval,
+                priority: priority,
+                executionEffort: executionEffort,
             )
         }
 
@@ -575,6 +590,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             handlerTypeIdentifier: String,
             data: AnyStruct?,
             delay: UFix64,
+            priority: FlowTransactionScheduler.Priority,
+            executionEffort: UInt64,
         ): UInt64 {
             // Calculate the target execution timestamp
             let future = getCurrentBlock().timestamp + delay
@@ -582,16 +599,21 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // Borrow FlowToken vault to pay scheduling fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
 
-            let priority = FlowTransactionScheduler.Priority.Medium
-            // Maximum execution effort for medium priority transactions
-            let mediumExecutionEffort = 7500 as UInt64
-
             // Estimate fees and withdraw payment
+            // calculateFee() is not supported by Flow emulator. When emulator is updated, following code can be uncommented.
+            // data is nil or UInt256, size is 0 in both cases
+            // let dataSizeMB = 0.0
+            // let fee = FlowTransactionScheduler.calculateFee(
+            //     executionEffort: executionEffort,
+            //     priority: priority,
+            //     dataSizeMB: dataSizeMB,
+            // )
+            // let fees <- vaultRef.withdraw(amount: fee) as! @FlowToken.Vault
             let estimate = FlowTransactionScheduler.estimate(
-                data: data,
+                data: nil,
                 timestamp: future,
                 priority: priority,
-                executionEffort: mediumExecutionEffort
+                executionEffort: executionEffort
             )
             let fees <- vaultRef.withdraw(amount: estimate.flowFee ?? 0.0) as! @FlowToken.Vault
 
@@ -602,7 +624,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 data: data,
                 timestamp: future,
                 priority: priority,
-                executionEffort: mediumExecutionEffort,
+                executionEffort: executionEffort,
                 fees: <-fees
             )
 
