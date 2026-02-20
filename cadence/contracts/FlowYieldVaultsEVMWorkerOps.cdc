@@ -137,8 +137,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         successfulPreprocessedRequestCount: Int,
     )
 
-    /// @notice Emitted when all scheduled executions are stopped and cancelled
-    /// @param cancelledIds Array of cancelled transaction IDs
+    /// @notice Emitted when tracked WorkerHandler executions are cancelled by stopAll()
+    /// @param cancelledIds Array of cancelled WorkerHandler transaction IDs
     /// @param totalRefunded Total amount of FLOW refunded
     access(all) event AllExecutionsStopped(
         cancelledIds: [UInt64],
@@ -213,8 +213,9 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             return <- create SchedulerHandler(workerCap: workerCap)
         }
 
-        /// @notice Stops all scheduled executions by pausing the SchedulerHandler and cancelling all pending transactions
-        /// @dev This will pause the handler and cancel all scheduled transactions, refunding fees.
+        /// @notice Pauses scheduler execution and cancels tracked in-flight WorkerHandler transactions
+        /// @dev This pauses new scheduling and cancels transactions tracked in scheduledRequests, refunding fees.
+        ///      It does not cancel the next scheduler transaction ID tracked by SchedulerHandler.
         access(all) fun stopAll() {
             pre {
                 FlowYieldVaultsEVMWorkerOps._getManagerFromStorage() != nil: "Scheduler manager not found"
@@ -234,7 +235,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // Borrow FlowToken vault to deposit refunded fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
 
-            // Step 2: Cancel each scheduled transaction and collect refunds
+            // Step 2: Cancel each tracked WorkerHandler transaction and collect refunds
             for scheduledRequestId in FlowYieldVaultsEVMWorkerOps.scheduledRequests.keys {
                 let request = FlowYieldVaultsEVMWorkerOps.scheduledRequests[scheduledRequestId]!
                 let refund <- manager.cancel(id: request.workerTransactionId)

@@ -1,11 +1,12 @@
 import "FlowYieldVaultsEVMWorkerOps"
 
 /// @title Stop All Scheduled Transactions
-/// @notice Stops and cancels all scheduled transactions, pausing the handler and refunding fees
+/// @notice Pauses scheduler execution and cancels tracked in-flight WorkerHandler transactions
 /// @dev This will:
 ///      1. Pause the handler to prevent new scheduling
-///      2. Cancel all pending scheduled transactions
+///      2. Cancel WorkerHandler transactions tracked in FlowYieldVaultsEVMWorkerOps.scheduledRequests
 ///      3. Refund fees to the contract account
+///      Note: This does not cancel the next scheduler transaction ID stored on SchedulerHandler.
 ///      Requires Admin resource.
 ///
 transaction() {
