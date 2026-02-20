@@ -92,7 +92,7 @@
 #
 # Balance changes:
 #   - User wallet:      -amount (+ gas fees) - funds left wallet
-#   - Pending balance:  0 (escrow was deducted at startProcessing)
+#   - Pending balance:  0 (escrow was deducted at startProcessingBatch)
 #   - Contract balance: +amount (funds returned by COA during completeProcessing)
 #   - COA balance:      unchanged (funds returned to contract)
 #   - YieldVault:       none created

@@ -22,7 +22,7 @@ import "FungibleToken"
 ///      - SchedulerHandler also identifies WorkerHandlers that panicked and handles the failure state changes accordingly.
 ///      - SchedulerHandler preprocesses requests before scheduling WorkerHandlers to identify and fail invalid requests.
 ///      - SchedulerHandler will schedule multiple WorkerHandlers for the same immediate height. If an EVM address has
-///        multiple pending requests, they will be offsetted sequentially to avoid randomization in the same block.
+///        multiple pending requests, they will be offset sequentially to avoid randomization in the same block.
 ///      - Contract provides shared state between WorkerHandler and SchedulerHandler (e.g. scheduledRequests dictionary).
 ///
 ///      EVM State Overview:
@@ -93,7 +93,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @notice Emitted when WorkerHandler has executed a request
     /// @param transactionId The transaction ID that was executed
     /// @param requestId The request ID that was processed
-    /// @param message The message from the WorkerHandler if error occurred
+    /// @param message The message from the WorkerHandler execution
     access(all) event WorkerHandlerExecuted(
         transactionId: UInt64,
         requestId: UInt256?,
@@ -104,7 +104,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @notice Emitted when SchedulerHandler has executed a request
     /// @param transactionId The transaction ID that was executed
     /// @param nextTransactionId The transaction ID of the next SchedulerHandler execution
-    /// @param message The message from the SchedulerHandler if error occurred
+    /// @param message The message from the SchedulerHandler execution
     access(all) event SchedulerHandlerExecuted(
         transactionId: UInt64,
         nextTransactionId: UInt64?,
@@ -396,14 +396,13 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         /// @notice Main scheduler logic
         /// @dev Flow:
-        ///      1. Check if scheduler is paused
-        ///      2. Check for failed worker requests
+        ///      1. Check for failed worker requests
         ///         - If a failure is identified, mark the request as failed and remove it from scheduledRequests
-        ///      3. Check pending request count & calculate capacity
-        ///      4. Fetch pending requests data from EVM contract
-        ///      5. Preprocess requests to drop invalid requests
-        ///      6. Start processing requests (PENDING -> PROCESSING)
-        ///      7. Schedule WorkerHandlers and assign request ids to them
+        ///      2. Check pending request count & calculate capacity
+        ///      3. Fetch pending requests data from EVM contract
+        ///      4. Preprocess requests to drop invalid requests
+        ///      5. Start processing requests (PENDING -> PROCESSING)
+        ///      6. Schedule WorkerHandlers and assign request ids to them
         /// @param manager The scheduler manager
         /// @return Error message if any error occurred, nil otherwise
         access(self) fun _runScheduler(
@@ -465,7 +464,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         ///      5. Remove the request from scheduledRequests
         /// @param manager The scheduler manager
         /// @param worker The worker capability
-        /// @return Error message if any error occurred, nil otherwise
         access(self) fun _checkForFailedWorkerRequests(
             manager: &{FlowTransactionSchedulerUtils.Manager},
             worker: &FlowYieldVaultsEVM.Worker,

@@ -4,7 +4,7 @@ import "EVM"
 /// @title Set Authorized COA
 /// @notice Sets the authorized COA address on the EVM FlowYieldVaultsRequests contract
 /// @dev Requires Worker resource. The Worker's COA must be the owner of the Solidity contract.
-///      The new COA will be authorized to call startProcessing and completeProcessing.
+///      The new COA will be authorized to call startProcessingBatch and completeProcessing.
 ///
 /// @param coa The EVM address of the new authorized COA
 ///

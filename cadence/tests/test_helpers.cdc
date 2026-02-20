@@ -246,15 +246,6 @@ fun updateRequestsAddress(_ signer: Test.TestAccount, _ address: String): Test.T
 }
 
 access(all)
-fun updateMaxRequests(_ signer: Test.TestAccount, _ maxRequests: Int): Test.TransactionResult {
-    return _executeTransaction(
-        "../transactions/update_max_requests.cdc",
-        [maxRequests],
-        signer
-    )
-}
-
-access(all)
 fun setupWorkerWithBadge(_ admin: Test.TestAccount): Test.TransactionResult {
     return _executeTransaction(
         "transactions/setup_worker_for_test.cdc",
@@ -285,7 +276,7 @@ fun getYieldVaultIdsForEVMAddress(_ evmAddress: String): [UInt64]? {
 
 access(all)
 fun getRequestsAddress(): String? {
-    let res = _executeScript("../scripts/get_contract_state.cdc", [admin.address])
+    let res = _executeScript("../scripts/get_contract_state.cdc", [])
     if res.status == Test.ResultStatus.succeeded {
         if let state = res.returnValue as? {String: AnyStruct} {
             let address = state["flowYieldVaultsRequestsAddress"] as! String?
