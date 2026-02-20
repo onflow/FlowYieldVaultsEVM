@@ -415,6 +415,11 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.setAuthorizedCOA(address(0));
     }
 
+    function test_Constructor_RevertZeroCOAAddress() public {
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidCOAAddress.selector);
+        new FlowYieldVaultsRequestsTestHelper(address(0), WFLOW);
+    }
+
     function test_SetTokenConfig() public {
         address token = makeAddr("token");
 
@@ -425,6 +430,14 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(isSupported, true);
         assertEq(minBalance, 0.5 ether);
         assertEq(isNative, false);
+    }
+
+    function test_SetTokenConfig_RevertZeroMinimumForSupportedToken() public {
+        address token = makeAddr("token");
+
+        vm.prank(c.owner());
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidMinimumBalance.selector);
+        c.setTokenConfig(token, true, 0, false);
     }
 
     function test_SetMaxPendingRequestsPerUser() public {
