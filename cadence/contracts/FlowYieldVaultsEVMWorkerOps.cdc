@@ -145,6 +145,14 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         totalRefunded: UFix64
     )
 
+    /// @notice Emitted when stopAll() cannot mark a cancelled request as FAILED
+    /// @param requestId EVM request ID that could not be marked as FAILED
+    /// @param workerTransactionId Cancelled WorkerHandler transaction ID
+    access(all) event StopAllMarkFailedSkipped(
+        requestId: UInt256,
+        workerTransactionId: UInt64,
+    )
+
     // ============================================
     // Admin Resource
     // ============================================
@@ -220,6 +228,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             pre {
                 FlowYieldVaultsEVMWorkerOps._getManagerFromStorage() != nil: "Scheduler manager not found"
                 FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage() != nil: "FlowToken vault not found"
+                FlowYieldVaultsEVMWorkerOps._getWorkerHandlerFromStorage() != nil: "WorkerHandler resource not found"
             }
 
             // Step 1: Pause the SchedulerHandler to prevent any new scheduling during cancellation
@@ -227,6 +236,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             // Borrow the scheduler Manager from storage
             let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
+            let workerHandler = FlowYieldVaultsEVMWorkerOps._getWorkerHandlerFromStorage()!
+            let worker = workerHandler.borrowWorker()
 
             let cancelledIds: [UInt64] = []
 
@@ -235,13 +246,25 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // Borrow FlowToken vault to deposit refunded fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
 
-            // Step 2: Cancel each tracked WorkerHandler transaction and collect refunds
+            // Step 2: Cancel each scheduled transaction, mark request as FAILED, and collect refunds
             for scheduledRequestId in FlowYieldVaultsEVMWorkerOps.scheduledRequests.keys {
                 let request = FlowYieldVaultsEVMWorkerOps.scheduledRequests[scheduledRequestId]!
                 let refund <- manager.cancel(id: request.workerTransactionId)
                 totalRefunded = totalRefunded + refund.balance
                 vaultRef.deposit(from: <-refund)
                 cancelledIds.append(request.workerTransactionId)
+
+                let markAsFailedResult = worker.markRequestAsFailed(
+                    request.request,
+                    message: "Worker transaction was cancelled by admin stopAll(). Transaction ID: \(request.workerTransactionId.toString())",
+                )
+                if !markAsFailedResult {
+                    emit StopAllMarkFailedSkipped(
+                        requestId: scheduledRequestId,
+                        workerTransactionId: request.workerTransactionId,
+                    )
+                }
+
                 FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: scheduledRequestId)
             }
 
@@ -303,6 +326,12 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 processResult: processResult,
                 message: message,
             )
+        }
+
+        /// @notice Borrows the Worker reference from the stored capability
+        /// @return The Worker reference
+        access(contract) view fun borrowWorker(): &FlowYieldVaultsEVM.Worker {
+            return self.workerCap.borrow()!
         }
 
         /// @notice Returns the view types supported by the WorkerHandler
