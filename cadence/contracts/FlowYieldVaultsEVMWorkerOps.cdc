@@ -311,7 +311,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 cancelledIds.append(schedulerTransactionId)
             }
             // Clear cached scheduler pointer to avoid stale transaction ID after cancellation.
-            schedulerHandler.nextSchedulerTransactionId = nil
+            schedulerHandler.clearNextSchedulerTransactionId()
 
             emit AllExecutionsStopped(
                 cancelledIds: cancelledIds,
@@ -723,6 +723,12 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 delay: FlowYieldVaultsEVMWorkerOps.schedulerWakeupInterval,
                 executionEffort: executionEffort,
             )
+        }
+
+        /// @notice Clears the cached next scheduler transaction ID
+        /// @dev Used by Admin.stopAll() after cancelling scheduler execution
+        access(contract) fun clearNextSchedulerTransactionId() {
+            self.nextSchedulerTransactionId = nil
         }
 
         /// @notice Helper function to schedule a transaction for the SchedulerHandler
