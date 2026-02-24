@@ -1261,7 +1261,7 @@ access(all) contract FlowYieldVaultsEVM {
         /// @param startIndex The index to start fetching from
         /// @param count The number of requests to fetch
         /// @return Array of pending EVMRequest structs
-        access(all) fun getPendingRequestsFromEVM(startIndex: Int, count: Int): [EVMRequest] {
+        access(all) fun getPendingRequestsFromEVM(startIndex: Int, count: Int): [EVMRequest]? {
             let startIdx = UInt256(startIndex)
             let cnt = UInt256(count)
             let calldata = EVM.encodeABIWithSignature("getPendingRequestsUnpacked(uint256,uint256)", [startIdx, cnt])
@@ -1275,7 +1275,8 @@ access(all) contract FlowYieldVaultsEVM {
 
             if callResult.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(callResult.data)
-                panic("getPendingRequestsUnpacked call failed: \(errorMsg)")
+                emit ErrorEncountered(message: "getPendingRequestsUnpacked call failed: \(errorMsg)")
+                return nil
             }
 
             let decoded = EVM.decodeABI(

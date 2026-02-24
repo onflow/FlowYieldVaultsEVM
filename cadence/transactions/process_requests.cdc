@@ -10,24 +10,27 @@ import "FlowYieldVaultsEVM"
 ///
 transaction(startIndex: Int, count: Int) {
     prepare(signer: auth(BorrowValue) &Account) {
+
         let worker = signer.storage.borrow<&FlowYieldVaultsEVM.Worker>(
             from: FlowYieldVaultsEVM.WorkerStoragePath
         ) ?? panic("Could not borrow Worker from storage")
 
-        let requests = worker.getPendingRequestsFromEVM(
+        if let requests = worker.getPendingRequestsFromEVM(
             startIndex: startIndex,
             count: count,
-        )
+        ) {
 
-        // Preprocess requests
-        if let successfulRequests = worker.preprocessRequests(requests) {
+            // Preprocess requests (PENDING -> PROCESSING)
+            if let successfulRequests = worker.preprocessRequests(requests) {
 
-            // Process requests
-            worker.processRequests(successfulRequests)
+                // Process requests
+                worker.processRequests(successfulRequests)
 
+            } else {
+                panic("Failed to preprocess requests")
+            }
         } else {
-            panic("Failed to preprocess requests")
+            panic("Failed to fetch pending requests")
         }
-
     }
 }

@@ -170,6 +170,7 @@ access(self) var isSchedulerPaused: Bool
 // Configuration
 access(self) var schedulerWakeupInterval: UFix64  // Default: 1.0 seconds
 access(self) var maxProcessingRequests: Int       // Default: 3 concurrent workers
+access(all) let executionEffortConstants: {String: UInt64}  // Configurable execution effort values
 ```
 
 **ScheduledEVMRequest:**
@@ -495,8 +496,24 @@ The SchedulerHandler monitors scheduled WorkerHandlers for failures:
 |-----------|---------|-------------|
 | `schedulerWakeupInterval` | 1.0s | Fixed interval between SchedulerHandler executions |
 | `maxProcessingRequests` | 3 | Maximum concurrent WorkerHandlers |
-| Execution Effort | 7500 | Medium execution effort for worker transactions |
-| Priority | Medium | All transactions use Medium priority |
+
+### Execution Effort Constants
+
+Execution effort values are configurable via the `executionEffortConstants` dictionary and can be updated by the Admin using `setExecutionEffortConstants(key, value)`.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `schedulerBaseEffort` | 700 | Base effort for SchedulerHandler execution |
+| `schedulerPerRequestEffort` | 1000 | Additional effort per request preprocessed |
+| `workerCreateYieldVaultRequestEffort` | 5000 | Effort for CREATE_YIELDVAULT requests |
+| `workerDepositRequestEffort` | 2000 | Effort for DEPOSIT_TO_YIELDVAULT requests |
+| `workerWithdrawRequestEffort` | 2000 | Effort for WITHDRAW_FROM_YIELDVAULT requests |
+| `workerCloseYieldVaultRequestEffort` | 5000 | Effort for CLOSE_YIELDVAULT requests |
+
+Priority is dynamically determined based on execution effort:
+- **Low**: effort ≤ 2500
+- **Medium**: 2500 < effort < 7500
+- **High**: effort ≥ 7500
 
 ---
 
@@ -562,6 +579,9 @@ access(all) fun getPendingRequestCount(): Int
 
 // Scheduler paused status (FlowYieldVaultsEVMWorkerOps)
 access(all) view fun getIsSchedulerPaused(): Bool
+
+// Execution effort constants (FlowYieldVaultsEVMWorkerOps)
+access(all) let executionEffortConstants: {String: UInt64}
 ```
 
 ---
@@ -684,7 +704,6 @@ pre {
 | `SchedulerHandlerExecuted` | SchedulerHandler completed execution cycle |
 | `WorkerHandlerPanicDetected` | WorkerHandler panicked, request marked as FAILED |
 | `WorkerHandlerScheduled` | WorkerHandler scheduled to process a request |
-| `SchedulerQueueUpdated` | Scheduler fetched and preprocessed pending requests |
 | `AllExecutionsStopped` | All scheduled executions cancelled and fees refunded |
 
 ---
@@ -761,6 +780,9 @@ access(all) fun createWorker(...): @Worker
 // Admin resource functions
 access(all) fun pauseScheduler()   // Stop scheduling new workers (in-flight workers continue)
 access(all) fun unpauseScheduler() // Resume scheduling
+access(all) fun setMaxProcessingRequests(maxProcessingRequests: Int)  // Set max concurrent workers
+access(all) fun setExecutionEffortConstants(key: String, value: UInt64)  // Update execution effort
+access(all) fun setSchedulerWakeupInterval(schedulerWakeupInterval: UFix64)  // Set scheduler interval
 access(all) fun createWorkerHandler(workerCap: ...) -> @WorkerHandler
 access(all) fun createSchedulerHandler(workerCap: ...) -> @SchedulerHandler
 access(all) fun stopAll()  // Emergency: pause + cancel all scheduled executions with refunds

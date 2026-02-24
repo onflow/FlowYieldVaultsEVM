@@ -9,7 +9,7 @@ access(all) fun main(): {String: AnyStruct} {
     let result: {String: AnyStruct} = {}
 
     result["flowYieldVaultsRequestsAddress"] = FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()?.toString() ?? "Not set"
-    result["yieldVaultsByEVMAddress"] = FlowYieldVaultsEVM.yieldVaultsByEVMAddress
+    result["yieldVaultRegistry"] = FlowYieldVaultsEVM.yieldVaultRegistry
 
     result["WorkerStoragePath"] = FlowYieldVaultsEVM.WorkerStoragePath.toString()
     result["AdminStoragePath"] = FlowYieldVaultsEVM.AdminStoragePath.toString()

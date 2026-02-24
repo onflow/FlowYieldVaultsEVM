@@ -436,7 +436,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice Emitted when requests are dropped
     /// @param requestIds Dropped request IDs
-    /// @param droppedBy Admin who dropped the requests
+    /// @param droppedBy Admin/COA who dropped the requests
     event RequestsDropped(uint256[] requestIds, address indexed droppedBy);
 
     /// @notice Emitted when a user claims their refund

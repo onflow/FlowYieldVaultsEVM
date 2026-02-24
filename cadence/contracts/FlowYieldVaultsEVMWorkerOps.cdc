@@ -63,7 +63,28 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     access(self) var schedulerWakeupInterval: UFix64
 
     /// @notice Maximum number of WorkerHandlers to be scheduled simultaneously
-    access(self) var maxProcessingRequests: Int
+    access(self) var maxProcessingRequests: UInt8
+
+    // ============================================
+    // Configuration Variables (Execution Effort)
+    // ============================================
+
+    /// @notice Configurable execution effort constants for scheduling transactions
+    /// @dev Keys are defined as public constants below. Values can be updated via Admin.setExecutionEffortConstants()
+    access(all) let executionEffortConstants: {String: UInt64}
+
+    /// @notice Key constant for scheduler base execution effort
+    access(all) let SCHEDULER_BASE_EFFORT: String
+    /// @notice Key constant for scheduler per-request additional execution effort
+    access(all) let SCHEDULER_PER_REQUEST_EFFORT: String
+    /// @notice Key constant for worker CREATE_YIELDVAULT request execution effort
+    access(all) let WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT: String
+    /// @notice Key constant for worker WITHDRAW_FROM_YIELDVAULT request execution effort
+    access(all) let WORKER_WITHDRAW_REQUEST_EFFORT: String
+    /// @notice Key constant for worker DEPOSIT_TO_YIELDVAULT request execution effort
+    access(all) let WORKER_DEPOSIT_REQUEST_EFFORT: String
+    /// @notice Key constant for worker CLOSE_YIELDVAULT request execution effort
+    access(all) let WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT: String
 
     // ============================================
     // Path Configuration Variables
@@ -109,6 +130,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         transactionId: UInt64,
         nextTransactionId: UInt64?,
         message: String,
+        pendingRequestCount: Int?,
+        fetchCount: Int?,
+        runCapacity: UInt8?,
+        nextRunCapacity: UInt8?,
     )
 
     /// @notice Emitted when a WorkerHandler has panicked and SchedulerHandler has marked the request as FAILED
@@ -125,16 +150,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @param scheduledRequest The scheduled request
     access(all) event WorkerHandlerScheduled(
         scheduledRequest: ScheduledEVMRequest,
-    )
-
-    /// @notice Emitted when the SchedulerHandler fetches pending requests
-    /// @param pendingRequestCount The number of pending requests
-    /// @param fetchSize The number of requests to fetch and preprocess/process
-    /// @param successfulPreprocessedRequestCount The number of successful preprocessed requests
-    access(all) event SchedulerQueueUpdated(
-        pendingRequestCount: Int,
-        fetchSize: Int,
-        successfulPreprocessedRequestCount: Int,
     )
 
     /// @notice Emitted when all scheduled executions are stopped and cancelled
@@ -166,21 +181,40 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 FlowYieldVaultsEVMWorkerOps._getManagerFromStorage() != nil: "Scheduler manager not found"
                 FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage() != nil: "SchedulerHandler resource not found"
             }
-            FlowYieldVaultsEVMWorkerOps.isSchedulerPaused = false
-            let schedulerHandler = FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage()!
-            let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
-            let txId = schedulerHandler.scheduleNextSchedulerExecution(manager: manager)
-            emit SchedulerUnpaused(
-                nextTransactionId: txId,
-            )
+            if FlowYieldVaultsEVMWorkerOps.isSchedulerPaused {
+                FlowYieldVaultsEVMWorkerOps.isSchedulerPaused = false
+                let schedulerHandler = FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage()!
+                let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
+                let txId = schedulerHandler.scheduleNextSchedulerExecution(manager: manager, forNumberOfRequests: 0)
+                emit SchedulerUnpaused(
+                    nextTransactionId: txId,
+                )
+            }
         }
 
         /// @notice Sets the maximum number of WorkerHandlers to be scheduled simultaneously
-        access(all) fun setMaxProcessingRequests(maxProcessingRequests: Int) {
+        access(all) fun setMaxProcessingRequests(maxProcessingRequests: UInt8) {
             pre {
                 maxProcessingRequests > 0: "Max processing requests must be greater than 0"
             }
             FlowYieldVaultsEVMWorkerOps.maxProcessingRequests = maxProcessingRequests
+        }
+
+        /// @notice Sets the execution effort constants
+        /// @param key The key of the execution effort constant to set
+        /// @param value The value of the execution effort constant to set
+        access(all) fun setExecutionEffortConstants(key: String, value: UInt64) {
+            pre {
+                value > 0: "Execution effort must be greater than 0"
+                key == FlowYieldVaultsEVMWorkerOps.SCHEDULER_BASE_EFFORT ||
+                key == FlowYieldVaultsEVMWorkerOps.SCHEDULER_PER_REQUEST_EFFORT ||
+                key == FlowYieldVaultsEVMWorkerOps.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT ||
+                key == FlowYieldVaultsEVMWorkerOps.WORKER_WITHDRAW_REQUEST_EFFORT ||
+                key == FlowYieldVaultsEVMWorkerOps.WORKER_DEPOSIT_REQUEST_EFFORT ||
+                key == FlowYieldVaultsEVMWorkerOps.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT
+                : "Invalid key: \(key)"
+            }
+            FlowYieldVaultsEVMWorkerOps.executionEffortConstants[key] = value
         }
 
         /// @notice Sets the interval at which the SchedulerHandler will be executed recurrently
@@ -219,6 +253,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             pre {
                 FlowYieldVaultsEVMWorkerOps._getManagerFromStorage() != nil: "Scheduler manager not found"
                 FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage() != nil: "FlowToken vault not found"
+                FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage() != nil: "SchedulerHandler resource not found"
             }
 
             // Step 1: Pause the SchedulerHandler to prevent any new scheduling during cancellation
@@ -242,6 +277,15 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 vaultRef.deposit(from: <-refund)
                 cancelledIds.append(request.workerTransactionId)
                 FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: scheduledRequestId)
+            }
+
+            // Step 3: Cancel scheduler execution
+            let schedulerHandler = FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage()!
+            if let schedulerTransactionId = schedulerHandler.nextSchedulerTransactionId {
+                let refund <- manager.cancel(id: schedulerTransactionId)
+                totalRefunded = totalRefunded + refund.balance
+                vaultRef.deposit(from: <-refund)
+                cancelledIds.append(schedulerTransactionId)
             }
 
             emit AllExecutionsStopped(
@@ -365,32 +409,80 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     transactionId: id,
                     nextTransactionId: nil,
                     message: "Scheduler is paused",
+                    pendingRequestCount: nil,
+                    fetchCount: nil,
+                    runCapacity: nil,
+                    nextRunCapacity: nil,
                 )
                 // Return without executing the main scheduler logic
                 // No further scheduler executions will be scheduled to save fees during paused state
                 return
             }
 
-            // Load scheduler manager from storage
+            // Load scheduler manager and worker from storage
             let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
+            let worker = self.workerCap.borrow()!
 
             var message = ""
+            var nextRunCapacity: UInt8 = 0
+            var pendingCount: Int? = nil
+            var fetchCount: Int? = nil
 
-            // Run main scheduler logic
-            if let errorMessage = self._runScheduler(manager: manager) {
-                message = "Scheduler error: \(errorMessage)"
-            } else {
-                message = "Scheduler ran successfully"
+            // Extract computation limit from passed data (nil is interpreted as 0)
+            // Defines how much computation is available for the scheduler to use
+            // 1 means 1 request to preprocess
+            var runCapacity = data as? UInt8 ?? 0
+
+            // Calculate capacity
+            let capacityLimit = UInt8(
+                FlowYieldVaultsEVMWorkerOps.maxProcessingRequests -
+                UInt8(FlowYieldVaultsEVMWorkerOps.scheduledRequests.length))
+            if capacityLimit > 0 {
+                let capacity = runCapacity < capacityLimit ? runCapacity : capacityLimit
+
+                // Check pending request count
+                if let pendingRequestCount = worker.getPendingRequestCountFromEVM() {
+                    pendingCount = pendingRequestCount
+                    if pendingRequestCount > 0 {
+
+                        fetchCount = pendingRequestCount > Int(capacity) ? Int(capacity) : pendingRequestCount
+
+                        // Run main scheduler logic
+                        if let errorMessage = self._runScheduler(
+                            manager: manager,
+                            worker: worker,
+                            fetchCount: fetchCount!,
+                        ) {
+                            message = "Scheduler failed with error: \(errorMessage)"
+                        } else {
+                            message = "Scheduler ran successfully"
+                        }
+
+                        let stillPendingCount = pendingRequestCount - fetchCount!
+                        nextRunCapacity = stillPendingCount < Int(FlowYieldVaultsEVMWorkerOps.maxProcessingRequests)
+                            ? UInt8(stillPendingCount)
+                            : FlowYieldVaultsEVMWorkerOps.maxProcessingRequests
+                    }
+                } else {
+                    message = "ERROR fetching pending requests"
+                }
             }
 
             // Schedule the next execution
-            let nextTransactionId = self.scheduleNextSchedulerExecution(manager: manager)
+            let nextTransactionId = self.scheduleNextSchedulerExecution(
+                manager: manager,
+                forNumberOfRequests: nextRunCapacity,
+            )
             self.nextSchedulerTransactionId = nextTransactionId
 
             emit SchedulerHandlerExecuted(
                 transactionId: id,
                 nextTransactionId: nextTransactionId,
                 message: message,
+                pendingRequestCount: pendingCount,
+                fetchCount: fetchCount,
+                runCapacity: runCapacity,
+                nextRunCapacity: nextRunCapacity,
             )
         }
 
@@ -408,29 +500,18 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @return Error message if any error occurred, nil otherwise
         access(self) fun _runScheduler(
             manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
+            worker: &FlowYieldVaultsEVM.Worker,
+            fetchCount: Int,
         ): String? {
             // Check for failed worker requests
-            let worker = self.workerCap.borrow()!
             self._checkForFailedWorkerRequests(manager: manager, worker: worker)
 
-            // Calculate capacity
-            let capacity =
-                FlowYieldVaultsEVMWorkerOps.maxProcessingRequests -
-                FlowYieldVaultsEVMWorkerOps.scheduledRequests.length
-            if capacity <= 0 {
-                return "No capacity available"
-            }
-
-            // Check pending request count
-            if let pendingRequestCount = worker.getPendingRequestCountFromEVM() {
-                if pendingRequestCount > 0 {
-                    // Fetch pending requests from EVM contract based on capacity
-                    let fetchCount = pendingRequestCount > capacity ? capacity : pendingRequestCount
-                    let pendingRequests = worker.getPendingRequestsFromEVM(
-                        startIndex: 0,
-                        count: fetchCount,
-                    )
-
+            // Fetch pending requests from EVM
+            if fetchCount > 0 {
+                if let pendingRequests = worker.getPendingRequestsFromEVM(
+                    startIndex: 0,
+                    count: fetchCount,
+                ) {
                     // Preprocess requests (PENDING -> PROCESSING)
                     var successCount = 0
                     if let successfulRequests = worker.preprocessRequests(pendingRequests) {
@@ -441,12 +522,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                         )
                         successCount = successfulRequests.length
                     }
-
-                    emit SchedulerQueueUpdated(
-                        pendingRequestCount: pendingRequestCount,
-                        fetchSize: fetchCount,
-                        successfulPreprocessedRequestCount: successCount,
-                    )
+                } else {
+                    return "Failed to fetch pending requests"
                 }
             }
 
@@ -525,8 +602,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             // WorkerHandler scheduling parameters
             let baseDelay = 1.0
-            let priority = FlowTransactionScheduler.Priority.Medium
-            let executionEffort = 5000 as UInt64
 
             // Borrow FlowToken vault to pay scheduling fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
@@ -549,6 +624,25 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 // We assume the original list is sorted by user action timestamp
                 // and no action changes order of requests
                 let delay = baseDelay + UFix64(userScheduleOffset[key]!)
+                var executionEffort: UInt64 = 0
+                switch request.requestType {
+                    case FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue:
+                        executionEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+                            FlowYieldVaultsEVMWorkerOps.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT
+                        ]!
+                    case FlowYieldVaultsEVM.RequestType.WITHDRAW_FROM_YIELDVAULT.rawValue:
+                        executionEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+                            FlowYieldVaultsEVMWorkerOps.WORKER_WITHDRAW_REQUEST_EFFORT
+                        ]!
+                    case FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue:
+                        executionEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+                            FlowYieldVaultsEVMWorkerOps.WORKER_DEPOSIT_REQUEST_EFFORT
+                        ]!
+                    case FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue:
+                        executionEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+                            FlowYieldVaultsEVMWorkerOps.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT
+                        ]!
+                }
 
                 // Schedule transaction
                 let transactionId = self._scheduleTransaction(
@@ -556,7 +650,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     handlerTypeIdentifier: workerHandler.getType().identifier,
                     data: request.id,
                     delay: delay,
-                    priority: priority,
                     executionEffort: executionEffort,
                 )
 
@@ -580,17 +673,22 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @param manager The scheduler manager
         access(contract) fun scheduleNextSchedulerExecution(
             manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
+            forNumberOfRequests: UInt8,
         ): UInt64 {
             // Scheduler parameters
-            let priority = FlowTransactionScheduler.Priority.Medium
-            let executionEffort = 5000 as UInt64
+            let baseEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+                FlowYieldVaultsEVMWorkerOps.SCHEDULER_BASE_EFFORT
+            ]!
+            let perRequestEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+                FlowYieldVaultsEVMWorkerOps.SCHEDULER_PER_REQUEST_EFFORT
+            ]!
+            let executionEffort = baseEffort + UInt64(forNumberOfRequests) * perRequestEffort
 
             return self._scheduleTransaction(
                 manager: manager,
                 handlerTypeIdentifier: self.getType().identifier,
-                data: nil,
+                data: forNumberOfRequests,
                 delay: FlowYieldVaultsEVMWorkerOps.schedulerWakeupInterval,
-                priority: priority,
                 executionEffort: executionEffort,
             )
         }
@@ -607,11 +705,18 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             handlerTypeIdentifier: String,
             data: AnyStruct?,
             delay: UFix64,
-            priority: FlowTransactionScheduler.Priority,
             executionEffort: UInt64,
         ): UInt64 {
             // Calculate the target execution timestamp
             let future = getCurrentBlock().timestamp + delay
+
+            // Determine priority based on execution effort
+            var priority = FlowTransactionScheduler.Priority.Low
+            if executionEffort > 2500 && executionEffort < 7500 {
+                priority = FlowTransactionScheduler.Priority.Medium
+            } else if executionEffort >= 7500 {
+                priority = FlowTransactionScheduler.Priority.High
+            }
 
             // Borrow FlowToken vault to pay scheduling fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
@@ -748,6 +853,22 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         self.WorkerHandlerStoragePath = /storage/FlowYieldVaultsEVMWorkerOpsWorkerHandler
         self.SchedulerHandlerStoragePath = /storage/FlowYieldVaultsEVMWorkerOpsSchedulerHandler
         self.AdminStoragePath = /storage/FlowYieldVaultsEVMWorkerOpsAdmin
+
+        self.SCHEDULER_BASE_EFFORT = "schedulerBaseEffort"
+        self.SCHEDULER_PER_REQUEST_EFFORT = "schedulerPerRequestEffort"
+        self.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT = "workerCreateYieldVaultRequestEffort"
+        self.WORKER_WITHDRAW_REQUEST_EFFORT = "workerWithdrawRequestEffort"
+        self.WORKER_DEPOSIT_REQUEST_EFFORT = "workerDepositRequestEffort"
+        self.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT = "workerCloseYieldVaultRequestEffort"
+
+        self.executionEffortConstants = {
+            self.SCHEDULER_BASE_EFFORT: 700,
+            self.SCHEDULER_PER_REQUEST_EFFORT: 1000,
+            self.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT: 5000,
+            self.WORKER_WITHDRAW_REQUEST_EFFORT: 2000,
+            self.WORKER_DEPOSIT_REQUEST_EFFORT: 2000,
+            self.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT: 5000
+        }
 
         self.scheduledRequests = {}
         self.isSchedulerPaused = false
