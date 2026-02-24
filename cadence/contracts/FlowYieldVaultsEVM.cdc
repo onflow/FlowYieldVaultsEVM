@@ -528,7 +528,7 @@ access(all) contract FlowYieldVaultsEVM {
             ) {
                 emit ErrorEncountered(message: "Failed to start processing requests: \(errorMessage)")
                 // This function doesn't have Cadence state side effects, so it's safe to return nil
-                // instead of panicing.
+                // instead of panicking.
                 return nil
             }
 
@@ -546,9 +546,9 @@ access(all) contract FlowYieldVaultsEVM {
         // Request Processing
         // ============================================
 
-        /// @notice Processes the given request ids
+        /// @notice Processes the given requests
         /// @dev This function might panic if the request processing fails.
-        /// @param requestIds Request ids to process.
+        /// @param requests Requests to process.
         access(all) fun processRequests(_ requests: [EVMRequest]) {
             var successCount = 0
             var failCount = 0
@@ -582,7 +582,7 @@ access(all) contract FlowYieldVaultsEVM {
                     "FlowYieldVaultsRequests address not set - call Admin.setFlowYieldVaultsRequestsAddress() first"
             }
 
-            // Validate status - should already be PROCESSING due to Solidity validation and startProcessing checks
+            // Validate status - should already be PROCESSING due to Solidity validation and startProcessingBatch checks
             // Check defensively to prevent batch failure if edge case occurs
             if request.status != FlowYieldVaultsEVM.RequestStatus.PROCESSING.rawValue {
                 return FlowYieldVaultsEVM.emitRequestFailedAndReturnProcessResult(
@@ -654,7 +654,7 @@ access(all) contract FlowYieldVaultsEVM {
         /// @dev Calls completeProcessing to mark the request as failed with the given message
         /// @param request The EVM request to mark as failed
         /// @param message The error message to include in the result
-        /// @return String error message if the request failed to be marked as failed, otherwise nil
+        /// @return True if the request was marked as failed on EVM, false otherwise
         access(all) fun markRequestAsFailed(
             _ request: EVMRequest,
             message: String
@@ -714,7 +714,7 @@ access(all) contract FlowYieldVaultsEVM {
         ///      1. Withdraws funds from COA (bridging ERC20 if needed)
         ///      2. Validates vault type matches the requested vaultIdentifier
         ///      3. Creates YieldVault via YieldVaultManager
-        ///      4. Records ownership in yieldVaultsByEVMAddress and yieldVaultOwnershipLookup
+        ///      4. Records ownership in yieldVaultRegistry
         /// @param request The CREATE_YIELDVAULT request containing vault/strategy identifiers and amount
         /// @return ProcessResult with success status, created yieldVaultId, and status message
         access(self) fun processCreateYieldVault(_ request: EVMRequest): ProcessResult {

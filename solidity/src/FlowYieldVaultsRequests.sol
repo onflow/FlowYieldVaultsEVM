@@ -28,7 +28,7 @@ import {
  *      4. CLOSE_YIELDVAULT: User requests closure → COA closes YieldVault and bridges all funds back
  *
  *      Processing uses atomic two-phase commit:
- *      - startProcessing(): Marks request as PROCESSING, deducts user balance
+ *      - startProcessingBatch(): Marks requests as PROCESSING, deducts user balances
  *      - completeProcessing(): Marks as COMPLETED/FAILED, credits claimable refunds on failure
  */
 contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
@@ -912,6 +912,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @notice Processes a batch of PENDING requests.
      * @dev For successful requests, marks them as PROCESSING.
      *      For rejected requests, marks them as FAILED.
+     *      Single-request processing is supported by passing one request id in
+     *      successfulRequestIds and an empty rejectedRequestIds array.
      * @param successfulRequestIds The request ids to start processing (PENDING -> PROCESSING)
      * @param rejectedRequestIds The request ids to drop (PENDING -> FAILED)
      */
@@ -932,28 +934,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
     }
-
-    /**
-     * @notice Begins processing a request by transitioning it to PROCESSING status.
-     * @dev This is the first phase of the two-phase commit pattern. Must be called by the
-     *      authorized COA before executing Cadence-side operations.
-     *
-     *      For CREATE/DEPOSIT requests:
-     *      - Validates sufficient escrowed balance exists
-     *      - Atomically deducts user's escrowed balance
-     *      - Transfers funds to the COA for bridging to Cadence
-     *
-     *      For WITHDRAW/CLOSE requests:
-     *      - Only transitions status (no fund movement on EVM side)
-     *      - Funds will be bridged back from Cadence in completeProcessing
-     *
-     *      The PROCESSING status prevents request cancellation and double-processing.
-     * @param requestId The unique identifier of the request to start processing.
-     */
-    function startProcessing(uint256 requestId) external onlyAuthorizedCOA nonReentrant {
-        _startProcessingInternal(requestId);
-    }
-
 
     /**
      * @notice Completes request processing by marking success/failure and handling refunds.
@@ -985,7 +965,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
         // === VALIDATION ===
         if (request.id != requestId) revert RequestNotFound();
-        // Only PROCESSING requests can be completed (must call startProcessing first)
+        // Only PROCESSING requests can be completed (must call startProcessingBatch first)
         if (request.status != RequestStatus.PROCESSING)
             revert InvalidRequestState();
 
@@ -1005,7 +985,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
 
         // === HANDLE REFUNDS FOR FAILED CREATE/DEPOSIT ===
-        // COA must return the funds that were transferred in startProcessing
+        // COA must return the funds that were transferred in startProcessingBatch
         if (
             !success &&
             (request.requestType == RequestType.CREATE_YIELDVAULT ||

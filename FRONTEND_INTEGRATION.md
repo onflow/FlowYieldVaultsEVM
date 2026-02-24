@@ -315,7 +315,7 @@ contract.on("RefundClaimed", (user, tokenAddress, amount) => {
 
 ```typescript
 // BalanceUpdated fires when escrowed balance (pendingUserBalances) changes
-// This happens on: request creation, startProcessing, cancelRequest, dropRequests
+// This happens on: request creation, startProcessingBatch, cancelRequest, dropRequests
 contract.on("BalanceUpdated", (user, tokenAddress, newBalance) => {
   if (user.toLowerCase() === currentUser.toLowerCase()) {
     // Update UI with new escrowed balance for active pending requests

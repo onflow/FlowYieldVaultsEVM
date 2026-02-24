@@ -28,7 +28,7 @@ EVM users deposit FLOW and submit requests to a Solidity contract. A Cadence wor
 │                                         │                                   │
 └─────────────────────────────────────────┼───────────────────────────────────┘
                                           │ COA calls:
-                                          │ - startProcessing()
+                                          │ - startProcessingBatch()
                                           │ - completeProcessing()
 ┌─────────────────────────────────────────┼───────────────────────────────────┐
 │                              Flow Cadence                                   │
@@ -126,7 +126,7 @@ Worker contract that processes EVM requests and manages YieldVault positions.
 
 **Responsibilities:**
 - Fetch pending requests from EVM via `getPendingRequestsUnpacked()`
-- Execute two-phase commit (startProcessing → operation → completeProcessing)
+- Execute two-phase commit (startProcessingBatch → operation → completeProcessing)
 - Create, deposit to, withdraw from, and close YieldVaults
 - Bridge funds between EVM and Cadence via COA
 - Track YieldVault ownership by EVM address
@@ -292,7 +292,7 @@ access(all) struct ProcessResult {
        │                     │     [EVMRequest]       │                     │
        │                     │───────────────────────▶│                     │
        │                     │                        │                     │
-       │                     │   startProcessing(id)  │                     │
+       │                     │   startProcessingBatch([id], [])  │                     │
        │                     │◀───────────────────────│                     │
        │                     │ Mark PROCESSING        │                     │
        │                     │ Deduct user balance    │                     │
@@ -329,7 +329,7 @@ access(all) struct ProcessResult {
 3. Contract escrows funds, creates PENDING request
 4. Worker fetches request via getPendingRequestsUnpacked()
 5. Worker does not require ownership for deposits (permissionless)
-6. Worker calls startProcessing() → PROCESSING, balance deducted
+6. Worker calls startProcessingBatch() → PROCESSING, balance deducted
 7. COA withdraws funds from its balance
 8. Worker deposits to YieldVault via YieldVaultManager
 9. Worker calls completeProcessing() → COMPLETED
@@ -343,7 +343,7 @@ access(all) struct ProcessResult {
 3. Contract creates PENDING request (no escrow needed)
 4. Worker fetches request via getPendingRequestsUnpacked()
 5. Worker validates YieldVault ownership
-6. Worker calls startProcessing() → PROCESSING
+6. Worker calls startProcessingBatch() → PROCESSING
 7. Worker withdraws from YieldVault via YieldVaultManager
 8. Worker bridges funds to EVM via COA.deposit()
 9. COA transfers $FLOW directly to user's EVM address
@@ -358,7 +358,7 @@ access(all) struct ProcessResult {
 3. Contract creates PENDING request (amount = 0)
 4. Worker fetches request via getPendingRequestsUnpacked()
 5. Worker validates YieldVault ownership
-6. Worker calls startProcessing() → PROCESSING
+6. Worker calls startProcessingBatch() → PROCESSING
 7. Worker closes YieldVault via YieldVaultManager, receives all funds
 8. Worker bridges funds to EVM via COA.deposit()
 9. COA transfers all $FLOW to user's EVM address
@@ -384,7 +384,7 @@ All refund scenarios use a pull pattern - funds are credited to `claimableRefund
 
 | Scenario | What Happens |
 |----------|--------------|
-| After `startProcessing()` (failed CREATE/DEPOSIT) | Funds credited to `claimableRefunds` |
+| After `startProcessingBatch()` (failed CREATE/DEPOSIT) | Funds credited to `claimableRefunds` |
 | User cancels request | Funds moved from `pendingUserBalances` to `claimableRefunds` |
 | Admin drops request | Funds moved from `pendingUserBalances` to `claimableRefunds` |
 | WITHDRAW/CLOSE | No escrowed funds on EVM side, so refunds are not applicable |
@@ -397,14 +397,15 @@ All refund scenarios use a pull pattern - funds are credited to `claimableRefund
 
 The bridge uses a two-phase commit pattern for atomic state management:
 
-### Phase 1: startProcessing()
+### Phase 1: startProcessingBatch()
 
 ```solidity
-function startProcessing(uint256 requestId) external onlyAuthorizedCOA {
-    // 1. Validate request exists and is PENDING
-    // 2. Mark as PROCESSING
-    // 3. For CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT: Deduct user balance and transfer to COA
-    // 4. Emit RequestProcessed event
+function startProcessingBatch(uint256[] calldata successfulRequestIds, uint256[] calldata rejectedRequestIds) external onlyAuthorizedCOA {
+    // 1. Mark rejectedRequestIds as FAILED
+    // 2. Validate each successful request exists and is PENDING
+    // 3. Mark successful requests as PROCESSING
+    // 4. For CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT: Deduct user balance and transfer to COA
+    // 5. Emit RequestProcessed events
 }
 ```
 

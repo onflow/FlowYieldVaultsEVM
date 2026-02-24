@@ -2,7 +2,6 @@ import "FlowYieldVaultsEVM"
 
 /// @title Get Contract State
 /// @notice Returns the current state of the FlowYieldVaultsEVM contract
-/// @param contractAddress The address where FlowYieldVaultsEVM is deployed (unused but kept for compatibility)
 /// @return Dictionary containing contract configuration and statistics
 ///
 access(all) fun main(): {String: AnyStruct} {
