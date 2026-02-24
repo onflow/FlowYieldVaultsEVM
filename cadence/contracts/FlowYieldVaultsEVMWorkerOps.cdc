@@ -257,7 +257,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         /// @notice Pauses scheduler execution and cancels tracked in-flight WorkerHandler transactions
         /// @dev This pauses new scheduling and cancels transactions tracked in scheduledRequests, refunding fees.
-        ///      It does not cancel the next scheduler transaction ID tracked by SchedulerHandler.
+        ///      It also cancels the next scheduler transaction ID tracked by SchedulerHandler.
         access(all) fun stopAll() {
             pre {
                 FlowYieldVaultsEVMWorkerOps._getManagerFromStorage() != nil: "Scheduler manager not found"
@@ -310,6 +310,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 vaultRef.deposit(from: <-refund)
                 cancelledIds.append(schedulerTransactionId)
             }
+            // Clear cached scheduler pointer to avoid stale transaction ID after cancellation.
+            schedulerHandler.nextSchedulerTransactionId = nil
 
             emit AllExecutionsStopped(
                 cancelledIds: cancelledIds,
@@ -354,7 +356,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             if let requestId = data as? UInt256 {
                 if let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId) {
                     processResult = worker.processRequest(request)
-                    message = "Successfully processed request"
+                    message = "Request processed"
                 } else {
                     message = "Request not found: \(requestId.toString())"
                 }
@@ -462,10 +464,13 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // 1 means 1 request to preprocess
             var runCapacity = data as? UInt8 ?? 0
 
-            // Calculate capacity
-            let capacityLimit = UInt8(
-                FlowYieldVaultsEVMWorkerOps.maxProcessingRequests -
-                UInt8(FlowYieldVaultsEVMWorkerOps.scheduledRequests.length))
+            // Calculate available capacity safely.
+            // Guard against underflow if maxProcessingRequests is reduced while requests are in flight.
+            let maxProcessingRequests = FlowYieldVaultsEVMWorkerOps.maxProcessingRequests
+            let currentInFlight = FlowYieldVaultsEVMWorkerOps.scheduledRequests.length
+            let capacityLimit: UInt8 = currentInFlight >= Int(maxProcessingRequests)
+                ? 0
+                : maxProcessingRequests - UInt8(currentInFlight)
             if capacityLimit > 0 {
                 let capacity = runCapacity < capacityLimit ? runCapacity : capacityLimit
 

@@ -5,8 +5,8 @@ import "FlowYieldVaultsEVMWorkerOps"
 /// @dev This will:
 ///      1. Pause the handler to prevent new scheduling
 ///      2. Cancel WorkerHandler transactions tracked in FlowYieldVaultsEVMWorkerOps.scheduledRequests
-///      3. Refund fees to the contract account
-///      Note: This does not cancel the next scheduler transaction ID stored on SchedulerHandler.
+///      3. Cancel the next scheduler transaction ID stored on SchedulerHandler
+///      4. Refund fees to the contract account
 ///      Requires Admin resource.
 ///
 transaction() {
