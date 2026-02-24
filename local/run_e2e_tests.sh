@@ -214,6 +214,35 @@ process_requests() {
     --compute-limit 9999 2>&1
 }
 
+# Extract transaction ID from flow output
+extract_tx_id() {
+  local output=$1
+  echo "$output" | grep -E "^ID" | head -1 | awk '{print $2}'
+}
+
+# Get computation from transaction profile
+get_tx_computation() {
+  local tx_id=$1
+  flow transactions profile "$tx_id" --output /dev/null 2>/dev/null | grep -E "^Computation:" | awk '{print $2}'
+}
+
+# Process requests and print transaction ID and computation
+process_requests_verbose() {
+  local request_type=$1
+  local start_index=${2:-0}
+  local count=${3:-10}
+
+  local output=$(process_requests "$start_index" "$count")
+  local tx_id=$(extract_tx_id "$output")
+
+  if [ -n "$tx_id" ]; then
+    local computation=$(get_tx_computation "$tx_id")
+    echo -e "  ℹ️  Process TX ($request_type): $tx_id (computation: ${computation:-N/A})" >&2
+  fi
+
+  echo "$output"
+}
+
 # Wait for request to be processed
 wait_for_processing() {
   local request_id=$1
@@ -630,7 +659,7 @@ assert_balance_decreased "$USER_A_BALANCE_BEFORE" "$USER_A_BALANCE_AFTER_CREATE"
 # Process the request
 log_test "Process the pending request via Cadence"
 
-PROCESS_OUTPUT=$(process_requests 0 10)
+PROCESS_OUTPUT=$(process_requests_verbose "CREATE_YIELDVAULT" 0 10)
 if echo "$PROCESS_OUTPUT" | grep -q "SEALED"; then
   log_success "Request processing transaction sealed"
 else
@@ -714,7 +743,7 @@ else
 
   # Process
   sleep 1
-  process_requests 0 10 >/dev/null 2>&1 || true
+  process_requests_verbose "DEPOSIT_TO_YIELDVAULT" 0 10 >/dev/null || true
   sleep 2
 
   # Verify escrow cleared after processing
@@ -764,7 +793,7 @@ if [ -n "$YIELDVAULT_ID" ]; then
 
   # Process
   sleep 1
-  process_requests 0 10 >/dev/null 2>&1 || true
+  process_requests_verbose "WITHDRAW_FROM_YIELDVAULT" 0 10 >/dev/null || true
   sleep 2
 
   # Verify User A EVM balance increased by withdrawn amount
@@ -805,7 +834,7 @@ assert_tx_success "$TX_OUTPUT" "User B create YieldVault transaction submitted"
 
 # Process
 sleep 1
-process_requests 0 10 >/dev/null 2>&1 || true
+process_requests_verbose "CREATE_YIELDVAULT" 0 10 >/dev/null || true
 sleep 2
 
 log_test "Verify User B has their own YieldVault"
@@ -958,7 +987,7 @@ if [ -n "$YIELDVAULT_ID" ]; then
 
   # Process
   sleep 1
-  process_requests 0 10 >/dev/null 2>&1 || true
+  process_requests_verbose "CLOSE_YIELDVAULT" 0 10 >/dev/null || true
   sleep 2
 
   # Verify User A received all funds back
@@ -1023,7 +1052,7 @@ if [ -n "$USER_B_VAULT_ID" ]; then
 
   # Process the deposit
   sleep 1
-  process_requests 0 10 >/dev/null 2>&1 || true
+  process_requests_verbose "DEPOSIT_TO_YIELDVAULT (cross-user)" 0 10 >/dev/null || true
   sleep 2
 
   # Verify User B's vault balance increased
@@ -1053,7 +1082,7 @@ if [ -n "$USER_B_VAULT_ID" ]; then
     # Request submitted - will fail on Cadence processing
     log_info "Request submitted - verifying Cadence rejects it"
     sleep 1
-    process_requests 0 10 >/dev/null 2>&1 || true
+    process_requests_verbose "CLOSE_YIELDVAULT (cross-user, should fail)" 0 10 >/dev/null || true
     sleep 2
 
     # Verify User B's vault still exists and has balance
@@ -1120,7 +1149,7 @@ log_info "Pending requests after rapid creation: $PENDING_COUNT"
 
 log_test "Process all pending requests"
 
-PROCESS_OUTPUT=$(process_requests 0 20)
+PROCESS_OUTPUT=$(process_requests_verbose "CREATE_YIELDVAULT (batch)" 0 20)
 if echo "$PROCESS_OUTPUT" | grep -q "SEALED"; then
   log_success "Batch processing completed"
 else
@@ -1161,7 +1190,7 @@ TX_OUTPUT=$(cast_send "$USER_A_PK" \
 assert_tx_success "$TX_OUTPUT" "Lifecycle: Create submitted"
 
 sleep 1
-process_requests 0 10 >/dev/null 2>&1 || true
+process_requests_verbose "CREATE_YIELDVAULT (lifecycle)" 0 10 >/dev/null || true
 sleep 2
 
 # Get the new vault ID
@@ -1190,7 +1219,7 @@ if [ -n "$LIFECYCLE_VAULT_ID" ]; then
 
   # Process deposits
   sleep 1
-  process_requests 0 10 >/dev/null 2>&1 || true
+  process_requests_verbose "DEPOSIT_TO_YIELDVAULT (lifecycle x2)" 0 10 >/dev/null || true
   sleep 2
 
   # Withdraw 1
@@ -1209,7 +1238,7 @@ if [ -n "$LIFECYCLE_VAULT_ID" ]; then
 
   # Process withdrawals
   sleep 1
-  process_requests 0 10 >/dev/null 2>&1 || true
+  process_requests_verbose "WITHDRAW_FROM_YIELDVAULT (lifecycle x2)" 0 10 >/dev/null || true
   sleep 2
 
   # Close
@@ -1220,7 +1249,7 @@ if [ -n "$LIFECYCLE_VAULT_ID" ]; then
 
   # Process close
   sleep 1
-  process_requests 0 10 >/dev/null 2>&1 || true
+  process_requests_verbose "CLOSE_YIELDVAULT (lifecycle)" 0 10 >/dev/null || true
   sleep 2
 
   # Verify lifecycle vault is closed and balance returned
