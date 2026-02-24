@@ -255,6 +255,16 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             return <- create SchedulerHandler(workerCap: workerCap)
         }
 
+        /// @notice Stores the scheduler transaction ID in SchedulerHandler state
+        /// @dev Used by bootstrap flows that schedule scheduler transactions outside SchedulerHandler.executeTransaction()
+        access(all) fun setNextSchedulerTransactionId(_ transactionId: UInt64) {
+            pre {
+                FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage() != nil: "SchedulerHandler resource not found"
+            }
+            let schedulerHandler = FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage()!
+            schedulerHandler.setNextSchedulerTransactionId(transactionId)
+        }
+
         /// @notice Pauses scheduler execution and cancels tracked in-flight WorkerHandler transactions
         /// @dev This pauses new scheduling and cancels transactions tracked in scheduledRequests, refunding fees.
         ///      It also cancels the next scheduler transaction ID tracked by SchedulerHandler.
@@ -436,6 +446,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             // Check if scheduler is paused
             if FlowYieldVaultsEVMWorkerOps.isSchedulerPaused {
+                // Clear cached scheduler pointer since this execution won't schedule a next run.
+                self.clearNextSchedulerTransactionId()
                 emit SchedulerHandlerExecuted(
                     transactionId: id,
                     nextTransactionId: nil,
@@ -507,7 +519,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 manager: manager,
                 forNumberOfRequests: nextRunCapacity,
             )
-            self.nextSchedulerTransactionId = nextTransactionId
 
             emit SchedulerHandlerExecuted(
                 transactionId: id,
@@ -546,14 +557,14 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     count: fetchCount,
                 ) {
                     // Preprocess requests (PENDING -> PROCESSING)
-                    var successCount = 0
                     if let successfulRequests = worker.preprocessRequests(pendingRequests) {
                         // Schedule WorkerHandlers and assign request ids to them
                         self._scheduleWorkerHandlersForRequests(
                             requests: successfulRequests,
                             manager: manager,
                         )
-                        successCount = successfulRequests.length
+                    } else {
+                        return "Failed to preprocess pending requests"
                     }
                 } else {
                     return "Failed to fetch pending requests"
@@ -716,19 +727,26 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             ]!
             let executionEffort = baseEffort + UInt64(forNumberOfRequests) * perRequestEffort
 
-            return self._scheduleTransaction(
+            let transactionId = self._scheduleTransaction(
                 manager: manager,
                 handlerTypeIdentifier: self.getType().identifier,
                 data: forNumberOfRequests,
                 delay: FlowYieldVaultsEVMWorkerOps.schedulerWakeupInterval,
                 executionEffort: executionEffort,
             )
+            self.setNextSchedulerTransactionId(transactionId)
+            return transactionId
+        }
+
+        /// @notice Sets the cached next scheduler transaction ID
+        access(contract) fun setNextSchedulerTransactionId(_ transactionId: UInt64?) {
+            self.nextSchedulerTransactionId = transactionId
         }
 
         /// @notice Clears the cached next scheduler transaction ID
         /// @dev Used by Admin.stopAll() after cancelling scheduler execution
         access(contract) fun clearNextSchedulerTransactionId() {
-            self.nextSchedulerTransactionId = nil
+            self.setNextSchedulerTransactionId(nil)
         }
 
         /// @notice Helper function to schedule a transaction for the SchedulerHandler

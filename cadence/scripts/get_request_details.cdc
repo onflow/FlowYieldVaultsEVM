@@ -13,7 +13,7 @@ access(all) fun main(requestId: UInt256): {String: AnyStruct} {
             "user": request.user.toString(),
             "requestType": request.requestType,
             "requestTypeName": getRequestTypeName(request.requestType),
-            "status": getStatusName(request.status),
+            "status": request.status,
             "statusName": getStatusName(request.status),
             "tokenAddress": request.tokenAddress.toString(),
             "amount": request.amount.toString(),

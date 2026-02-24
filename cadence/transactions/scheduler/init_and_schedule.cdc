@@ -22,6 +22,7 @@ transaction {
     let feeVaultRef: auth(FungibleToken.Withdraw) &FlowToken.Vault
     let workerHandlerTypeIdentifier: String
     let schedulerHandler: &FlowYieldVaultsEVMWorkerOps.SchedulerHandler
+    let opsAdmin: &FlowYieldVaultsEVMWorkerOps.Admin
 
     prepare(signer: auth(BorrowValue, IssueStorageCapabilityController, SaveValue, PublishCapability) &Account) {
         pre {
@@ -48,7 +49,7 @@ transaction {
             ) ?? panic("Could not borrow Manager reference")
 
         // Load WorkerOps Admin
-        let opsAdmin = signer.storage
+        self.opsAdmin = signer.storage
             .borrow<&FlowYieldVaultsEVMWorkerOps.Admin>
             (from: FlowYieldVaultsEVMWorkerOps.AdminStoragePath)
             ?? panic("Could not borrow FlowYieldVaultsEVMWorkerOps Admin")
@@ -59,7 +60,7 @@ transaction {
 
         // Initialize SchedulerHandler resource if it doesn't exist
         if signer.storage.borrow<&AnyResource>(from: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath) == nil {
-            let handler <- opsAdmin.createSchedulerHandler(workerCap: workerCap)
+            let handler <- self.opsAdmin.createSchedulerHandler(workerCap: workerCap)
             signer.storage.save(<-handler, to: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath)
         }
         self.schedulerHandler = signer.storage
@@ -67,7 +68,7 @@ transaction {
 
         // Initialize WorkerHandler resource if it doesn't exist
         if signer.storage.borrow<&AnyResource>(from: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath) == nil {
-            let handler <- opsAdmin.createWorkerHandler(workerCap: workerCap)
+            let handler <- self.opsAdmin.createWorkerHandler(workerCap: workerCap)
             self.workerHandlerTypeIdentifier = handler.getType().identifier
             signer.storage.save(<-handler, to: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath)
         } else {
@@ -136,6 +137,7 @@ transaction {
                 priority: schedulerPriority,
                 executionEffort: schedulerExecutionEffort
             )
+            self.opsAdmin.setNextSchedulerTransactionId(schedulerTransactionId)
             log("Scheduler started: \(schedulerTransactionId)")
         }
     }
