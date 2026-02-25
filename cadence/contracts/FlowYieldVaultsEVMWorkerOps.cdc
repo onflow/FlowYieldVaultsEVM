@@ -19,6 +19,11 @@ import "FungibleToken"
 ///      - SchedulerHandler is always scheduled to run at the configured interval. It checks if there are any
 ///        pending requests in the EVM contract. If there are, it will schedule multiple WorkerHandlers to process the
 ///        requests based on available capacity.
+///      - SchedulerHandler uses a two-phase capacity strategy:
+///        1) Current run reads run capacity from scheduler data (nil means 0) and processes up to that limit.
+///        2) It computes next run capacity from remaining pending requests and schedules the next run with
+///           matching execution effort.
+///      - This keeps idle/empty scheduler runs cheap while automatically scaling effort when backlog appears.
 ///      - SchedulerHandler also identifies WorkerHandlers that panicked and handles the failure state changes accordingly.
 ///      - SchedulerHandler preprocesses requests before scheduling WorkerHandlers to identify and fail invalid requests.
 ///      - SchedulerHandler will schedule multiple WorkerHandlers for the same immediate height. If an EVM address has
@@ -285,7 +290,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             let cancelledIds: [UInt64] = []
 
-            var totalRefunded: UFix64 = 0.0
+            var totalRefunded = 0.0
 
             // Borrow FlowToken vault to deposit refunded fees
             let vaultRef = FlowYieldVaultsEVMWorkerOps._getFlowTokenVaultFromStorage()!
@@ -436,7 +441,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         /// @notice Executes the recurrent scheduler logic
         /// @param id The transaction ID being executed
-        /// @param data Unused - scheduler data (nil)
+        /// @param data Optional scheduler run capacity hint (UInt8). nil is treated as 0.
         access(FlowTransactionScheduler.Execute) fun executeTransaction(id: UInt64, data: AnyStruct?) {
             pre {
                 FlowYieldVaultsEVMWorkerOps._getManagerFromStorage() != nil: "Scheduler manager not found"
@@ -471,26 +476,38 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             var pendingCount: Int? = nil
             var fetchCount: Int? = nil
 
-            // Extract computation limit from passed data (nil is interpreted as 0)
-            // Defines how much computation is available for the scheduler to use
-            // 1 means 1 request to preprocess
-            var runCapacity = data as? UInt8 ?? 0
+            // runCapacity:
+            // Scheduler budget passed in transaction data from previous scheduler run.
+            // nil means "no budget" (0). A value of N means this run can attempt up to N requests.
+            let runCapacity = data as? UInt8 ?? 0
 
             // Calculate available capacity safely.
             // Guard against underflow if maxProcessingRequests is reduced while requests are in flight.
             let maxProcessingRequests = FlowYieldVaultsEVMWorkerOps.maxProcessingRequests
             let currentInFlight = FlowYieldVaultsEVMWorkerOps.scheduledRequests.length
+            // capacityLimit:
+            // Remaining worker slots available right now, based on in-flight workers.
+            // capacityLimit = max(0, maxProcessingRequests - currentInFlight)
             let capacityLimit: UInt8 = currentInFlight >= Int(maxProcessingRequests)
                 ? 0
                 : maxProcessingRequests - UInt8(currentInFlight)
             if capacityLimit > 0 {
+                // capacity:
+                // Effective per-run budget after applying both limits:
+                // - requested runCapacity
+                // - currently available worker slots (capacityLimit)
                 let capacity = runCapacity < capacityLimit ? runCapacity : capacityLimit
 
                 // Check pending request count
                 if let pendingRequestCount = worker.getPendingRequestCountFromEVM() {
+                    // pendingRequestCount:
+                    // Total backlog currently pending on EVM at this moment.
                     pendingCount = pendingRequestCount
                     if pendingRequestCount > 0 {
 
+                        // fetchCount:
+                        // Number of pending requests this run will actually fetch/process.
+                        // fetchCount = min(pendingRequestCount, capacity)
                         fetchCount = pendingRequestCount > Int(capacity) ? Int(capacity) : pendingRequestCount
 
                         // Run main scheduler logic
@@ -504,7 +521,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                             message = "Scheduler ran successfully"
                         }
 
-                        let stillPendingCount = pendingRequestCount - fetchCount!
+                        let stillPendingCount: Int = pendingRequestCount - fetchCount!
                         nextRunCapacity = stillPendingCount < Int(FlowYieldVaultsEVMWorkerOps.maxProcessingRequests)
                             ? UInt8(stillPendingCount)
                             : FlowYieldVaultsEVMWorkerOps.maxProcessingRequests
@@ -535,12 +552,13 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @dev Flow:
         ///      1. Check for failed worker requests
         ///         - If a failure is identified, mark the request as failed and remove it from scheduledRequests
-        ///      2. Check pending request count & calculate capacity
-        ///      3. Fetch pending requests data from EVM contract
-        ///      4. Preprocess requests to drop invalid requests
-        ///      5. Start processing requests (PENDING -> PROCESSING)
-        ///      6. Schedule WorkerHandlers and assign request ids to them
+        ///      2. If fetchCount > 0, fetch pending requests from EVM
+        ///      3. Preprocess requests to drop invalid requests
+        ///      4. Start processing requests (PENDING -> PROCESSING)
+        ///      5. Schedule WorkerHandlers and assign request ids to them
         /// @param manager The scheduler manager
+        /// @param worker The worker resource
+        /// @param fetchCount Number of pending requests to fetch in this run
         /// @return Error message if any error occurred, nil otherwise
         access(self) fun _runScheduler(
             manager: auth(FlowTransactionSchedulerUtils.Owner) &{FlowTransactionSchedulerUtils.Manager},
@@ -779,7 +797,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
             // Estimate fees and withdraw payment
             // calculateFee() is not supported by Flow emulator. When emulator is updated, following code can be uncommented.
-            // data is nil or UInt256, size is 0 in both cases
             // let dataSizeMB = 0.0
             // let fee = FlowTransactionScheduler.calculateFee(
             //     executionEffort: executionEffort,
@@ -788,7 +805,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // )
             // let fees <- vaultRef.withdraw(amount: fee) as! @FlowToken.Vault
             let estimate = FlowTransactionScheduler.estimate(
-                data: nil,
+                data: data,
                 timestamp: future,
                 priority: priority,
                 executionEffort: executionEffort

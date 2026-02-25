@@ -169,7 +169,7 @@ access(self) var isSchedulerPaused: Bool
 
 // Configuration
 access(self) var schedulerWakeupInterval: UFix64  // Default: 1.0 seconds
-access(self) var maxProcessingRequests: Int       // Default: 3 concurrent workers
+access(self) var maxProcessingRequests: UInt8     // Default: 3 concurrent workers
 access(all) let executionEffortConstants: {String: UInt64}  // Configurable execution effort values
 ```
 
@@ -781,7 +781,7 @@ access(all) fun createWorker(...): @Worker
 // Admin resource functions
 access(all) fun pauseScheduler()   // Stop scheduling new workers (in-flight workers continue)
 access(all) fun unpauseScheduler() // Resume scheduling
-access(all) fun setMaxProcessingRequests(maxProcessingRequests: Int)  // Set max concurrent workers
+access(all) fun setMaxProcessingRequests(maxProcessingRequests: UInt8)  // Set max concurrent workers
 access(all) fun setExecutionEffortConstants(key: String, value: UInt64)  // Update execution effort
 access(all) fun setSchedulerWakeupInterval(schedulerWakeupInterval: UFix64)  // Set scheduler interval
 access(all) fun createWorkerHandler(workerCap: ...) -> @WorkerHandler
