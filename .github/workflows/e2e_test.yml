@@ -52,11 +52,60 @@ jobs:
 
       - name: Deploy Full Stack
         run: |
-          DEPLOYMENT_OUTPUT=$(./local/deploy_full_stack.sh)
-          echo "$DEPLOYMENT_OUTPUT"
-          FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowYieldVaultsRequests Contract:" | sed 's/.*: //')
+          set -o pipefail
+
+          MAX_ATTEMPTS=2
+          ATTEMPT=1
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Deploy attempt $ATTEMPT/$MAX_ATTEMPTS"
+            if ./local/deploy_full_stack.sh 2>&1 | tee deploy_full_stack.log; then
+              break
+            fi
+
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "Deploy Full Stack failed after $MAX_ATTEMPTS attempts"
+              exit 1
+            fi
+
+            echo "Deploy failed, retrying once..."
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 5
+          done
+
+          FLOW_VAULTS_REQUESTS_CONTRACT=$(grep "FlowYieldVaultsRequests Contract:" deploy_full_stack.log | tail -n 1 | sed 's/.*: //')
+          if [ -z "$FLOW_VAULTS_REQUESTS_CONTRACT" ]; then
+            echo "Failed to extract FlowYieldVaultsRequests contract address from deploy output"
+            exit 1
+          fi
+
           echo "CONTRACT_ADDRESS=$FLOW_VAULTS_REQUESTS_CONTRACT" >> $GITHUB_ENV
 
+      - name: Detect Strategy Identifier
+        run: |
+          echo "Detecting supported strategy identifier..."
+          YIELDVAULT_CHECK=$(flow scripts execute ./cadence/scripts/check_yieldvault_details.cdc 0x045a1763c93006ca)
+          echo "$YIELDVAULT_CHECK"
+
+          SUPPORTED_STRATEGIES=$(echo "$YIELDVAULT_CHECK" | grep -oE '"supportedStrategies": \[[^]]*\]' || true)
+          if [ -z "$SUPPORTED_STRATEGIES" ]; then
+            echo "❌ Could not parse supported strategy list"
+            exit 1
+          fi
+
+          STRATEGY_LIST=$(echo "$SUPPORTED_STRATEGIES" | sed -E 's/^"supportedStrategies": \[(.*)\]$/\1/' | tr -d '"' | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed '/^$/d')
+          STRATEGY_IDENTIFIER=$(echo "$STRATEGY_LIST" | grep 'TracerStrategy' | head -n 1 || true)
+          if [ -z "$STRATEGY_IDENTIFIER" ]; then
+            STRATEGY_IDENTIFIER=$(echo "$STRATEGY_LIST" | head -n 1)
+          fi
+
+          if [ -z "$STRATEGY_IDENTIFIER" ]; then
+            echo "❌ No supported strategy identifier found"
+            exit 1
+          fi
+
+          echo "Using strategy identifier: $STRATEGY_IDENTIFIER"
+          echo "STRATEGY_IDENTIFIER=$STRATEGY_IDENTIFIER" >> $GITHUB_ENV
+      
       # === TEST 1: BASIC YIELDVAULT CREATION ===
       - name: Test 1 - Create YieldVault (10 FLOW)
         run: |
