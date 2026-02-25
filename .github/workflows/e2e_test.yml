@@ -52,9 +52,32 @@ jobs:
       
       - name: Deploy Full Stack
         run: |
-          DEPLOYMENT_OUTPUT=$(./local/deploy_full_stack.sh)
-          echo "$DEPLOYMENT_OUTPUT"
-          FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowYieldVaultsRequests Contract:" | sed 's/.*: //')
+          set -o pipefail
+
+          MAX_ATTEMPTS=2
+          ATTEMPT=1
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Deploy attempt $ATTEMPT/$MAX_ATTEMPTS"
+            if ./local/deploy_full_stack.sh 2>&1 | tee deploy_full_stack.log; then
+              break
+            fi
+
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "Deploy Full Stack failed after $MAX_ATTEMPTS attempts"
+              exit 1
+            fi
+
+            echo "Deploy failed, retrying once..."
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 5
+          done
+
+          FLOW_VAULTS_REQUESTS_CONTRACT=$(grep "FlowYieldVaultsRequests Contract:" deploy_full_stack.log | tail -n 1 | sed 's/.*: //')
+          if [ -z "$FLOW_VAULTS_REQUESTS_CONTRACT" ]; then
+            echo "Failed to extract FlowYieldVaultsRequests contract address from deploy output"
+            exit 1
+          fi
+
           echo "CONTRACT_ADDRESS=$FLOW_VAULTS_REQUESTS_CONTRACT" >> $GITHUB_ENV
 
       - name: Detect Strategy Identifier
