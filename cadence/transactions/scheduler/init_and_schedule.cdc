@@ -130,7 +130,7 @@ transaction {
         // Schedule scheduler
         if !schedulerRunning {
             let schedulerPriority = FlowTransactionScheduler.Priority.Medium
-            let schedulerExecutionEffort = 5000 as UInt64
+            let schedulerExecutionEffort = 700 as UInt64
             // First scheduler run will be scheduled without any requests to preprocess
             // If there are pending requests, they will be preprocessed in the next scheduler execution
             let schedulerTransactionId = _scheduleTransaction(
