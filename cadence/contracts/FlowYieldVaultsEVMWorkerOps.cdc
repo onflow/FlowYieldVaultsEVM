@@ -378,10 +378,24 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 if let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId) {
                     processResult = worker.processRequest(request)
                     message = "Request processed"
+                    FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                } else if let scheduledRequest = FlowYieldVaultsEVMWorkerOps.scheduledRequests[requestId] {
+                    // Request lookup can fail transiently; attempt fail-marking with tracked payload first.
+                    let markAsFailed = worker.markRequestAsFailed(
+                        scheduledRequest.request,
+                        message: "Request lookup failed in worker execution. Transaction ID: \(id.toString())",
+                    )
+
+                    if markAsFailed {
+                        FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                        message = "Request not found and marked as failed: \(requestId.toString())"
+                    } else {
+                        // Keep tracking so scheduler recovery can retry failure handling later.
+                        message = "Request not found and failed to mark as failed; retained for recovery: \(requestId.toString())"
+                    }
                 } else {
-                    message = "Request not found: \(requestId.toString())"
+                    message = "Request not found and not tracked: \(requestId.toString())"
                 }
-                FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
             } else {
                 message = "No valid request ID found"
             }
