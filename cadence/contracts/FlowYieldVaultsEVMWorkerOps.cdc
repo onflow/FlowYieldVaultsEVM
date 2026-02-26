@@ -490,7 +490,15 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             // Calculate available capacity safely.
             // Guard against underflow if maxProcessingRequests is reduced while requests are in flight.
             let maxProcessingRequests = FlowYieldVaultsEVMWorkerOps.maxProcessingRequests
-            let currentInFlight = FlowYieldVaultsEVMWorkerOps.scheduledRequests.length
+            var currentInFlight = FlowYieldVaultsEVMWorkerOps.scheduledRequests.length
+
+            // If capacity is saturated, run failed-worker recovery first to clear stale entries
+            // that would otherwise block pending-request processing.
+            if currentInFlight >= Int(maxProcessingRequests) {
+                self._checkForFailedWorkerRequests(manager: manager, worker: worker)
+                currentInFlight = FlowYieldVaultsEVMWorkerOps.scheduledRequests.length
+            }
+
             // capacityLimit:
             // Remaining worker slots available right now, based on in-flight workers.
             // capacityLimit = max(0, maxProcessingRequests - currentInFlight)
