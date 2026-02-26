@@ -193,7 +193,12 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 FlowYieldVaultsEVMWorkerOps.isSchedulerPaused = false
                 let schedulerHandler = FlowYieldVaultsEVMWorkerOps._getSchedulerHandlerFromStorage()!
                 let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
-                let txId = schedulerHandler.scheduleNextSchedulerExecution(manager: manager, forNumberOfRequests: 0)
+                // First scheduler run will be scheduled without any requests to preprocess
+                // If there are pending requests, they will be preprocessed in the next scheduler execution
+                let txId = schedulerHandler.scheduleNextSchedulerExecution(
+                    manager: manager,
+                    forNumberOfRequests: 0,
+                )
                 emit SchedulerUnpaused(
                     nextTransactionId: txId,
                 )
@@ -221,6 +226,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 key == FlowYieldVaultsEVMWorkerOps.WORKER_DEPOSIT_REQUEST_EFFORT ||
                 key == FlowYieldVaultsEVMWorkerOps.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT
                 : "Invalid key: \(key)"
+                value <= 9999: "Execution effort must be less than or equal to 9999"
             }
             FlowYieldVaultsEVMWorkerOps.executionEffortConstants[key] = value
         }
@@ -656,7 +662,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 // Count user requests for scheduling
                 let key = request.user.toString()
                 if userScheduleOffset[key] == nil {
-                    // first request for user is scheduled immediately
+                    // first request for user is scheduled without additional delay
                     userScheduleOffset[key] = 0
                 } else {
                     // subsequent requests are scheduled with an offset

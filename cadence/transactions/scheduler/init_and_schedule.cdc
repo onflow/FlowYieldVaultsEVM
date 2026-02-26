@@ -108,7 +108,8 @@ transaction {
                 handlerCap: self.workerHandlerCap,
                 feeVaultRef: self.feeVaultRef,
                 priority: workerHandlerPriority,
-                executionEffort: workerHandlerExecutionEffort
+                executionEffort: workerHandlerExecutionEffort,
+                data: nil
             )
             log("\(self.workerHandlerTypeIdentifier) successfully registered in the manager")
         } else {
@@ -130,12 +131,15 @@ transaction {
         if !schedulerRunning {
             let schedulerPriority = FlowTransactionScheduler.Priority.Medium
             let schedulerExecutionEffort = 5000 as UInt64
+            // First scheduler run will be scheduled without any requests to preprocess
+            // If there are pending requests, they will be preprocessed in the next scheduler execution
             let schedulerTransactionId = _scheduleTransaction(
                 manager: self.manager,
                 handlerCap: self.schedulerHandlerCap,
                 feeVaultRef: self.feeVaultRef,
                 priority: schedulerPriority,
-                executionEffort: schedulerExecutionEffort
+                executionEffort: schedulerExecutionEffort,
+                data: nil
             )
             self.opsAdmin.setNextSchedulerTransactionId(schedulerTransactionId)
             log("Scheduler started: \(schedulerTransactionId)")
@@ -159,6 +163,7 @@ access(self) fun _scheduleTransaction(
     feeVaultRef: auth(FungibleToken.Withdraw) &FlowToken.Vault,
     priority: FlowTransactionScheduler.Priority,
     executionEffort: UInt64,
+    data: AnyStruct?,
 ): UInt64 {
     // Calculate the target execution timestamp
     let future = getCurrentBlock().timestamp + 1.0
@@ -182,7 +187,7 @@ access(self) fun _scheduleTransaction(
     // Schedule the next execution
     let transactionId = manager.schedule(
         handlerCap: handlerCap,
-        data: nil,
+        data: data,
         timestamp: future,
         priority: priority,
         executionEffort: executionEffort,
