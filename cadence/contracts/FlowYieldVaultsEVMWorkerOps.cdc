@@ -318,9 +318,9 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                         requestId: scheduledRequestId,
                         workerTransactionId: request.workerTransactionId,
                     )
+                } else {
+                    FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: scheduledRequestId)
                 }
-
-                FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: scheduledRequestId)
             }
 
             // Step 3: Cancel scheduler execution
@@ -615,7 +615,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         ///         - Only acceptable transaction status is Scheduled (pending execution)
         ///         - No status is considered not acceptable because it means the manager cleaned up the request
         ///      4. If the transaction status is invalid, mark the request as FAILED providing the transaction ID
-        ///      5. Remove the request from scheduledRequests
+        ///      5. Remove from scheduledRequests only when fail-marking succeeds; otherwise retain for retry
         /// @param manager The scheduler manager
         /// @param worker The worker capability
         access(self) fun _checkForFailedWorkerRequests(
@@ -646,9 +646,11 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                         message: "Worker transaction did not execute successfully. Transaction ID: \(txId.toString())",
                     )
 
-                    // Remove request from scheduledRequests
-                    // Success is not checked because errors are not considered transient
-                    FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                    // Remove from tracking only on successful fail-marking.
+                    // If fail-marking fails, retain tracking so future recovery can retry.
+                    if success {
+                        FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                    }
 
                     emit WorkerHandlerPanicDetected(
                         status: txStatus?.rawValue,
