@@ -1,39 +1,28 @@
 import "FlowYieldVaultsEVM"
 
 /// @title Get Request Details
-/// @notice Returns details of the first pending request from FlowYieldVaultsRequests
-/// @param contractAddr The address where FlowYieldVaultsEVM Worker is stored
-/// @param startIndex The index to start fetching requests from
-/// @param count The number of requests to fetch
-/// @return Dictionary with request details or empty message if none pending
+/// @notice Returns details for a specific request ID from FlowYieldVaultsRequests
+/// @param requestId The request ID to fetch
+/// @return Dictionary with request details
 ///
-access(all) fun main(contractAddr: Address, startIndex: Int, count: Int): {String: AnyStruct} {
-    let account = getAuthAccount<auth(Storage) &Account>(contractAddr)
+access(all) fun main(requestId: UInt256): {String: AnyStruct} {
 
-    let worker = account.storage.borrow<&FlowYieldVaultsEVM.Worker>(
-        from: FlowYieldVaultsEVM.WorkerStoragePath
-    ) ?? panic("No Worker found")
-
-    let requests = worker.getPendingRequestsFromEVM(startIndex: startIndex, count: count)
-
-    if requests.length == 0 {
-        return {"message": "No pending requests"}
-    }
-
-    let request = requests[0]
-
-    return {
-        "id": request.id.toString(),
-        "user": request.user.toString(),
-        "requestType": request.requestType,
-        "requestTypeName": getRequestTypeName(request.requestType),
-        "status": request.status,
-        "statusName": getStatusName(request.status),
-        "tokenAddress": request.tokenAddress.toString(),
-        "amount": request.amount.toString(),
-        "yieldVaultId": request.yieldVaultId.toString(),
-        "timestamp": request.timestamp.toString(),
-        "message": request.message
+    if let request = FlowYieldVaultsEVM.getRequestUnpacked(requestId) {
+        return {
+            "id": request.id.toString(),
+            "user": request.user.toString(),
+            "requestType": request.requestType,
+            "requestTypeName": getRequestTypeName(request.requestType),
+            "status": request.status,
+            "statusName": getStatusName(request.status),
+            "tokenAddress": request.tokenAddress.toString(),
+            "amount": request.amount.toString(),
+            "yieldVaultId": request.yieldVaultId?.toString() ?? "",
+            "timestamp": request.timestamp.toString(),
+            "message": request.message
+        }
+    } else {
+        panic("Request not found")
     }
 }
 

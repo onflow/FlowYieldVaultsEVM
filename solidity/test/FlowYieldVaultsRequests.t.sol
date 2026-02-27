@@ -48,6 +48,12 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.testRegisterYieldVaultId(42, user, NATIVE_FLOW);
     }
 
+    function _startProcessingBatch(uint256 requestId) internal {
+        uint256[] memory successfulRequestIds = new uint256[](1);
+        successfulRequestIds[0] = requestId;
+        c.startProcessingBatch(successfulRequestIds, new uint256[](0));
+    }
+
     // ============================================
     // USER REQUEST LIFECYCLE
     // ============================================
@@ -79,7 +85,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         );
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         vm.expectRevert(
             FlowYieldVaultsRequests.CannotRegisterSentinelYieldVaultId.selector
         );
@@ -97,7 +103,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 0, "YieldVault 0 created");
         vm.stopPrank();
 
@@ -224,7 +230,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // 2. COA starts processing (moves funds to COA)
         vm.prank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
 
         // 3. COA fails and returns funds
@@ -261,7 +267,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Process and fail
         vm.prank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
         c.completeProcessing{value: 2 ether}(reqId, false, sentinelYieldVaultId, "Failed");
@@ -280,7 +286,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
         c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed");
@@ -293,17 +299,17 @@ contract FlowYieldVaultsRequestsTest is Test {
     }
 
     // ============================================
-    // COA PROCESSING - startProcessing & completeProcessing
+    // COA PROCESSING - startProcessingBatch & completeProcessing
     // ============================================
 
-    function test_StartProcessing_Success() public {
+    function test_StartProcessingBatch_Success() public {
         vm.prank(user);
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
 
         vm.prank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
 
         // Balance deducted atomically
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
@@ -312,25 +318,25 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PROCESSING));
     }
 
-    function test_StartProcessing_RevertNotPending() public {
+    function test_StartProcessingBatch_RevertNotPending() public {
         vm.prank(user);
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
 
-        vm.expectRevert(FlowYieldVaultsRequests.RequestAlreadyFinalized.selector);
-        c.startProcessing(reqId);
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidRequestState.selector);
+        _startProcessingBatch(reqId);
         vm.stopPrank();
     }
 
-    function test_StartProcessing_RevertUnauthorized() public {
+    function test_StartProcessingBatch_RevertUnauthorized() public {
         vm.prank(user);
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.NotAuthorizedCOA.selector, user));
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
     }
 
     function test_CompleteProcessing_Success() public {
@@ -338,7 +344,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 100, "YieldVault created");
         vm.stopPrank();
 
@@ -357,7 +363,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         // Escrowed balance is now 0 (funds sent to COA)
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 0);
@@ -379,7 +385,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         // Escrowed balance is now 0 (funds sent to COA)
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 0);
@@ -403,7 +409,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.closeYieldVault(42);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 42, "Closed");
         vm.stopPrank();
 
@@ -416,7 +422,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(coa);
-        vm.expectRevert(FlowYieldVaultsRequests.RequestAlreadyFinalized.selector);
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidRequestState.selector);
         c.completeProcessing(reqId, true, 100, "Should fail");
     }
 
@@ -762,7 +768,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // 2. COA starts processing (deducts balance atomically)
         vm.prank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
 
         // 3. COA completes processing (funds are bridged via COA in Cadence)
@@ -785,7 +791,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // COA processes
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 42, "Withdrawn");
         vm.stopPrank();
 
@@ -846,7 +852,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Process middle request (req3)
         vm.startPrank(coa);
-        c.startProcessing(req3);
+        _startProcessingBatch(req3);
         c.completeProcessing(req3, true, 200, "Created");
         vm.stopPrank();
 
@@ -868,7 +874,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Remove first element
         vm.startPrank(coa);
-        c.startProcessing(req1);
+        _startProcessingBatch(req1);
         c.completeProcessing(req1, true, 100, "Created");
         vm.stopPrank();
 
@@ -887,7 +893,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Remove last element
         vm.startPrank(coa);
-        c.startProcessing(req3);
+        _startProcessingBatch(req3);
         c.completeProcessing(req3, true, 100, "Created");
         vm.stopPrank();
 
@@ -906,13 +912,13 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Process in FIFO order
         vm.startPrank(coa);
-        c.startProcessing(req1);
+        _startProcessingBatch(req1);
         c.completeProcessing(req1, true, 100, "Created");
 
-        c.startProcessing(req2);
+        _startProcessingBatch(req2);
         c.completeProcessing(req2, true, 101, "Created");
 
-        c.startProcessing(req3);
+        _startProcessingBatch(req3);
         c.completeProcessing(req3, true, 102, "Created");
         vm.stopPrank();
 
@@ -929,7 +935,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Process out of order: req2, req4, req1, req3
         vm.startPrank(coa);
-        c.startProcessing(req2);
+        _startProcessingBatch(req2);
         c.completeProcessing(req2, true, 100, "Created");
 
         // After removing req2: [req1, req3, req4]
@@ -938,7 +944,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(ids1[1], req3);
         assertEq(ids1[2], req4);
 
-        c.startProcessing(req4);
+        _startProcessingBatch(req4);
         c.completeProcessing(req4, true, 101, "Created");
 
         // After removing req4: [req1, req3]
@@ -946,7 +952,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(ids2[0], req1);
         assertEq(ids2[1], req3);
 
-        c.startProcessing(req1);
+        _startProcessingBatch(req1);
         c.completeProcessing(req1, true, 102, "Created");
 
         // After removing req1: [req3]
@@ -954,7 +960,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(ids3.length, 1);
         assertEq(ids3[0], req3);
 
-        c.startProcessing(req3);
+        _startProcessingBatch(req3);
         c.completeProcessing(req3, true, 103, "Created");
         vm.stopPrank();
 
@@ -1034,7 +1040,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Process req2
         vm.startPrank(coa);
-        c.startProcessing(req2);
+        _startProcessingBatch(req2);
         c.completeProcessing(req2, true, 100, "Created");
         vm.stopPrank();
 
@@ -1092,7 +1098,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Remove user's middle request (u1r2)
         vm.startPrank(coa);
-        c.startProcessing(u1r2);
+        _startProcessingBatch(u1r2);
         c.completeProcessing(u1r2, true, 100, "Created");
         vm.stopPrank();
 
@@ -1118,9 +1124,9 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         vm.startPrank(coa);
-        c.startProcessing(req1);
+        _startProcessingBatch(req1);
         c.completeProcessing(req1, true, 100, "Created");
-        c.startProcessing(req2);
+        _startProcessingBatch(req2);
         c.completeProcessing(req2, true, 101, "Created");
         vm.stopPrank();
 
@@ -1139,7 +1145,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 200, "Created");
         vm.stopPrank();
 
@@ -1153,7 +1159,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 closeReqId = c.closeYieldVault(200);
 
         vm.startPrank(coa);
-        c.startProcessing(closeReqId);
+        _startProcessingBatch(closeReqId);
         c.completeProcessing(closeReqId, true, 200, "Closed");
         vm.stopPrank();
 
@@ -1173,11 +1179,11 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         vm.startPrank(coa);
-        c.startProcessing(req1);
+        _startProcessingBatch(req1);
         c.completeProcessing(req1, true, 100, "Created");
-        c.startProcessing(req2);
+        _startProcessingBatch(req2);
         c.completeProcessing(req2, true, 101, "Created");
-        c.startProcessing(req3);
+        _startProcessingBatch(req3);
         c.completeProcessing(req3, true, 102, "Created");
         vm.stopPrank();
 
@@ -1190,7 +1196,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 closeReq = c.closeYieldVault(101);
 
         vm.startPrank(coa);
-        c.startProcessing(closeReq);
+        _startProcessingBatch(closeReq);
         c.completeProcessing(closeReq, true, 101, "Closed");
         vm.stopPrank();
 
@@ -1211,7 +1217,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 closeReq = c.closeYieldVault(42);
 
         vm.startPrank(coa);
-        c.startProcessing(closeReq);
+        _startProcessingBatch(closeReq);
         c.completeProcessing(closeReq, true, 42, "Closed");
         vm.stopPrank();
 
@@ -1244,7 +1250,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Process every other request (simulating out-of-order processing)
         vm.startPrank(coa);
         for (uint256 i = 1; i < numRequests; i += 2) {
-            c.startProcessing(requestIds[i]);
+            _startProcessingBatch(requestIds[i]);
             c.completeProcessing(requestIds[i], true, uint64(100 + i), "Created");
         }
         vm.stopPrank();
@@ -1282,7 +1288,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Process user[2]'s middle request
         vm.startPrank(coa);
-        c.startProcessing(userRequestIds[2][1]);
+        _startProcessingBatch(userRequestIds[2][1]);
         c.completeProcessing(userRequestIds[2][1], true, 300, "Created");
         vm.stopPrank();
 
@@ -1306,7 +1312,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 100, "Created");
         vm.stopPrank();
 
@@ -1324,7 +1330,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Start and fail processing req1
         vm.startPrank(coa);
-        c.startProcessing(req1);
+        _startProcessingBatch(req1);
         // COA must return funds when completing with failure
         c.completeProcessing{value: 1 ether}(req1, false, c.NO_YIELDVAULT_ID(), "Failed");
         vm.stopPrank();
@@ -1366,12 +1372,12 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 100, "Created");
 
         // Try to register same ID again (simulate COA bug)
         uint256 reqId2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
-        c.startProcessing(reqId2);
+        _startProcessingBatch(reqId2);
         vm.expectRevert(abi.encodeWithSelector(
             FlowYieldVaultsRequests.YieldVaultIdAlreadyRegistered.selector,
             100
@@ -1386,7 +1392,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 100, "Created");
         vm.stopPrank();
 
@@ -1395,7 +1401,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 depositReq = c.depositToYieldVault{value: 1 ether}(100, NATIVE_FLOW, 1 ether);
 
         vm.startPrank(coa);
-        c.startProcessing(depositReq);
+        _startProcessingBatch(depositReq);
         vm.expectRevert(abi.encodeWithSelector(
             FlowYieldVaultsRequests.YieldVaultIdMismatch.selector,
             100,  // expected
@@ -1411,7 +1417,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        c.startProcessing(reqId);
+        _startProcessingBatch(reqId);
         c.completeProcessing(reqId, true, 100, "Created");
         vm.stopPrank();
 

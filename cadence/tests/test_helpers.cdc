@@ -31,14 +31,14 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "Burner",
         path: "../../imports/f233dcee88fe0abe/Burner.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy DeFiActions dependencies
     err = Test.deployContract(
         name: "DeFiActionsMathUtils",
@@ -46,21 +46,21 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "DeFiActionsUtils",
         path: "../../imports/92195d814edf9cb0/DeFiActionsUtils.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "DeFiActions",
         path: "../../imports/92195d814edf9cb0/DeFiActions.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy FlowYieldVaults dependencies
     err = Test.deployContract(
         name: "FlowYieldVaultsClosedBeta",
@@ -68,14 +68,14 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "FlowYieldVaults",
         path: "../../lib/FlowYieldVaults/cadence/contracts/FlowYieldVaults.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy FlowEVMBridge dependencies for FlowEVMBridgeUtils
     // First deploy interfaces
     err = Test.deployContract(
@@ -84,42 +84,42 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "IBridgePermissions",
         path: "../../imports/1e4aa0b87d10b141/IBridgePermissions.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "ICrossVM",
         path: "../../imports/1e4aa0b87d10b141/ICrossVM.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "ICrossVMAsset",
         path: "../../imports/1e4aa0b87d10b141/ICrossVMAsset.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "CrossVMMetadataViews",
         path: "../../imports/1d7e57aa55817448/CrossVMMetadataViews.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "CrossVMNFT",
         path: "../../imports/1e4aa0b87d10b141/CrossVMNFT.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy custom association types
     err = Test.deployContract(
         name: "FlowEVMBridgeCustomAssociationTypes",
@@ -127,14 +127,14 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "FlowEVMBridgeCustomAssociations",
         path: "../../imports/1e4aa0b87d10b141/FlowEVMBridgeCustomAssociations.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy FlowEVMBridgeConfig
     err = Test.deployContract(
         name: "FlowEVMBridgeConfig",
@@ -142,7 +142,7 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy Serialize (dependency of SerializeMetadata)
     err = Test.deployContract(
         name: "Serialize",
@@ -150,14 +150,14 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "SerializeMetadata",
         path: "../../imports/1e4aa0b87d10b141/SerializeMetadata.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy FlowEVMBridgeUtils (required by FlowYieldVaultsEVM)
     err = Test.deployContract(
         name: "FlowEVMBridgeUtils",
@@ -165,7 +165,7 @@ access(all) fun deployContracts() {
         arguments: ["0x0000000000000000000000000000000000000000"]
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy FlowEVMBridge interface contracts
     err = Test.deployContract(
         name: "IEVMBridgeNFTMinter",
@@ -173,28 +173,28 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "IEVMBridgeTokenMinter",
         path: "../../imports/1e4aa0b87d10b141/IEVMBridgeTokenMinter.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "IFlowEVMNFTBridge",
         path: "../../imports/1e4aa0b87d10b141/IFlowEVMNFTBridge.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     err = Test.deployContract(
         name: "IFlowEVMTokenBridge",
         path: "../../imports/1e4aa0b87d10b141/IFlowEVMTokenBridge.cdc",
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Deploy CrossVMToken
     err = Test.deployContract(
         name: "CrossVMToken",
@@ -202,11 +202,11 @@ access(all) fun deployContracts() {
         arguments: []
     )
     Test.expect(err, Test.beNil())
-    
+
     // Note: We skip deploying FlowEVMBridge, FlowEVMBridgeNFTEscrow, FlowEVMBridgeTokenEscrow,
     // and FlowEVMBridgeTemplates as they have access control issues and are not needed.
     // FlowYieldVaultsEVM only requires FlowEVMBridgeUtils and FlowEVMBridgeConfig which are already deployed.
-    
+
     // Deploy FlowYieldVaultsEVM
     err = Test.deployContract(
         name: "FlowYieldVaultsEVM",
@@ -246,15 +246,6 @@ fun updateRequestsAddress(_ signer: Test.TestAccount, _ address: String): Test.T
 }
 
 access(all)
-fun updateMaxRequests(_ signer: Test.TestAccount, _ maxRequests: Int): Test.TransactionResult {
-    return _executeTransaction(
-        "../transactions/update_max_requests.cdc",
-        [maxRequests],
-        signer
-    )
-}
-
-access(all)
 fun setupWorkerWithBadge(_ admin: Test.TestAccount): Test.TransactionResult {
     return _executeTransaction(
         "transactions/setup_worker_for_test.cdc",
@@ -285,7 +276,7 @@ fun getYieldVaultIdsForEVMAddress(_ evmAddress: String): [UInt64]? {
 
 access(all)
 fun getRequestsAddress(): String? {
-    let res = _executeScript("../scripts/get_contract_state.cdc", [admin.address])
+    let res = _executeScript("../scripts/get_contract_state.cdc", [])
     if res.status == Test.ResultStatus.succeeded {
         if let state = res.returnValue as? {String: AnyStruct} {
             let address = state["flowYieldVaultsRequestsAddress"] as! String?
@@ -294,17 +285,6 @@ fun getRequestsAddress(): String? {
                 return nil
             }
             return address
-        }
-    }
-    return nil
-}
-
-access(all)
-fun getMaxRequestsConfig(): Int? {
-    let res = _executeScript("../scripts/get_max_requests_config.cdc", [])
-    if res.status == Test.ResultStatus.succeeded {
-        if let result = res.returnValue as? {String: AnyStruct} {
-            return result["currentMaxRequestsPerTx"] as! Int?
         }
     }
     return nil

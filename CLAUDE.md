@@ -46,9 +46,9 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 ### Cross-VM Request Flow
 
 1. **EVM User** calls `FlowYieldVaultsRequests.sol` (creates request, escrows funds)
-2. **FlowYieldVaultsTransactionHandler.cdc** triggers `Worker.processRequests()` on schedule
+2. **FlowYieldVaultsEVMWorkerOps.cdc** SchedulerHandler schedules WorkerHandlers to process requests
 3. **FlowYieldVaultsEVM.cdc** Worker fetches pending requests via `getPendingRequestsUnpacked()`
-4. **Two-phase commit**: `startProcessing()` marks PROCESSING and deducts balance, `completeProcessing()` marks COMPLETED/FAILED (refunds credited to `claimableRefunds` on failure)
+4. **Two-phase commit**: `startProcessingBatch()` marks PROCESSING and deducts balance, `completeProcessing()` marks COMPLETED/FAILED (refunds credited to `claimableRefunds` on failure)
 
 ### Contract Components
 
@@ -56,15 +56,16 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 | --------------------------------------- | -------------------- | ----------------------------------- |
 | `FlowYieldVaultsRequests.sol`           | `solidity/src/`      | EVM request queue + fund escrow     |
 | `FlowYieldVaultsEVM.cdc`                | `cadence/contracts/` | Cadence worker processing requests  |
-| `FlowYieldVaultsTransactionHandler.cdc` | `cadence/contracts/` | Auto-scheduler with adaptive delays |
+| `FlowYieldVaultsEVMWorkerOps.cdc`       | `cadence/contracts/` | SchedulerHandler + WorkerHandler orchestration |
 
 ### Key Design Patterns
 
 - **COA Bridge**: Cadence Owned Account bridges funds between EVM and Cadence via FlowEVMBridge
 - **Sentinel Values**: `NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF`, `NO_YIELDVAULT_ID = type(uint64).max`
-- **Ownership Tracking**: Parallel mappings on both EVM (`userOwnsYieldVault`) and Cadence (`yieldVaultRegistry`) for O(1) lookups
-- **Adaptive Scheduling**: TransactionHandler adjusts delay based on pending count (3s for >10, 5s for >=5, 7s for >=1, 30s idle)
-- **Dynamic Execution Effort**: `baseEffortPerRequest * maxRequestsPerTx + baseOverhead`
+- **Ownership Tracking**: Parallel mappings on both EVM (`userOwnsYieldVault`) and Cadence (`yieldVaultOwnershipLookup`) for O(1) lookups
+- **Scheduler/Worker Split**: SchedulerHandler runs at fixed interval, schedules WorkerHandlers for individual requests
+- **Batch Preprocessing**: SchedulerHandler validates requests before scheduling workers; invalid requests fail early
+- **Crash Recovery**: SchedulerHandler monitors WorkerHandler transactions and marks panicked requests as FAILED
 
 ### Request Types (must stay synchronized between contracts)
 
@@ -114,7 +115,42 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 | --------------------------------- | -------------------------------------------- |
 | FlowYieldVaultsRequests (EVM)     | `0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d` |
 | FlowYieldVaultsEVM (Cadence)      | `df111ffc5064198a`                           |
-| FlowYieldVaultsTransactionHandler | `df111ffc5064198a`                           |
+| FlowYieldVaultsEVMWorkerOps       | `df111ffc5064198a`                           |
+
+## Blockchain Execution Model (Critical for Code Review)
+
+When reviewing this codebase, keep these fundamental blockchain properties in mind:
+
+### Transaction Atomicity
+
+**All blockchain transactions are atomic.** If any operation within a transaction panics/reverts, ALL state changes made during that transaction are rolled back completely. There is no "partial completion" scenario.
+
+- In Cadence: `panic()` reverts all state changes in the transaction
+- In Solidity: `revert()` or failed `require()` reverts all state changes
+- This is **by design** and is the correct way to ensure data consistency
+
+Therefore, patterns like:
+```cadence
+// This is SAFE - if processRequest panics, the remove never happened
+scheduledRequests.remove(key: requestId)
+processResult = worker.processRequest(request)  // if this panics, the line above reverts too
+```
+
+### Sequential Execution (No On-Chain Race Conditions)
+
+**Blockchain transactions execute one at a time in a deterministic order.** There is no parallel execution within the same blockchain execution environment.
+
+- Transactions are ordered within blocks and executed sequentially
+- Two transactions cannot "race" against each other simultaneously
+- What might look like a "race condition" is actually just transaction ordering, which is well-defined behavior
+
+This means scenarios like "Transaction A completes but Transaction B sees stale state" are **impossible** within the same execution context. By the time Transaction B executes, Transaction A has either fully committed or fully reverted.
+
+### Implications for This Codebase
+
+1. **WorkerHandler/SchedulerHandler coordination** is safe because they run in separate transactions that execute sequentially
+2. **Panic-based error handling** in `processRequest()` is the correct pattern - it ensures atomicity across Cadence and EVM state
+3. **State removal before vs after processing** doesn't create race conditions - if processing fails, the entire transaction (including removal) reverts
 
 ## Dependencies
 

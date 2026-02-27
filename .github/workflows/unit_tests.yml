@@ -17,19 +17,19 @@ jobs:
         with:
           token: ${{ secrets.GH_PAT }}
           submodules: recursive
-      
+
       - name: Install Flow CLI
         run: sh -ci "$(curl -fsSL https://raw.githubusercontent.com/onflow/flow-cli/master/install.sh)"
-      
+
       - name: Update PATH
         run: echo "$HOME/.local/bin" >> $GITHUB_PATH
-      
+
       - name: Verify Flow CLI Installation
         run: flow version
-      
+
       - name: Make test script executable
         run: chmod +x ./local/run_cadence_tests.sh
-      
+
       - name: Run Cadence Tests
         run: ./local/run_cadence_tests.sh
 

@@ -31,7 +31,8 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 │  └───────────────────────────────────────────────────────────────────────┘  │
 │                              ▲                                              │
 │  ┌───────────────────────────┴─────────────────────────────────────────┐    │
-│  │              FlowYieldVaultsTransactionHandler                      │    │
+│  │                   FlowYieldVaultsEVMWorkerOps                       │    │
+│  │  SchedulerHandler ──schedules──▶ WorkerHandler (per request)       │    │
 │  │       (Auto-scheduling with FlowTransactionScheduler)               │    │
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                             │
@@ -44,7 +45,7 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 |-----------|-------------|
 | **FlowYieldVaultsRequests** (Solidity) | Request queue and fund escrow on EVM. Accepts user requests and holds deposited funds until processed. |
 | **FlowYieldVaultsEVM** (Cadence) | Worker contract that processes EVM requests, manages YieldVault positions, and bridges funds via COA. |
-| **FlowYieldVaultsTransactionHandler** (Cadence) | Auto-scheduling handler that triggers request processing at adaptive intervals based on queue depth. |
+| **FlowYieldVaultsEVMWorkerOps** (Cadence) | Orchestration contract with SchedulerHandler (checks queue, schedules workers) and WorkerHandler (processes individual requests). Includes crash recovery for panicked workers. |
 | **COA** (Cadence Owned Account) | Bridge account controlled by the Worker that moves funds between EVM and Cadence. |
 
 ## Supported Operations
@@ -60,13 +61,11 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 
 1. **User submits request** on EVM with optional fund deposit
 2. **FlowYieldVaultsRequests** escrows funds and queues the request
-3. **FlowYieldVaultsTransactionHandler** triggers `worker.processRequests()` at scheduled intervals
-4. **Worker.processRequests()** fetches pending requests from EVM via `getPendingRequestsUnpacked()`
-5. **For each request**, two-phase commit:
-   - `startProcessing()`: Marks request as PROCESSING, deducts user balance (for CREATE_YIELDVAULT/DEPOSIT_TO_YIELDVAULT)
+3. **SchedulerHandler** fetches pending requests, calls `preprocessRequests()` to validate and transition (PENDING → PROCESSING), then schedules WorkerHandlers
+4. **WorkerHandler** processes individual requests via `processRequest()`:
    - Execute Cadence operation (create/deposit/withdraw/close YieldVault)
    - `completeProcessing()`: Marks as COMPLETED or FAILED (on failure, credits `claimableRefunds`; user claims via `claimRefund`)
-6. **Funds bridged** to user on withdrawal/close operations
+5. **Funds bridged** to user on withdrawal/close operations
 
 ## Quick Start
 
@@ -100,6 +99,7 @@ Recommended sequence (run from repo root):
 2. `./local/deploy_full_stack.sh`
 3. `./local/run_e2e_tests.sh`
 4. `./local/run_admin_e2e_tests.sh`
+5. `./local/run_worker_tests.sh`
 
 Notes:
 - These scripts expect `flow`, `forge`, `cast`, `curl`, `bc`, `lsof`, and `git` on PATH.
@@ -111,6 +111,7 @@ Local script reference:
 - `./local/deploy_full_stack.sh`: Funds local EVM EOAs, deploys `FlowYieldVaultsRequests` to the local EVM, deploys Cadence contracts, sets up the Worker, and writes `./local/.deployed_contract_address`.
 - `./local/run_e2e_tests.sh`: Runs end-to-end user flows (create/deposit/withdraw/close/cancel). Requires emulator/gateway running and a deployed contract address.
 - `./local/run_admin_e2e_tests.sh`: Runs end-to-end admin flows (allowlist/blocklist, token config, max requests, admin cancel/drop). Requires emulator/gateway running and a deployed contract address.
+- `./local/run_worker_tests.sh`: Runs scheduled worker tests (SchedulerHandler, WorkerHandler, pause/unpause, crash recovery). Requires emulator/gateway running and a deployed contract address.
 - `./local/run_cadence_tests.sh`: Runs Cadence tests with `flow test`. Cleans `./db` and `./imports` first (stop emulator if you need to preserve state).
 - `./local/run_solidity_tests.sh`: Runs Solidity tests with `forge test`.
 - `./local/testnet-e2e.sh`: Testnet CLI for state checks and user/admin actions. Run `./local/testnet-e2e.sh --help` for commands. Uses `PRIVATE_KEY` and `TESTNET_RPC_URL` if set; admin commands require `testnet-account` in `flow.json`. Update the hardcoded `CONTRACT` address in the script when deploying a new version.
@@ -188,7 +189,7 @@ forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYie
 |---------|----------|---------|
 | Testnet | FlowYieldVaultsRequests | `0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d` |
 | Testnet | FlowYieldVaultsEVM | Deployed on Cadence |
-| Testnet | FlowYieldVaultsTransactionHandler | Deployed on Cadence |
+| Testnet | FlowYieldVaultsEVMWorkerOps | Deployed on Cadence |
 
 Source of truth for published addresses: `deployments/contract-addresses.json`.
 
@@ -249,27 +250,13 @@ Testnet E2E uses `deployments/contract-addresses.json` to auto-load addresses (s
 | `maxPendingRequestsPerUser` | 10 | Max pending requests per user (0 = unlimited) |
 | `minimumBalance` | 1 FLOW | Minimum deposit for native $FLOW |
 
-### FlowYieldVaultsEVM (Cadence)
+### FlowYieldVaultsEVMWorkerOps (Cadence)
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `maxRequestsPerTx` | 1 | Requests processed per transaction (1-100) |
+| `schedulerWakeupInterval` | 1.0s | Fixed interval between scheduler executions |
+| `maxProcessingRequests` | 3 | Maximum concurrent WorkerHandlers |
 
-### FlowYieldVaultsTransactionHandler (Cadence)
-
-| Pending Requests | Delay | Description |
-|------------------|-------|-------------|
-| ≥11 | 3s | High load |
-| ≥5 | 5s | Medium load |
-| ≥1 | 7s | Low load |
-| 0 | 30s | Idle |
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `isPaused` | false | Pause/resume processing |
-| `baseEffortPerRequest` | 2000 | Execution effort per request |
-| `baseOverhead` | 3000 | Base overhead for transactions |
-| `idleExecutionEffort` | 5000 | Max effort cap when idle (for Medium priority) |
 
 ## Security
 
