@@ -133,7 +133,7 @@ All user operations are available through `FlowYieldVaultsYieldVaultOperations.s
 | `USER_PRIVATE_KEY` | Private key for signing transactions | `0x3` (test account) |
 | `AMOUNT` | Amount in wei for create/deposit operations | `10000000000000000000` (10 FLOW) |
 | `VAULT_IDENTIFIER` | Cadence vault type identifier | `A.0ae53cb6e3f42a79.FlowToken.Vault` |
-| `STRATEGY_IDENTIFIER` | Cadence strategy type identifier | `A.045a1763c93006ca.FlowYieldVaultsStrategies.TracerStrategy` |
+| `STRATEGY_IDENTIFIER` | Cadence strategy type identifier | `A.045a1763c93006ca.MockStrategies.TracerStrategy` |
 
 #### Commands
 

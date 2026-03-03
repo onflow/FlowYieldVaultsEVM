@@ -18,7 +18,7 @@ access(all) let nativeFlowAddr = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFF
 /* --- Mock Vault and Strategy Identifiers --- */
 
 access(all) let mockVaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
-access(all) let mockStrategyIdentifier = "A.045a1763c93006ca.FlowYieldVaultsStrategies.TracerStrategy"
+access(all) let mockStrategyIdentifier = "A.045a1763c93006ca.MockStrategies.TracerStrategy"
 
 /* --- Setup helpers --- */
 
