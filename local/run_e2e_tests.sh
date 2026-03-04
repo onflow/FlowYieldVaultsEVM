@@ -72,7 +72,7 @@ RPC_URL="http://localhost:8545"
 # Contract constants
 NATIVE_FLOW="0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF"
 VAULT_IDENTIFIER="A.0ae53cb6e3f42a79.FlowToken.Vault"
-STRATEGY_IDENTIFIER="A.045a1763c93006ca.FlowYieldVaultsStrategies.TracerStrategy"
+STRATEGY_IDENTIFIER="A.045a1763c93006ca.MockStrategies.TracerStrategy"
 CADENCE_CONTRACT_ADDR="045a1763c93006ca"
 
 # ============================================

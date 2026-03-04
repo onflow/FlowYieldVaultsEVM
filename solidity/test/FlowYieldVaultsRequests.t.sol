@@ -39,7 +39,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     error OwnableInvalidOwner(address owner);
 
     string constant VAULT_ID = "A.0ae53cb6e3f42a79.FlowToken.Vault";
-    string constant STRATEGY_ID = "A.045a1763c93006ca.FlowYieldVaultsStrategies.TracerStrategy";
+    string constant STRATEGY_ID = "A.045a1763c93006ca.MockStrategies.TracerStrategy";
 
     function setUp() public {
         vm.deal(user, 100 ether);
