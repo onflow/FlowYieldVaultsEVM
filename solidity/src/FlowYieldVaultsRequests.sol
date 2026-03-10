@@ -173,15 +173,19 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice All requests indexed by request ID
     mapping(uint256 => Request) public requests;
 
-    /// @notice Array of pending request IDs awaiting processing (FIFO order)
-    uint256[] public pendingRequestIds;
-
-    /// @notice Index of request ID in global pending array (for O(1) lookup)
-    mapping(uint256 => uint256) private _requestIndexInGlobalArray;
-
     /// @notice Index of yieldVaultId in user's yieldVaultsByUser array (for O(1) removal)
     /// @dev Internal visibility allows test helpers to properly initialize state
     mapping(address => mapping(uint64 => uint256)) internal _yieldVaultIndexInUserArray;
+
+    /// @notice Mapping of queued request IDs awaiting processing (FIFO order)
+    mapping(uint256 => uint256) private _requestsQueue;
+
+    /// @notice Pointer to the current head in _requestsQueue. Denotes the next request to be processed
+    uint256 private _requestsQueueHead = 1;
+
+    /// @notice Pointer to the current tail in _requestsQueue. Points to the next available
+    ///         slot — i.e., one past the last enqueued request.
+    uint256 private _requestsQueueTail = 1;
 
     // ============================================
     // Errors
@@ -293,6 +297,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice The requested recovery amount exceeds the available excess amount
     error InsufficientRecoveryAmount(uint256 available, uint256 requested);
+
+    /// @notice Invalid dequeue operation on an empty requests queue
+    error EmptyRequestsQueue();
+
+    /// @notice Processed request does not match the head of requestsQueue
+    error RequestProcessOutOfOrder(uint256 expectedId, uint256 processedId);
 
     // ============================================
     // Events
@@ -886,7 +896,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (userPendingRequestCount[request.user] > 0) {
             userPendingRequestCount[request.user]--;
         }
-        _removePendingRequest(requestId);
+        _removeUserPendingRequest(requestId);
+        _dropQueuedRequest(requestId);
 
         // === REFUND HANDLING (pull pattern) ===
         // For CREATE/DEPOSIT requests, move funds from pendingUserBalances to claimableRefunds
@@ -955,6 +966,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @notice Processes a batch of PENDING requests.
      * @dev For successful requests, marks them as PROCESSING.
      *      For rejected requests, marks them as FAILED.
+     *      Requests are classified as successful/rejected based on validation
+     *      logic that is performed on Cadence side, and not on the authorized
+     *      COA's discretion.
      *      Single-request processing is supported by passing one request id in
      *      successfulRequestIds and an empty rejectedRequestIds array.
      * @param successfulRequestIds The request ids to start processing (PENDING -> PROCESSING)
@@ -964,6 +978,38 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256[] calldata successfulRequestIds,
         uint256[] calldata rejectedRequestIds
     ) external onlyAuthorizedCOA nonReentrant {
+        uint256 totalRequests = successfulRequestIds.length + rejectedRequestIds.length;
+
+        uint256 j = 0;
+        uint256 k = 0;
+        for (uint256 i = 0; i < totalRequests; i++) {
+            uint256 requestId = _requestsQueue[_requestsQueueHead+i];
+            uint256 reqId;
+            if (j < successfulRequestIds.length) {
+                reqId = successfulRequestIds[j];
+                Request storage request = requests[reqId];
+
+                // === VALIDATION ===
+                if (request.id != reqId) revert RequestNotFound();
+                if (request.status != RequestStatus.PENDING)
+                    revert InvalidRequestState();
+
+                if (reqId == requestId) {
+                    j++;
+                    continue;
+                }
+            }
+
+            if (k < rejectedRequestIds.length) {
+                reqId = rejectedRequestIds[k];
+                if (reqId == requestId) {
+                    k++;
+                    continue;
+                }
+            }
+
+            revert RequestProcessOutOfOrder(requestId, reqId);
+        }
 
         // === REJECTED REQUESTS ===
         _dropRequestsInternal(rejectedRequestIds);
@@ -1116,12 +1162,21 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Gets the count of pending requests
     /// @return Number of pending requests
     function getPendingRequestCount() external view returns (uint256) {
-        return pendingRequestIds.length;
+        return _requestsQueueLength();
     }
 
     /// @notice Gets all pending request IDs
     /// @return Array of pending request IDs
     function getPendingRequestIds() external view returns (uint256[] memory) {
+        uint256[] memory pendingRequestIds = new uint256[](_requestsQueueLength());
+        uint256 arrayIndex = 0;
+        for (uint256 i = _requestsQueueHead; i < _requestsQueueTail;) {
+            pendingRequestIds[arrayIndex] = _requestsQueue[i];
+            unchecked {
+                ++arrayIndex;
+                ++i;
+            }
+        }
         return pendingRequestIds;
     }
 
@@ -1160,7 +1215,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             string[] memory strategyIdentifiers
         )
     {
-        if (startIndex >= pendingRequestIds.length) {
+        if (startIndex >= _requestsQueueLength()) {
             return (
                 new uint256[](0),
                 new address[](0),
@@ -1176,7 +1231,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             );
         }
 
-        uint256 remaining = pendingRequestIds.length - startIndex;
+        uint256 remaining = _requestsQueueLength() - startIndex;
         uint256 size = count == 0
             ? remaining
             : (count < remaining ? count : remaining);
@@ -1193,8 +1248,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         vaultIdentifiers = new string[](size);
         strategyIdentifiers = new string[](size);
 
-        for (uint256 i = 0; i < size; ) {
-            Request memory req = requests[pendingRequestIds[startIndex + i]];
+        for (uint256 i = 0; i < size;) {
+            Request memory req = requests[_requestsQueue[_requestsQueueHead + startIndex + i]];
             ids[i] = req.id;
             users[i] = req.user;
             requestTypes[i] = uint8(req.requestType);
@@ -1457,7 +1512,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 }
 
                 // Remove from pending queues (both global and user-specific)
-                _removePendingRequest(requestId);
+                _removeUserPendingRequest(requestId);
+                _dropQueuedRequest(requestId);
 
                 emit RequestProcessed(
                     requestId,
@@ -1501,11 +1557,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      */
     function _startProcessingInternal(uint256 requestId) internal {
         Request storage request = requests[requestId];
-
-        // === VALIDATION ===
-        if (request.id != requestId) revert RequestNotFound();
-        if (request.status != RequestStatus.PENDING)
-            revert InvalidRequestState();
 
         // === TRANSITION TO PROCESSING ===
         // This prevents cancellation and ensures atomicity with completeProcessing
@@ -1563,7 +1614,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (userPendingRequestCount[request.user] > 0) {
             userPendingRequestCount[request.user]--;
         }
-        _removePendingRequest(requestId);
+        _removeUserPendingRequest(requestId);
+        uint256 reqId = _dequeueRequest();
+        if (reqId != requestId) revert RequestProcessOutOfOrder(reqId, requestId);
 
         emit RequestProcessed(
             requestId,
@@ -1806,8 +1859,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         });
 
         // Add to global pending queue with index tracking for O(1) lookup
-        _requestIndexInGlobalArray[requestId] = pendingRequestIds.length;
-        pendingRequestIds.push(requestId);
+        _enqueueRequest(requestId);
         userPendingRequestCount[msg.sender]++;
 
         // Add to user's pending array with index tracking for O(1) removal
@@ -1843,40 +1895,16 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /**
-     * @dev Removes a request from all pending queues while preserving request history.
-     *      Uses two different removal strategies:
-     *      - Global array: Shift elements to maintain FIFO order (O(n) but necessary for fair processing)
-     *      - User array: Swap-and-pop for O(1) removal (order doesn't affect processing)
+     * @dev Removes a request from the user pending requests mapping while preserving request history.
+     *      Uses the following removal strategy:
+     *      - Swap-and-pop for O(1) removal (order doesn't affect processing)
      *
      *      The request data remains in the `requests` mapping for historical queries;
-     *      this function only removes it from the pending queues.
-     * @param requestId The request ID to remove from pending queues.
+     *      This function only removes it from the user pending requests mapping.
+     * @param requestId The request ID to remove from the user pending requests mapping.
      */
-    function _removePendingRequest(uint256 requestId) internal {
-        // === GLOBAL PENDING ARRAY REMOVAL ===
-        // Uses O(1) lookup + O(n) shift to maintain FIFO order
-        // FIFO order is critical for DeFi fairness - requests must be processed in submission order
-        uint256 indexInGlobal = _requestIndexInGlobalArray[requestId];
-        uint256 globalLength = pendingRequestIds.length;
-
-        // Safety check: verify element exists at expected index
-        if (globalLength > 0 && indexInGlobal < globalLength && pendingRequestIds[indexInGlobal] == requestId) {
-            // Shift all subsequent elements left to maintain FIFO order
-            for (uint256 j = indexInGlobal; j < globalLength - 1; ) {
-                pendingRequestIds[j] = pendingRequestIds[j + 1];
-                // Update index mapping for each shifted element
-                _requestIndexInGlobalArray[pendingRequestIds[j]] = j;
-                unchecked {
-                    ++j;
-                }
-            }
-            // Remove the last element (now duplicated or the one to remove)
-            pendingRequestIds.pop();
-            // Clean up index mapping
-            delete _requestIndexInGlobalArray[requestId];
-        }
-
-        // === USER PENDING ARRAY REMOVAL ===
+    function _removeUserPendingRequest(uint256 requestId) internal {
+        // === USER PENDING REQUESTS ARRAY REMOVAL ===
         // Uses swap-and-pop for O(1) removal (order doesn't affect FIFO processing)
         address user = requests[requestId].user;
         uint256[] storage userPendingIds = pendingRequestIdsByUser[user];
@@ -1897,5 +1925,71 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             userPendingIds.pop();
             delete _requestIndexInUserArray[requestId];
         }
+    }
+
+    /**
+     * @dev Enqueues a request in the requestsQueue and shifts the queue's tail pointer.
+     *
+     * @param requestId The request ID to enqueue in the pending requests queue.
+     */
+    function _enqueueRequest(uint256 requestId) internal {
+        _requestsQueue[_requestsQueueTail] = requestId;
+        _requestsQueueTail += 1;
+    }
+
+    /**
+     * @dev Dequeues the head of requestsQueue and shifts the queue's head pointer.
+     *
+     * @return The request ID that was dequeued.
+     */
+    function _dequeueRequest() internal returns (uint256) {
+        if (_requestsQueueLength() == 0) revert EmptyRequestsQueue();
+
+        uint256 requestId = _requestsQueue[_requestsQueueHead];
+
+        delete _requestsQueue[_requestsQueueHead];
+        _requestsQueueHead += 1;
+
+        return requestId;
+    }
+
+    /**
+     * @dev Drops a request from the requestsQueue.
+     *      O(n) operation — scans from the removed element to the tail and shifts
+     *      the queue to all subsequent elements left to maintain FIFO order.
+     *
+     * @param requestId The request ID to remove from the pending requests queue.
+     */
+    function _dropQueuedRequest(uint256 requestId) internal {
+        bool requestFound = false;
+        for (uint256 i = _requestsQueueHead; i < _requestsQueueTail;) {
+            if (_requestsQueue[i] == requestId) {
+                requestFound = true;
+            }
+
+            // Shift the matching request to the queue's tail, then delete it
+            if (requestFound && (i + 1 < _requestsQueueTail)) {
+                _requestsQueue[i] = _requestsQueue[i + 1];
+            } else if (requestFound) {
+                delete _requestsQueue[i];
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Decrement the queue tail only if the given requestId was found
+        if (!requestFound) revert RequestNotFound();
+        _requestsQueueTail -= 1;
+    }
+
+    /**
+     * @dev Counts the total number of pending requests in the requestsQueue.
+     *
+     * @return The current requestsQueue length.
+     */
+    function _requestsQueueLength() internal view returns (uint256) {
+        return _requestsQueueTail - _requestsQueueHead;
     }
 }
