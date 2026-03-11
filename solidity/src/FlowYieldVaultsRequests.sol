@@ -54,7 +54,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         FAILED
     }
 
-    /// @notice Complete request data structure
+    /// @notice Stored request data structure
     /// @param id Unique request identifier
     /// @param user Address of the user who created the request
     /// @param requestType Type of operation requested
@@ -64,8 +64,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param yieldVaultId Associated YieldVault Id
     /// @param timestamp Block timestamp when request was created
     /// @param message Status message or error reason
-    /// @param vaultIdentifier Cadence vault type identifier for CREATE_YIELDVAULT
-    /// @param strategyIdentifier Cadence strategy type identifier for CREATE_YIELDVAULT
+    /// @param createVaultConfigId Immutable CREATE_YIELDVAULT config ID (0 for non-CREATE requests)
     struct Request {
         uint256 id;
         address user;
@@ -76,6 +75,29 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint64 yieldVaultId;
         uint256 timestamp;
         string message;
+        uint64 createVaultConfigId;
+    }
+
+    /// @notice Fully resolved request view including the immutable CREATE_YIELDVAULT config ID
+    struct RequestView {
+        uint256 id;
+        address user;
+        RequestType requestType;
+        RequestStatus status;
+        address tokenAddress;
+        uint256 amount;
+        uint64 yieldVaultId;
+        uint256 timestamp;
+        string message;
+        uint64 createVaultConfigId;
+        string vaultIdentifier;
+        string strategyIdentifier;
+    }
+
+    /// @notice Immutable CREATE_YIELDVAULT configuration selected by config ID
+    struct CreateYieldVaultConfig {
+        bool exists;
+        bool enabled;
         string vaultIdentifier;
         string strategyIdentifier;
     }
@@ -166,6 +188,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice All requests indexed by request ID
     mapping(uint256 => Request) public requests;
+
+    /// @notice Immutable CREATE_YIELDVAULT configs indexed by config ID
+    mapping(uint64 => CreateYieldVaultConfig) private _createYieldVaultConfigs;
+
+    /// @notice Reverse lookup from (vaultIdentifier,strategyIdentifier) pair to config ID
+    mapping(bytes32 => uint64) public createYieldVaultConfigIdByPairHash;
 
     /// @notice Array of pending request IDs awaiting processing (FIFO order)
     uint256[] public pendingRequestIds;
@@ -270,6 +298,24 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Strategy identifier cannot be empty for CREATE_YIELDVAULT
     error EmptyStrategyIdentifier();
 
+    /// @notice CREATE_YIELDVAULT config ID cannot be zero
+    error InvalidCreateYieldVaultConfigId();
+
+    /// @notice CREATE_YIELDVAULT config does not exist
+    error CreateYieldVaultConfigNotFound(uint64 configId);
+
+    /// @notice CREATE_YIELDVAULT config already exists
+    error CreateYieldVaultConfigAlreadyExists(uint64 configId);
+
+    /// @notice CREATE_YIELDVAULT config cannot be used for new requests
+    error CreateYieldVaultConfigDisabled(uint64 configId);
+
+    /// @notice The provided vault/strategy pair is already mapped to a config ID
+    error CreateYieldVaultConfigPairAlreadyRegistered(uint64 configId);
+
+    /// @notice The provided vault/strategy pair is not registered
+    error CreateYieldVaultConfigPairNotRegistered(bytes32 pairHash);
+
     /// @notice No refund available for the specified token
     error NoRefundAvailable(address token);
 
@@ -297,6 +343,28 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256 timestamp,
         string vaultIdentifier,
         string strategyIdentifier
+    );
+
+    /// @notice Emitted when a CREATE_YIELDVAULT config is registered
+    /// @param configId Immutable config ID
+    /// @param vaultIdentifier Cadence vault type identifier
+    /// @param strategyIdentifier Cadence strategy type identifier
+    /// @param configuredBy Admin who registered the config
+    event CreateYieldVaultConfigRegistered(
+        uint64 indexed configId,
+        string vaultIdentifier,
+        string strategyIdentifier,
+        address indexed configuredBy
+    );
+
+    /// @notice Emitted when a CREATE_YIELDVAULT config is enabled or disabled for new requests
+    /// @param configId Immutable config ID
+    /// @param enabled Whether new requests may use this config
+    /// @param updatedBy Admin who changed the status
+    event CreateYieldVaultConfigEnabled(
+        uint64 indexed configId,
+        bool enabled,
+        address indexed updatedBy
     );
 
     /// @notice Emitted when a request status changes
@@ -642,6 +710,67 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         );
     }
 
+    /// @notice Registers an immutable CREATE_YIELDVAULT config
+    /// @dev Config IDs are immutable once registered. Disable old configs instead of mutating them.
+    /// @param configId Immutable config ID
+    /// @param vaultIdentifier Cadence vault type identifier
+    /// @param strategyIdentifier Cadence strategy type identifier
+    function registerCreateYieldVaultConfig(
+        uint64 configId,
+        string calldata vaultIdentifier,
+        string calldata strategyIdentifier
+    ) external onlyOwner {
+        if (configId == 0) revert InvalidCreateYieldVaultConfigId();
+        if (_createYieldVaultConfigs[configId].exists) {
+            revert CreateYieldVaultConfigAlreadyExists(configId);
+        }
+        if (bytes(vaultIdentifier).length == 0) revert EmptyVaultIdentifier();
+        if (bytes(strategyIdentifier).length == 0) {
+            revert EmptyStrategyIdentifier();
+        }
+
+        bytes32 pairHash = _hashCreateYieldVaultConfigPair(
+            vaultIdentifier,
+            strategyIdentifier
+        );
+        uint64 existingConfigId = createYieldVaultConfigIdByPairHash[pairHash];
+        if (existingConfigId != 0) {
+            revert CreateYieldVaultConfigPairAlreadyRegistered(existingConfigId);
+        }
+
+        _createYieldVaultConfigs[configId] = CreateYieldVaultConfig({
+            exists: true,
+            enabled: true,
+            vaultIdentifier: vaultIdentifier,
+            strategyIdentifier: strategyIdentifier
+        });
+        createYieldVaultConfigIdByPairHash[pairHash] = configId;
+
+        emit CreateYieldVaultConfigRegistered(
+            configId,
+            vaultIdentifier,
+            strategyIdentifier,
+            msg.sender
+        );
+        emit CreateYieldVaultConfigEnabled(configId, true, msg.sender);
+    }
+
+    /// @notice Enables or disables a CREATE_YIELDVAULT config for new requests
+    /// @param configId Immutable config ID
+    /// @param enabled Whether new requests may use this config
+    function setCreateYieldVaultConfigEnabled(
+        uint64 configId,
+        bool enabled
+    ) external onlyOwner {
+        CreateYieldVaultConfig storage config = _createYieldVaultConfigs[
+            configId
+        ];
+        if (!config.exists) revert CreateYieldVaultConfigNotFound(configId);
+
+        config.enabled = enabled;
+        emit CreateYieldVaultConfigEnabled(configId, enabled, msg.sender);
+    }
+
     /// @notice Sets the maximum pending requests allowed per user
     /// @param _maxRequests New limit (0 = unlimited)
     function setMaxPendingRequestsPerUser(
@@ -683,7 +812,29 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     // External Functions - User
     // ============================================
 
-    /// @notice Creates a new YieldVault by depositing funds
+    /// @notice Creates a new YieldVault by depositing funds with a registered config ID
+    /// @param tokenAddress Token to deposit (use NATIVE_FLOW for native $FLOW)
+    /// @param amount Amount to deposit
+    /// @param createVaultConfigId Immutable CREATE_YIELDVAULT config ID
+    /// @return requestId The created request ID
+    function createYieldVault(
+        address tokenAddress,
+        uint256 amount,
+        uint64 createVaultConfigId
+    )
+        external
+        payable
+        whenNotPaused
+        onlyAllowlisted
+        notBlocklisted
+        nonReentrant
+        returns (uint256)
+    {
+        return _createYieldVaultRequest(tokenAddress, amount, createVaultConfigId);
+    }
+
+    /// @notice Creates a new YieldVault by depositing funds using a registered vault/strategy pair
+    /// @dev Legacy compatibility path. Resolves the pair to a config ID before creating the request.
     /// @param tokenAddress Token to deposit (use NATIVE_FLOW for native $FLOW)
     /// @param amount Amount to deposit
     /// @param vaultIdentifier Cadence vault type identifier
@@ -708,17 +859,22 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (bytes(strategyIdentifier).length == 0)
             revert EmptyStrategyIdentifier();
 
-        _validateDeposit(tokenAddress, amount);
-        _checkPendingRequestLimit(msg.sender);
+        bytes32 pairHash = _hashCreateYieldVaultConfigPair(
+            vaultIdentifier,
+            strategyIdentifier
+        );
+        uint64 createVaultConfigId = createYieldVaultConfigIdByPairHash[
+            pairHash
+        ];
+        if (createVaultConfigId == 0) {
+            revert CreateYieldVaultConfigPairNotRegistered(pairHash);
+        }
 
         return
-            _createRequest(
-                RequestType.CREATE_YIELDVAULT,
+            _createYieldVaultRequest(
                 tokenAddress,
                 amount,
-                NO_YIELDVAULT_ID,
-                vaultIdentifier,
-                strategyIdentifier
+                createVaultConfigId
             );
     }
 
@@ -756,8 +912,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 vaultToken,
                 amount,
                 yieldVaultId,
-                "",
-                ""
+                0
             );
     }
 
@@ -781,8 +936,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 vaultToken,
                 amount,
                 yieldVaultId,
-                "",
-                ""
+                0
             );
     }
 
@@ -803,8 +957,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 vaultToken,
                 0,
                 yieldVaultId,
-                "",
-                ""
+                0
             );
     }
 
@@ -1081,8 +1234,54 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         return pendingRequestIds;
     }
 
+    /// @notice Gets a CREATE_YIELDVAULT config by ID
+    /// @param configId Immutable config ID
+    /// @return exists Whether the config exists
+    /// @return enabled Whether new requests may use this config
+    /// @return vaultIdentifier Cadence vault type identifier
+    /// @return strategyIdentifier Cadence strategy type identifier
+    function getCreateYieldVaultConfig(
+        uint64 configId
+    )
+        external
+        view
+        returns (
+            bool exists,
+            bool enabled,
+            string memory vaultIdentifier,
+            string memory strategyIdentifier
+        )
+    {
+        CreateYieldVaultConfig storage config = _createYieldVaultConfigs[
+            configId
+        ];
+        return (
+            config.exists,
+            config.enabled,
+            config.vaultIdentifier,
+            config.strategyIdentifier
+        );
+    }
+
+    /// @notice Resolves a vault/strategy pair to a registered config ID
+    /// @param vaultIdentifier Cadence vault type identifier
+    /// @param strategyIdentifier Cadence strategy type identifier
+    /// @return configId Registered config ID or 0 if not found
+    function getCreateYieldVaultConfigId(
+        string calldata vaultIdentifier,
+        string calldata strategyIdentifier
+    ) external view returns (uint64 configId) {
+        return
+            createYieldVaultConfigIdByPairHash[
+                _hashCreateYieldVaultConfigPair(
+                    vaultIdentifier,
+                    strategyIdentifier
+                )
+            ];
+    }
+
     /// @notice Gets pending requests in unpacked format with pagination
-    /// @dev Optimized for Cadence consumption - returns parallel arrays instead of struct array
+    /// @dev Legacy read API that resolves CREATE_YIELDVAULT config IDs back to identifier strings
     /// @param startIndex Starting index in pending requests
     /// @param count Number of requests to return (0 = all remaining)
     /// @return ids Request IDs
@@ -1094,8 +1293,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return yieldVaultIds YieldVault Ids
     /// @return timestamps Timestamps
     /// @return messages Messages
-    /// @return vaultIdentifiers Vault identifiers
-    /// @return strategyIdentifiers Strategy identifiers
+    /// @return createVaultConfigIds Immutable CREATE_YIELDVAULT config IDs
     function getPendingRequestsUnpacked(
         uint256 startIndex,
         uint256 count
@@ -1112,8 +1310,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             uint64[] memory yieldVaultIds,
             uint256[] memory timestamps,
             string[] memory messages,
-            string[] memory vaultIdentifiers,
-            string[] memory strategyIdentifiers
+            uint64[] memory createVaultConfigIds
         )
     {
         if (startIndex >= pendingRequestIds.length) {
@@ -1127,8 +1324,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 new uint64[](0),
                 new uint256[](0),
                 new string[](0),
-                new string[](0),
-                new string[](0)
+                new uint64[](0)
             );
         }
 
@@ -1146,11 +1342,10 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         yieldVaultIds = new uint64[](size);
         timestamps = new uint256[](size);
         messages = new string[](size);
-        vaultIdentifiers = new string[](size);
-        strategyIdentifiers = new string[](size);
+        createVaultConfigIds = new uint64[](size);
 
         for (uint256 i = 0; i < size; ) {
-            Request memory req = requests[pendingRequestIds[startIndex + i]];
+            Request storage req = requests[pendingRequestIds[startIndex + i]];
             ids[i] = req.id;
             users[i] = req.user;
             requestTypes[i] = uint8(req.requestType);
@@ -1160,8 +1355,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             yieldVaultIds[i] = req.yieldVaultId;
             timestamps[i] = req.timestamp;
             messages[i] = req.message;
-            vaultIdentifiers[i] = req.vaultIdentifier;
-            strategyIdentifiers[i] = req.strategyIdentifier;
+            createVaultConfigIds[i] = req.createVaultConfigId;
             unchecked {
                 ++i;
             }
@@ -1173,8 +1367,28 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return Request data
     function getRequest(
         uint256 requestId
-    ) external view returns (Request memory) {
-        return requests[requestId];
+    ) external view returns (RequestView memory) {
+        Request storage req = requests[requestId];
+        (
+            string memory vaultIdentifier,
+            string memory strategyIdentifier
+        ) = _resolveCreateYieldVaultConfigForRequest(req);
+
+        return
+            RequestView({
+                id: req.id,
+                user: req.user,
+                requestType: req.requestType,
+                status: req.status,
+                tokenAddress: req.tokenAddress,
+                amount: req.amount,
+                yieldVaultId: req.yieldVaultId,
+                timestamp: req.timestamp,
+                message: req.message,
+                createVaultConfigId: req.createVaultConfigId,
+                vaultIdentifier: vaultIdentifier,
+                strategyIdentifier: strategyIdentifier
+            });
     }
 
     /// @notice Gets a specific request by ID in unpacked format (tuple)
@@ -1188,8 +1402,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return yieldVaultId YieldVault Id
     /// @return timestamp Timestamp
     /// @return message Status message
-    /// @return vaultIdentifier Vault identifier
-    /// @return strategyIdentifier Strategy identifier
+    /// @return createVaultConfigId Immutable CREATE_YIELDVAULT config ID
     function getRequestUnpacked(
         uint256 requestId
     )
@@ -1205,9 +1418,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             uint64 yieldVaultId,
             uint256 timestamp,
             string memory message,
-            string memory vaultIdentifier,
-            string memory strategyIdentifier
-        )
+            uint64 createVaultConfigId
+    )
     {
         Request storage req = requests[requestId];
         id = req.id;
@@ -1219,8 +1431,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         yieldVaultId = req.yieldVaultId;
         timestamp = req.timestamp;
         message = req.message;
-        vaultIdentifier = req.vaultIdentifier;
-        strategyIdentifier = req.strategyIdentifier;
+        createVaultConfigId = req.createVaultConfigId;
     }
 
     /// @notice Checks if a YieldVault Id is valid
@@ -1272,8 +1483,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return yieldVaultIds YieldVault Ids
     /// @return timestamps Timestamps
     /// @return messages Messages
-    /// @return vaultIdentifiers Vault identifiers
-    /// @return strategyIdentifiers Strategy identifiers
+    /// @return createVaultConfigIds Immutable CREATE_YIELDVAULT config IDs
     /// @return pendingBalance Escrowed balance for active pending requests (native FLOW only)
     /// @return claimableRefund Claimable refund amount (native FLOW only)
     function getPendingRequestsByUserUnpacked(
@@ -1290,8 +1500,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             uint64[] memory yieldVaultIds,
             uint256[] memory timestamps,
             string[] memory messages,
-            string[] memory vaultIdentifiers,
-            string[] memory strategyIdentifiers,
+            uint64[] memory createVaultConfigIds,
             uint256 pendingBalance,
             uint256 claimableRefund
         )
@@ -1309,8 +1518,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         yieldVaultIds = new uint64[](count);
         timestamps = new uint256[](count);
         messages = new string[](count);
-        vaultIdentifiers = new string[](count);
-        strategyIdentifiers = new string[](count);
+        createVaultConfigIds = new uint64[](count);
 
         // Fill arrays - only iterate through user's requests
         for (uint256 i = 0; i < count; ) {
@@ -1323,8 +1531,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             yieldVaultIds[i] = req.yieldVaultId;
             timestamps[i] = req.timestamp;
             messages[i] = req.message;
-            vaultIdentifiers[i] = req.vaultIdentifier;
-            strategyIdentifiers[i] = req.strategyIdentifier;
+            createVaultConfigIds[i] = req.createVaultConfigId;
             unchecked {
                 ++i;
             }
@@ -1701,6 +1908,43 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /**
+     * @dev Validates a registered CREATE_YIELDVAULT config and creates the request.
+     * @param tokenAddress The token involved in the CREATE_YIELDVAULT request.
+     * @param amount The amount of tokens involved.
+     * @param createVaultConfigId Immutable CREATE_YIELDVAULT config ID.
+     * @return The newly created request ID.
+     */
+    function _createYieldVaultRequest(
+        address tokenAddress,
+        uint256 amount,
+        uint64 createVaultConfigId
+    ) internal returns (uint256) {
+        if (createVaultConfigId == 0) revert InvalidCreateYieldVaultConfigId();
+
+        CreateYieldVaultConfig storage config = _createYieldVaultConfigs[
+            createVaultConfigId
+        ];
+        if (!config.exists) {
+            revert CreateYieldVaultConfigNotFound(createVaultConfigId);
+        }
+        if (!config.enabled) {
+            revert CreateYieldVaultConfigDisabled(createVaultConfigId);
+        }
+
+        _validateDeposit(tokenAddress, amount);
+        _checkPendingRequestLimit(msg.sender);
+
+        return
+            _createRequest(
+                RequestType.CREATE_YIELDVAULT,
+                tokenAddress,
+                amount,
+                NO_YIELDVAULT_ID,
+                createVaultConfigId
+            );
+    }
+
+    /**
      * @dev Creates a new request and updates all related state.
      *      This function handles the core request creation logic shared by all request types:
      *      1. Generates unique request ID and stores request data
@@ -1712,8 +1956,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @param tokenAddress The token involved in this request.
      * @param amount The amount of tokens involved (0 for CLOSE requests).
      * @param yieldVaultId The YieldVault Id
-     * @param vaultIdentifier Cadence vault type identifier (only for CREATE requests).
-     * @param strategyIdentifier Cadence strategy type identifier (only for CREATE requests).
+     * @param createVaultConfigId Immutable CREATE_YIELDVAULT config ID (0 for non-CREATE requests).
      * @return The newly created request ID.
      */
     function _createRequest(
@@ -1721,8 +1964,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         address tokenAddress,
         uint256 amount,
         uint64 yieldVaultId,
-        string memory vaultIdentifier,
-        string memory strategyIdentifier
+        uint64 createVaultConfigId
     ) internal returns (uint256) {
         // Generate unique request ID using auto-incrementing counter
         uint256 requestId = _requestIdCounter++;
@@ -1738,8 +1980,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             yieldVaultId: yieldVaultId,
             timestamp: block.timestamp,
             message: "",
-            vaultIdentifier: vaultIdentifier,
-            strategyIdentifier: strategyIdentifier
+            createVaultConfigId: createVaultConfigId
         });
 
         // Add to global pending queue with index tracking for O(1) lookup
@@ -1764,6 +2005,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             );
         }
 
+        (
+            string memory vaultIdentifier,
+            string memory strategyIdentifier
+        ) = _resolveCreateYieldVaultConfigForRequest(requests[requestId]);
+
         emit RequestCreated(
             requestId,
             msg.sender,
@@ -1777,6 +2023,53 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         );
 
         return requestId;
+    }
+
+    /**
+     * @dev Resolves a stored request's CREATE_YIELDVAULT config into identifier strings.
+     *      Non-CREATE requests, or CREATE requests whose config is missing, resolve to empty strings.
+     * @param req The stored request.
+     * @return vaultIdentifier Cadence vault type identifier or empty string.
+     * @return strategyIdentifier Cadence strategy type identifier or empty string.
+     */
+    function _resolveCreateYieldVaultConfigForRequest(
+        Request storage req
+    )
+        internal
+        view
+        returns (
+            string memory vaultIdentifier,
+            string memory strategyIdentifier
+        )
+    {
+        if (
+            req.requestType != RequestType.CREATE_YIELDVAULT ||
+            req.createVaultConfigId == 0
+        ) {
+            return ("", "");
+        }
+
+        CreateYieldVaultConfig storage config = _createYieldVaultConfigs[
+            req.createVaultConfigId
+        ];
+        if (!config.exists) {
+            return ("", "");
+        }
+
+        return (config.vaultIdentifier, config.strategyIdentifier);
+    }
+
+    /**
+     * @dev Hashes a CREATE_YIELDVAULT config pair for reverse lookup.
+     * @param vaultIdentifier Cadence vault type identifier.
+     * @param strategyIdentifier Cadence strategy type identifier.
+     * @return Pair hash.
+     */
+    function _hashCreateYieldVaultConfigPair(
+        string memory vaultIdentifier,
+        string memory strategyIdentifier
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encode(vaultIdentifier, strategyIdentifier));
     }
 
     /**

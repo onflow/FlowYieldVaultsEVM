@@ -24,7 +24,64 @@ USER_C_FUNDING="500.0"
 USER_D_EOA="0xE57bFE9F44b819898F47BF37E5AF72a0783e1141"
 USER_D_FUNDING="500.0"
 
+# Fresh deployments need at least one registered CREATE_YIELDVAULT config.
+# These defaults match the local emulator fixtures used by the E2E scripts.
+INITIAL_CREATE_VAULT_CONFIG_ID="${INITIAL_CREATE_VAULT_CONFIG_ID:-1}"
+INITIAL_CREATE_VAULT_IDENTIFIER="${INITIAL_CREATE_VAULT_IDENTIFIER:-A.0ae53cb6e3f42a79.FlowToken.Vault}"
+INITIAL_CREATE_STRATEGY_IDENTIFIER="${INITIAL_CREATE_STRATEGY_IDENTIFIER:-A.045a1763c93006ca.MockStrategies.TracerStrategy}"
+
 RPC_URL="localhost:8545"
+
+register_initial_create_yieldvault_config() {
+  local contract_address=$1
+  local registered_id
+
+  echo "Registering initial CREATE_YIELDVAULT config..."
+  echo "  Config ID: $INITIAL_CREATE_VAULT_CONFIG_ID"
+  echo "  Vault:     $INITIAL_CREATE_VAULT_IDENTIFIER"
+  echo "  Strategy:  $INITIAL_CREATE_STRATEGY_IDENTIFIER"
+
+  registered_id=$(cast call "$contract_address" \
+    "getCreateYieldVaultConfigId(string,string)(uint64)" \
+    "$INITIAL_CREATE_VAULT_IDENTIFIER" \
+    "$INITIAL_CREATE_STRATEGY_IDENTIFIER" \
+    --rpc-url "http://$RPC_URL" | tr -d '[:space:]')
+
+  if [ "$registered_id" = "$INITIAL_CREATE_VAULT_CONFIG_ID" ]; then
+    echo "✓ Initial CREATE_YIELDVAULT config already registered"
+    echo ""
+    return 0
+  fi
+
+  if [ -n "$registered_id" ] && [ "$registered_id" != "0" ]; then
+    echo "❌ CREATE_YIELDVAULT pair already registered with unexpected config ID"
+    echo "Expected config ID: $INITIAL_CREATE_VAULT_CONFIG_ID"
+    echo "Actual config ID:   $registered_id"
+    exit 1
+  fi
+
+  flow transactions send ./cadence/transactions/register_create_yieldvault_config_everywhere.cdc \
+    "$INITIAL_CREATE_VAULT_CONFIG_ID" \
+    "$INITIAL_CREATE_VAULT_IDENTIFIER" \
+    "$INITIAL_CREATE_STRATEGY_IDENTIFIER" \
+    --signer emulator-flow-yield-vaults --compute-limit 9999
+
+  registered_id=$(cast call "$contract_address" \
+    "getCreateYieldVaultConfigId(string,string)(uint64)" \
+    "$INITIAL_CREATE_VAULT_IDENTIFIER" \
+    "$INITIAL_CREATE_STRATEGY_IDENTIFIER" \
+    --rpc-url "http://$RPC_URL" | tr -d '[:space:]')
+
+  if [ "$registered_id" != "$INITIAL_CREATE_VAULT_CONFIG_ID" ]; then
+    echo "❌ Failed to verify initial CREATE_YIELDVAULT config registration"
+    echo "Expected config ID: $INITIAL_CREATE_VAULT_CONFIG_ID"
+    echo "Actual config ID:   ${registered_id:-<empty>}"
+    exit 1
+  fi
+
+  echo "✓ Initial CREATE_YIELDVAULT config registered"
+  echo ""
+}
 
 # ============================================
 # VERIFY EVM GATEWAY IS READY
@@ -211,6 +268,8 @@ echo "Setting up worker with badge for contract $FLOW_VAULTS_REQUESTS_CONTRACT..
 flow transactions send ./cadence/transactions/setup_worker_with_badge.cdc \
   "$FLOW_VAULTS_REQUESTS_CONTRACT" \
   --signer emulator-flow-yield-vaults --compute-limit 9999
+
+register_initial_create_yieldvault_config "$FLOW_VAULTS_REQUESTS_CONTRACT"
 
 echo "✓ Project initialization complete"
 

@@ -53,6 +53,7 @@ fun testCreateYieldVaultFromEVMRequest() {
         yieldVaultId: nil,
         timestamp: 0,
         message: "",
+        createVaultConfigId: mockCreateVaultConfigId,
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
@@ -73,6 +74,7 @@ fun testCreateYieldVaultFromEVMRequest() {
     // --- assert ------------------------------------------------------------
     // Verify the request structure is valid for processing
     Test.assert(createRequest.amount > 0, message: "Amount must be positive")
+    Test.assertEqual(mockCreateVaultConfigId, createRequest.createVaultConfigId!)
     Test.assertEqual(mockVaultIdentifier, createRequest.vaultIdentifier)
     Test.assertEqual(mockStrategyIdentifier, createRequest.strategyIdentifier)
 }
@@ -91,6 +93,7 @@ fun testDepositToExistingYieldVault() {
         yieldVaultId: 1,
         timestamp: 0,
         message: "",
+        createVaultConfigId: nil,
         vaultIdentifier: "", // Not needed for DEPOSIT
         strategyIdentifier: ""
     )
@@ -115,6 +118,7 @@ fun testWithdrawFromYieldVault() {
         yieldVaultId: 1,
         timestamp: 0,
         message: "",
+        createVaultConfigId: nil,
         vaultIdentifier: "",
         strategyIdentifier: ""
     )
@@ -139,6 +143,7 @@ fun testCloseYieldVaultComplete() {
         yieldVaultId: 1,
         timestamp: 0,
         message: "",
+        createVaultConfigId: nil,
         vaultIdentifier: "",
         strategyIdentifier: ""
     )
@@ -164,6 +169,7 @@ fun testRequestStatusTransitions() {
         yieldVaultId: nil,
         timestamp: 0,
         message: "",
+        createVaultConfigId: mockCreateVaultConfigId,
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
@@ -180,6 +186,7 @@ fun testRequestStatusTransitions() {
         yieldVaultId: nil,
         timestamp: 0,
         message: "Insufficient balance",
+        createVaultConfigId: mockCreateVaultConfigId,
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
@@ -200,6 +207,7 @@ fun testMultipleUsersIndependentYieldVaults() {
         yieldVaultId: nil,
         timestamp: 0,
         message: "",
+        createVaultConfigId: mockCreateVaultConfigId,
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
@@ -214,6 +222,7 @@ fun testMultipleUsersIndependentYieldVaults() {
         yieldVaultId: nil,
         timestamp: 0,
         message: "",
+        createVaultConfigId: mockCreateVaultConfigId,
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
@@ -271,10 +280,12 @@ fun testVaultAndStrategyIdentifiers() {
         yieldVaultId: nil,
         timestamp: 0,
         message: "",
+        createVaultConfigId: mockCreateVaultConfigId,
         vaultIdentifier: customVaultId,
         strategyIdentifier: customStrategyId
     )
 
+    Test.assertEqual(mockCreateVaultConfigId, request.createVaultConfigId!)
     Test.assertEqual(customVaultId, request.vaultIdentifier)
     Test.assertEqual(customStrategyId, request.strategyIdentifier)
 }

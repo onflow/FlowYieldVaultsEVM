@@ -16,6 +16,22 @@ set -a
 source "$PROJECT_ROOT/.env"
 set +a
 
+# Fresh deployments should seed at least one CREATE_YIELDVAULT config so the system is usable immediately.
+# Set SKIP_INITIAL_CREATE_CONFIG_REGISTRATION=1 only if you intentionally want to register configs later.
+INITIAL_CREATE_VAULT_CONFIG_ID="${INITIAL_CREATE_VAULT_CONFIG_ID:-}"
+INITIAL_CREATE_VAULT_IDENTIFIER="${INITIAL_CREATE_VAULT_IDENTIFIER:-}"
+INITIAL_CREATE_STRATEGY_IDENTIFIER="${INITIAL_CREATE_STRATEGY_IDENTIFIER:-}"
+SKIP_INITIAL_CREATE_CONFIG_REGISTRATION="${SKIP_INITIAL_CREATE_CONFIG_REGISTRATION:-0}"
+
+if [ "$SKIP_INITIAL_CREATE_CONFIG_REGISTRATION" != "1" ]; then
+    if [ -z "$INITIAL_CREATE_VAULT_CONFIG_ID" ] || [ -z "$INITIAL_CREATE_VAULT_IDENTIFIER" ] || [ -z "$INITIAL_CREATE_STRATEGY_IDENTIFIER" ]; then
+        echo "❌ Error: Missing initial CREATE_YIELDVAULT config."
+        echo "Set INITIAL_CREATE_VAULT_CONFIG_ID, INITIAL_CREATE_VAULT_IDENTIFIER, and INITIAL_CREATE_STRATEGY_IDENTIFIER in .env"
+        echo "or set SKIP_INITIAL_CREATE_CONFIG_REGISTRATION=1 if you intend to register configs manually later."
+        exit 1
+    fi
+fi
+
 # Resolve testnet account address used by Cadence scripts.
 # Prefer .env override, then fallback to flow.json account config.
 TESTNET_ACCOUNT_ADDRESS="${TESTNET_ACCOUNT_ADDRESS:-}"
@@ -76,6 +92,65 @@ contract_exists_on_account() {
 is_incompatible_update_error() {
     local output="$1"
     [[ "$output" == *"cannot deploy invalid contract"* || "$output" == *"mismatching field"* || "$output" == *"found new field"* || "$output" == *"missing event declaration"* ]]
+}
+
+register_initial_create_yieldvault_config() {
+    local contract_address="$1"
+    local registered_id
+
+    if [ "$SKIP_INITIAL_CREATE_CONFIG_REGISTRATION" = "1" ]; then
+        echo "⚠️  Skipping initial CREATE_YIELDVAULT config registration because SKIP_INITIAL_CREATE_CONFIG_REGISTRATION=1"
+        echo ""
+        return 0
+    fi
+
+    echo "🧩 Registering initial CREATE_YIELDVAULT config..."
+    echo "   Config ID: $INITIAL_CREATE_VAULT_CONFIG_ID"
+    echo "   Vault:     $INITIAL_CREATE_VAULT_IDENTIFIER"
+    echo "   Strategy:  $INITIAL_CREATE_STRATEGY_IDENTIFIER"
+
+    registered_id=$(cast call "$contract_address" \
+        "getCreateYieldVaultConfigId(string,string)(uint64)" \
+        "$INITIAL_CREATE_VAULT_IDENTIFIER" \
+        "$INITIAL_CREATE_STRATEGY_IDENTIFIER" \
+        --rpc-url "$TESTNET_RPC_URL" | tr -d '[:space:]')
+
+    if [ "$registered_id" = "$INITIAL_CREATE_VAULT_CONFIG_ID" ]; then
+        echo "✅ Initial CREATE_YIELDVAULT config already registered"
+        echo ""
+        return 0
+    fi
+
+    if [ -n "$registered_id" ] && [ "$registered_id" != "0" ]; then
+        echo "❌ CREATE_YIELDVAULT pair already registered with unexpected config ID"
+        echo "Expected config ID: $INITIAL_CREATE_VAULT_CONFIG_ID"
+        echo "Actual config ID:   $registered_id"
+        exit 1
+    fi
+
+    flow_cmd transactions send "$PROJECT_ROOT/cadence/transactions/register_create_yieldvault_config_everywhere.cdc" \
+        "$INITIAL_CREATE_VAULT_CONFIG_ID" \
+        "$INITIAL_CREATE_VAULT_IDENTIFIER" \
+        "$INITIAL_CREATE_STRATEGY_IDENTIFIER" \
+        --network "$FLOW_NETWORK" \
+        --signer "$FLOW_SIGNER" \
+        --compute-limit 9999
+
+    registered_id=$(cast call "$contract_address" \
+        "getCreateYieldVaultConfigId(string,string)(uint64)" \
+        "$INITIAL_CREATE_VAULT_IDENTIFIER" \
+        "$INITIAL_CREATE_STRATEGY_IDENTIFIER" \
+        --rpc-url "$TESTNET_RPC_URL" | tr -d '[:space:]')
+
+    if [ "$registered_id" != "$INITIAL_CREATE_VAULT_CONFIG_ID" ]; then
+        echo "❌ Failed to verify initial CREATE_YIELDVAULT config registration"
+        echo "Expected config ID: $INITIAL_CREATE_VAULT_CONFIG_ID"
+        echo "Actual config ID:   ${registered_id:-<empty>}"
+        exit 1
+    fi
+
+    echo "✅ Initial CREATE_YIELDVAULT config registered"
+    echo ""
 }
 
 deploy_or_update_cadence_contract() {
@@ -365,6 +440,11 @@ else
 fi
 
 echo ""
+
+# ==========================================
+# Step 6.5: Seed Initial CREATE_YIELDVAULT Config
+# ==========================================
+register_initial_create_yieldvault_config "$DEPLOYED_ADDRESS"
 
 # ==========================================
 # Step 7: Initialize WorkerOps Handlers & Schedule

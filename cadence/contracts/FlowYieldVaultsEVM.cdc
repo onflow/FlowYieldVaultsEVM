@@ -49,6 +49,19 @@ access(all) contract FlowYieldVaultsEVM {
         access(all) case FAILED
     }
 
+    /// @notice Immutable CREATE_YIELDVAULT configuration registered by admin
+    access(all) struct CreateYieldVaultConfig {
+        access(all) let id: UInt64
+        access(all) let vaultIdentifier: String
+        access(all) let strategyIdentifier: String
+
+        init(id: UInt64, vaultIdentifier: String, strategyIdentifier: String) {
+            self.id = id
+            self.vaultIdentifier = vaultIdentifier
+            self.strategyIdentifier = strategyIdentifier
+        }
+    }
+
     /// @notice Decoded request data from EVM contract
     /// @dev Mirrors the Request struct in FlowYieldVaultsRequests.sol for cross-VM communication
     access(all) struct EVMRequest {
@@ -61,6 +74,7 @@ access(all) contract FlowYieldVaultsEVM {
         access(all) let yieldVaultId: UInt64?
         access(all) let timestamp: UInt256
         access(all) let message: String
+        access(all) let createVaultConfigId: UInt64?
         access(all) let vaultIdentifier: String
         access(all) let strategyIdentifier: String
 
@@ -74,6 +88,7 @@ access(all) contract FlowYieldVaultsEVM {
             yieldVaultId: UInt64?,
             timestamp: UInt256,
             message: String,
+            createVaultConfigId: UInt64?,
             vaultIdentifier: String,
             strategyIdentifier: String
         ) {
@@ -109,6 +124,11 @@ access(all) contract FlowYieldVaultsEVM {
             }
             self.timestamp = timestamp
             self.message = message
+            if createVaultConfigId == nil || createVaultConfigId! == 0 {
+                self.createVaultConfigId = nil
+            } else {
+                self.createVaultConfigId = createVaultConfigId
+            }
             self.vaultIdentifier = vaultIdentifier
             self.strategyIdentifier = strategyIdentifier
         }
@@ -163,6 +183,12 @@ access(all) contract FlowYieldVaultsEVM {
     /// Allows O(1) lookup for yield vault ownership verification
     /// @dev Maps EVM address string to {yieldVaultId: true} for fast ownership checks
     access(all) let yieldVaultRegistry: {String: {UInt64: Bool}}
+
+    /// @notice Immutable CREATE_YIELDVAULT configs keyed by config ID
+    access(all) let createYieldVaultConfigs: {UInt64: CreateYieldVaultConfig}
+
+    /// @notice Reverse index from vault/strategy pair to config ID
+    access(contract) let createYieldVaultConfigIdsByPairKey: {String: UInt64}
 
     /// @notice Address of the FlowYieldVaultsRequests contract on EVM
     access(contract) var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
@@ -333,6 +359,13 @@ access(all) contract FlowYieldVaultsEVM {
     /// @param requestId The request ID that was cancelled
     access(all) event EVMRequestCancelled(requestId: UInt256)
 
+    /// @notice Emitted when a CREATE_YIELDVAULT config is successfully registered on the EVM contract
+    access(all) event EVMCreateYieldVaultConfigRegistered(
+        configId: UInt64,
+        vaultIdentifier: String,
+        strategyIdentifier: String
+    )
+
     // ============================================
     // Resources
     // ============================================
@@ -357,6 +390,62 @@ access(all) contract FlowYieldVaultsEVM {
         access(all) fun updateFlowYieldVaultsRequestsAddress(_ address: EVM.EVMAddress) {
             FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress = address
             emit FlowYieldVaultsRequestsAddressSet(address: address.toString())
+        }
+
+        /// @notice Registers an immutable CREATE_YIELDVAULT config locally on Cadence
+        /// @dev Contract-internal only. External callers must use FlowYieldVaultsEVM.registerCreateYieldVaultConfigEverywhere().
+        /// @param configId Immutable config ID
+        /// @param vaultIdentifier Cadence vault type identifier
+        /// @param strategyIdentifier Cadence strategy type identifier
+        access(contract) fun registerCreateYieldVaultConfig(
+            configId: UInt64,
+            vaultIdentifier: String,
+            strategyIdentifier: String
+        ) {
+            pre {
+                configId > 0: "configId must be greater than 0"
+                FlowYieldVaultsEVM.createYieldVaultConfigs[configId] == nil:
+                    "CreateYieldVault config \(configId) already registered"
+                FlowYieldVaultsEVM.createYieldVaultConfigIdsByPairKey[
+                    FlowYieldVaultsEVM.createYieldVaultConfigPairKey(
+                        vaultIdentifier: vaultIdentifier,
+                        strategyIdentifier: strategyIdentifier
+                    )
+                ] == nil: "CreateYieldVault config already registered for pair \(vaultIdentifier) / \(strategyIdentifier)"
+            }
+
+            let vaultType = CompositeType(vaultIdentifier)
+                ?? panic("Invalid vaultIdentifier: \(vaultIdentifier)")
+            let strategyType = CompositeType(strategyIdentifier)
+                ?? panic("Invalid strategyIdentifier: \(strategyIdentifier)")
+
+            let supportedStrategies = FlowYieldVaults.getSupportedStrategies()
+            var isStrategySupported = false
+            for supported in supportedStrategies {
+                if supported == strategyType {
+                    isStrategySupported = true
+                    break
+                }
+            }
+            if !isStrategySupported {
+                panic("Unsupported strategyIdentifier: \(strategyIdentifier)")
+            }
+
+            let supportedVaults = FlowYieldVaults.getSupportedInitializationVaults(forStrategy: strategyType)
+            if supportedVaults[vaultType] != true {
+                panic("Unsupported vaultIdentifier \(vaultIdentifier) for strategy \(strategyIdentifier)")
+            }
+
+            let pairKey = FlowYieldVaultsEVM.createYieldVaultConfigPairKey(
+                vaultIdentifier: vaultIdentifier,
+                strategyIdentifier: strategyIdentifier
+            )
+            FlowYieldVaultsEVM.createYieldVaultConfigIdsByPairKey[pairKey] = configId
+            FlowYieldVaultsEVM.createYieldVaultConfigs[configId] = CreateYieldVaultConfig(
+                id: configId,
+                vaultIdentifier: vaultIdentifier,
+                strategyIdentifier: strategyIdentifier
+            )
         }
 
         /// @notice Creates a new Worker resource
@@ -461,7 +550,7 @@ access(all) contract FlowYieldVaultsEVM {
         /// @dev Flow:
         ///      - Validate status - should be PENDING
         ///      - Validate amount - should already be validated by Solidity, but check defensively
-        ///      - Early validation for CREATE_YIELDVAULT requests - validate vaultIdentifier and strategyIdentifier
+        ///      - Early validation for CREATE_YIELDVAULT requests - config ID must be registered locally
         ///      - Call startProcessingBatch to update the request statuses (PENDING -> PROCESSING/FAILED)
         ///      - Return successful requests for further processing
         /// @param requests The list of EVM requests to preprocess
@@ -491,9 +580,8 @@ access(all) contract FlowYieldVaultsEVM {
                 }
 
                 // Early validation for CREATE_YIELDVAULT requests
-                // Validate vaultIdentifier and strategyIdentifier
                 if request.requestType == FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue {
-                    let validationResult = FlowYieldVaultsEVM.validateCreateYieldVaultParameters(request)
+                    let validationResult = FlowYieldVaultsEVM.validateCreateYieldVaultConfig(request)
                     if !validationResult.success {
                         FlowYieldVaultsEVM.emitRequestFailed(request,
                             message: "Validation failed: \(validationResult.message)")
@@ -514,6 +602,7 @@ access(all) contract FlowYieldVaultsEVM {
                     yieldVaultId: request.yieldVaultId,
                     timestamp: request.timestamp,
                     message: request.message,
+                    createVaultConfigId: request.createVaultConfigId,
                     vaultIdentifier: request.vaultIdentifier,
                     strategyIdentifier: request.strategyIdentifier,
                 )
@@ -715,11 +804,28 @@ access(all) contract FlowYieldVaultsEVM {
         ///      2. Validates vault type matches the requested vaultIdentifier
         ///      3. Creates YieldVault via YieldVaultManager
         ///      4. Records ownership in yieldVaultRegistry
-        /// @param request The CREATE_YIELDVAULT request containing vault/strategy identifiers and amount
+        /// @param request The CREATE_YIELDVAULT request containing the registered config ID and amount
         /// @return ProcessResult with success status, created yieldVaultId, and status message
         access(self) fun processCreateYieldVault(_ request: EVMRequest): ProcessResult {
-            let vaultIdentifier = request.vaultIdentifier
-            let strategyIdentifier = request.strategyIdentifier
+            if request.createVaultConfigId == nil {
+                return ProcessResult(
+                    success: false,
+                    yieldVaultId: nil,
+                    message: "Missing createVaultConfigId for CREATE_YIELDVAULT request \(request.id)"
+                )
+            }
+
+            let config = FlowYieldVaultsEVM.getCreateYieldVaultConfig(request.createVaultConfigId!)
+            if config == nil {
+                return ProcessResult(
+                    success: false,
+                    yieldVaultId: nil,
+                    message: "Unknown createVaultConfigId \(request.createVaultConfigId!) for request \(request.id)"
+                )
+            }
+
+            let vaultIdentifier = config!.vaultIdentifier
+            let strategyIdentifier = config!.strategyIdentifier
             let amount = FlowYieldVaultsEVM.ufix64FromUInt256(request.amount, tokenAddress: request.tokenAddress)
 
             // Phase 1: Withdraw funds from COA (bridges ERC20 to Cadence vault if needed)
@@ -750,15 +856,21 @@ access(all) contract FlowYieldVaultsEVM {
             }
 
             // Phase 3: Create the YieldVault with the specified strategy
-            // Note: strategyIdentifier already validated by validateCreateYieldVaultParameters
-            let strategyType = CompositeType(strategyIdentifier)!
+            let strategyType = CompositeType(strategyIdentifier)
+            if strategyType == nil {
+                return self.returnFundsToCOAAndFail(
+                    vault: <-vault,
+                    tokenAddress: request.tokenAddress,
+                    errorMessage: "Strategy type for config \(request.createVaultConfigId!) is no longer valid: \(strategyIdentifier)"
+                )
+            }
 
             let betaRef = self.getBetaRef()
             let yieldVaultManager = self.getYieldVaultManagerRef()
 
             let yieldVaultId = yieldVaultManager.createYieldVault(
                 betaRef: betaRef,
-                strategyType: strategyType,
+                strategyType: strategyType!,
                 withVault: <-vault
             )
 
@@ -1290,8 +1402,7 @@ access(all) contract FlowYieldVaultsEVM {
                     Type<[UInt64]>(),
                     Type<[UInt256]>(),
                     Type<[String]>(),
-                    Type<[String]>(),
-                    Type<[String]>()
+                    Type<[UInt64]>()
                 ],
                 data: callResult.data
             )
@@ -1305,12 +1416,15 @@ access(all) contract FlowYieldVaultsEVM {
             let yieldVaultIds = decoded[6] as! [UInt64]
             let timestamps = decoded[7] as! [UInt256]
             let messages = decoded[8] as! [String]
-            let vaultIdentifiers = decoded[9] as! [String]
-            let strategyIdentifiers = decoded[10] as! [String]
+            let createVaultConfigIds = decoded[9] as! [UInt64]
 
             let requests: [EVMRequest] = []
             var i = 0
             while i < ids.length {
+                let createVaultConfigId = createVaultConfigIds[i]
+                let config = FlowYieldVaultsEVM.getCreateYieldVaultConfig(createVaultConfigId)
+                let vaultIdentifier = config?.vaultIdentifier ?? ""
+                let strategyIdentifier = config?.strategyIdentifier ?? ""
                 let request = EVMRequest(
                     id: ids[i],
                     user: users[i],
@@ -1321,8 +1435,9 @@ access(all) contract FlowYieldVaultsEVM {
                     yieldVaultId: yieldVaultIds[i],
                     timestamp: timestamps[i],
                     message: messages[i],
-                    vaultIdentifier: vaultIdentifiers[i],
-                    strategyIdentifier: strategyIdentifiers[i]
+                    createVaultConfigId: createVaultConfigId,
+                    vaultIdentifier: vaultIdentifier,
+                    strategyIdentifier: strategyIdentifier
                 )
                 requests.append(request)
                 i = i + 1
@@ -1511,6 +1626,46 @@ access(all) contract FlowYieldVaultsEVM {
             )
         }
 
+        /// @notice Registers an immutable CREATE_YIELDVAULT config on the EVM request contract
+        /// @dev Contract-internal only. External callers must use FlowYieldVaultsEVM.registerCreateYieldVaultConfigEverywhere().
+        ///      If the EVM call fails, the surrounding Cadence transaction should revert and roll back local writes.
+        /// @param configId Immutable config ID shared with the EVM request contract
+        /// @param vaultIdentifier Cadence vault type identifier
+        /// @param strategyIdentifier Cadence strategy type identifier
+        access(contract) fun registerCreateYieldVaultConfigOnEVM(
+            configId: UInt64,
+            vaultIdentifier: String,
+            strategyIdentifier: String
+        ) {
+            pre {
+                FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress != nil:
+                    "FlowYieldVaultsRequests address not set - call Admin.setFlowYieldVaultsRequestsAddress() first"
+            }
+
+            let calldata = EVM.encodeABIWithSignature(
+                "registerCreateYieldVaultConfig(uint64,string,string)",
+                [configId, vaultIdentifier, strategyIdentifier]
+            )
+
+            let result = self.getCOARef().call(
+                to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
+                data: calldata,
+                gasLimit: 300_000,
+                value: EVM.Balance(attoflow: 0)
+            )
+
+            if result.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                panic("registerCreateYieldVaultConfigOnEVM failed: \(errorMsg)")
+            }
+
+            emit EVMCreateYieldVaultConfigRegistered(
+                configId: configId,
+                vaultIdentifier: vaultIdentifier,
+                strategyIdentifier: strategyIdentifier
+            )
+        }
+
         /// @notice Sets the authorized COA address on the EVM contract
         /// @param coa The new authorized COA address
         access(all) fun setAuthorizedCOA(_ coa: EVM.EVMAddress) {
@@ -1640,6 +1795,57 @@ access(all) contract FlowYieldVaultsEVM {
         return self.flowYieldVaultsRequestsAddress
     }
 
+    /// @notice Registers an immutable CREATE_YIELDVAULT config on both Cadence and the EVM request contract
+    /// @dev This is the only public config-registration entrypoint. It validates and stores the local Cadence config
+    ///      first, then performs the COA owner call on EVM. If the EVM call fails, the surrounding Cadence transaction
+    ///      reverts and the local write is rolled back.
+    /// @param admin Borrowed Admin resource from the signer account
+    /// @param worker Borrowed Worker resource from the signer account
+    /// @param configId Immutable config ID shared with the EVM request contract
+    /// @param vaultIdentifier Cadence vault type identifier
+    /// @param strategyIdentifier Cadence strategy type identifier
+    access(all) fun registerCreateYieldVaultConfigEverywhere(
+        admin: &Admin,
+        worker: &Worker,
+        configId: UInt64,
+        vaultIdentifier: String,
+        strategyIdentifier: String
+    ) {
+        admin.registerCreateYieldVaultConfig(
+            configId: configId,
+            vaultIdentifier: vaultIdentifier,
+            strategyIdentifier: strategyIdentifier
+        )
+
+        worker.registerCreateYieldVaultConfigOnEVM(
+            configId: configId,
+            vaultIdentifier: vaultIdentifier,
+            strategyIdentifier: strategyIdentifier
+        )
+    }
+
+    /// @notice Gets a registered CREATE_YIELDVAULT config by ID
+    /// @param configId Immutable config ID
+    /// @return The registered config or nil if not found
+    access(all) view fun getCreateYieldVaultConfig(_ configId: UInt64): CreateYieldVaultConfig? {
+        return self.createYieldVaultConfigs[configId]
+    }
+
+    /// @notice Gets the registered CREATE_YIELDVAULT config ID for a vault/strategy pair
+    /// @param vaultIdentifier Cadence vault type identifier
+    /// @param strategyIdentifier Cadence strategy type identifier
+    /// @return The registered config ID or nil if not found
+    access(all) view fun getCreateYieldVaultConfigId(
+        vaultIdentifier: String,
+        strategyIdentifier: String
+    ): UInt64? {
+        let pairKey = self.createYieldVaultConfigPairKey(
+            vaultIdentifier: vaultIdentifier,
+            strategyIdentifier: strategyIdentifier
+        )
+        return self.createYieldVaultConfigIdsByPairKey[pairKey]
+    }
+
     /// @notice Gets pending requests for a specific EVM address (public query)
     /// @dev Uses the contract account's public COA capability at /public/evm for read-only EVM calls.
     /// @param evmAddressHex The EVM address as a hex string (e.g., "0x1234...")
@@ -1680,8 +1886,7 @@ access(all) contract FlowYieldVaultsEVM {
                 Type<[UInt64]>(),         // yieldVaultIds
                 Type<[UInt256]>(),        // timestamps
                 Type<[String]>(),         // messages
-                Type<[String]>(),         // vaultIdentifiers
-                Type<[String]>(),         // strategyIdentifiers
+                Type<[UInt64]>(),         // createVaultConfigIds
                 Type<UInt256>(),          // pendingBalance
                 Type<UInt256>()           // claimableRefund
             ],
@@ -1696,10 +1901,9 @@ access(all) contract FlowYieldVaultsEVM {
         let yieldVaultIds = decoded[5] as! [UInt64]
         let timestamps = decoded[6] as! [UInt256]
         let messages = decoded[7] as! [String]
-        let vaultIdentifiers = decoded[8] as! [String]
-        let strategyIdentifiers = decoded[9] as! [String]
-        let pendingBalanceRaw = decoded[10] as! UInt256
-        let claimableRefundRaw = decoded[11] as! UInt256
+        let createVaultConfigIds = decoded[8] as! [UInt64]
+        let pendingBalanceRaw = decoded[9] as! UInt256
+        let claimableRefundRaw = decoded[10] as! UInt256
 
         // Convert pending balance from wei to UFix64
         let pendingBalance = FlowEVMBridgeUtils.uint256ToUFix64(value: pendingBalanceRaw, decimals: 18)
@@ -1709,6 +1913,10 @@ access(all) contract FlowYieldVaultsEVM {
         var requests: [EVMRequest] = []
         var i = 0
         while i < ids.length {
+            let createVaultConfigId = createVaultConfigIds[i]
+            let config = FlowYieldVaultsEVM.getCreateYieldVaultConfig(createVaultConfigId)
+            let vaultIdentifier = config?.vaultIdentifier ?? ""
+            let strategyIdentifier = config?.strategyIdentifier ?? ""
             let request = EVMRequest(
                 id: ids[i],
                 user: evmAddress,
@@ -1719,8 +1927,9 @@ access(all) contract FlowYieldVaultsEVM {
                 yieldVaultId: yieldVaultIds[i],
                 timestamp: timestamps[i],
                 message: messages[i],
-                vaultIdentifier: vaultIdentifiers[i],
-                strategyIdentifier: strategyIdentifiers[i]
+                createVaultConfigId: createVaultConfigId,
+                vaultIdentifier: vaultIdentifier,
+                strategyIdentifier: strategyIdentifier
             )
             requests.append(request)
             i = i + 1
@@ -1776,8 +1985,7 @@ access(all) contract FlowYieldVaultsEVM {
                 Type<UInt64>(),           // yieldVaultId
                 Type<UInt256>(),          // timestamp
                 Type<String>(),           // message
-                Type<String>(),           // vaultIdentifier
-                Type<String>()           // strategyIdentifier
+                Type<UInt64>()            // createVaultConfigId
             ],
             data: callResult.data
         )
@@ -1791,13 +1999,16 @@ access(all) contract FlowYieldVaultsEVM {
         let yieldVaultId = decoded[6] as! UInt64
         let timestamp = decoded[7] as! UInt256
         let message = decoded[8] as! String
-        let vaultIdentifier = decoded[9] as! String
-        let strategyIdentifier = decoded[10] as! String
+        let createVaultConfigId = decoded[9] as! UInt64
 
         // Request not found
         if timestamp == 0 {
             return nil
         }
+
+        let config = FlowYieldVaultsEVM.getCreateYieldVaultConfig(createVaultConfigId)
+        let vaultIdentifier = config?.vaultIdentifier ?? ""
+        let strategyIdentifier = config?.strategyIdentifier ?? ""
 
         // Build request array
         let request = EVMRequest(
@@ -1810,6 +2021,7 @@ access(all) contract FlowYieldVaultsEVM {
             yieldVaultId: yieldVaultId,
             timestamp: timestamp,
             message: message,
+            createVaultConfigId: createVaultConfigId,
             vaultIdentifier: vaultIdentifier,
             strategyIdentifier: strategyIdentifier
             )
@@ -1854,66 +2066,32 @@ access(all) contract FlowYieldVaultsEVM {
     // Internal Functions
     // ============================================
 
-    /// @notice Validates CREATE_YIELDVAULT request parameters before processing
-    /// @dev Validates that vaultIdentifier and strategyIdentifier are valid Cadence types
-    ///      and that the strategy is supported by FlowYieldVaults protocol.
-    ///      This prevents panics during createYieldVault by catching invalid parameters early.
-    ///      Note: Basic string validations (empty checks) should be done on the Solidity side.
+    /// @notice Validates CREATE_YIELDVAULT request config presence before processing
+    /// @dev Scheduler paths only check that the immutable config ID is registered locally.
+    ///      Dynamic Cadence type resolution happens only in admin registration or worker execution paths.
     /// @param request The request to validate
     /// @return ProcessResult with success=true if valid, or success=false with error message
-    access(self) fun validateCreateYieldVaultParameters(_ request: EVMRequest): ProcessResult {
-        // Validate vaultIdentifier is a valid Cadence type identifier
-        let vaultType = CompositeType(request.vaultIdentifier)
-        if vaultType == nil {
+    access(self) fun validateCreateYieldVaultConfig(_ request: EVMRequest): ProcessResult {
+        if request.createVaultConfigId == nil {
             return ProcessResult(
                 success: false,
                 yieldVaultId: nil,
-                message: "Invalid vaultIdentifier: \(request.vaultIdentifier) is not a valid Cadence type"
+                message: "Missing createVaultConfigId for CREATE_YIELDVAULT request \(request.id)"
             )
         }
 
-        // Validate strategyIdentifier is a valid Cadence type identifier
-        let strategyType = CompositeType(request.strategyIdentifier)
-        if strategyType == nil {
+        if FlowYieldVaultsEVM.getCreateYieldVaultConfig(request.createVaultConfigId!) == nil {
             return ProcessResult(
                 success: false,
                 yieldVaultId: nil,
-                message: "Invalid strategyIdentifier: \(request.strategyIdentifier) is not a valid Cadence type"
+                message: "Unknown createVaultConfigId \(request.createVaultConfigId!)"
             )
         }
 
-        // Validate strategy is supported by FlowYieldVaults protocol
-        let supportedStrategies = FlowYieldVaults.getSupportedStrategies()
-        var isStrategySupported = false
-        for supported in supportedStrategies {
-            if supported == strategyType! {
-                isStrategySupported = true
-                break
-            }
-        }
-        if !isStrategySupported {
-            return ProcessResult(
-                success: false,
-                yieldVaultId: nil,
-                message: "Unsupported strategy: \(request.strategyIdentifier) is not supported by FlowYieldVaults"
-            )
-        }
-
-        // Validate vault type is supported for this strategy's initialization
-        let supportedVaults = FlowYieldVaults.getSupportedInitializationVaults(forStrategy: strategyType!)
-        if supportedVaults[vaultType!] != true {
-            return ProcessResult(
-                success: false,
-                yieldVaultId: nil,
-                message: "Unsupported vault type: \(request.vaultIdentifier) cannot be used to initialize strategy \(request.strategyIdentifier)"
-            )
-        }
-
-        // Validation passed
         return ProcessResult(
             success: true,
             yieldVaultId: nil,
-            message: "Validation passed"
+            message: "CreateYieldVault config registered"
         )
     }
 
@@ -1990,6 +2168,15 @@ access(all) contract FlowYieldVaultsEVM {
         return "EVM revert data: 0x\(String.encodeHex(data))"
     }
 
+    /// @notice Creates a stable dictionary key for a vault/strategy config pair
+    /// @dev Length prefixes avoid collisions between concatenated identifiers.
+    access(contract) view fun createYieldVaultConfigPairKey(
+        vaultIdentifier: String,
+        strategyIdentifier: String
+    ): String {
+        return "\(vaultIdentifier.length):\(vaultIdentifier)|\(strategyIdentifier.length):\(strategyIdentifier)"
+    }
+
     /// @notice Emits the RequestFailed event and returns a ProcessResult with success=false
     /// @dev This is a helper function to emit the RequestFailed event and return a ProcessResult with success=false
     /// @param request The EVM request that failed
@@ -2035,6 +2222,8 @@ access(all) contract FlowYieldVaultsEVM {
         self.WorkerStoragePath = /storage/flowYieldVaultsEVM
         self.AdminStoragePath = /storage/flowYieldVaultsEVMAdmin
         self.yieldVaultRegistry = {}
+        self.createYieldVaultConfigs = {}
+        self.createYieldVaultConfigIdsByPairKey = {}
         self.flowYieldVaultsRequestsAddress = nil
 
         let admin <- create Admin()

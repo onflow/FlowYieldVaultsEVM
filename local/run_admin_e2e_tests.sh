@@ -172,12 +172,12 @@ get_escrow_balance() {
 }
 
 # Get request status (0=PENDING, 1=PROCESSING, 2=COMPLETED, 3=FAILED)
-# The struct is: (requestId, user, requestType, status, token, amount, yieldVaultId, createdAt, vaultIdentifier, strategyIdentifier, errorMessage)
+# The struct is: (requestId, user, requestType, status, token, amount, yieldVaultId, createdAt, errorMessage, createVaultConfigId, vaultIdentifier, strategyIdentifier)
 # Status is the 4th field (index 3)
 get_request_status() {
   local request_id=$1
   local result
-  result=$(cast_call "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,string,string))" "$request_id")
+  result=$(cast_call "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,uint64,string,string))" "$request_id")
   # Extract the status field (4th value after the opening paren)
   # Cast output format: (requestId, user, requestType, status, ...)
   # Use awk to split by comma and get the 4th field, then extract the number

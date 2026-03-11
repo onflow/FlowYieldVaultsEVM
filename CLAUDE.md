@@ -47,7 +47,7 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 
 1. **EVM User** calls `FlowYieldVaultsRequests.sol` (creates request, escrows funds)
 2. **FlowYieldVaultsEVMWorkerOps.cdc** SchedulerHandler schedules WorkerHandlers to process requests
-3. **FlowYieldVaultsEVM.cdc** Worker fetches pending requests via `getPendingRequestsUnpacked()`
+3. **FlowYieldVaultsEVM.cdc** Worker fetches pending requests via `getPendingRequestsUnpacked()`, then resolves `createVaultConfigId` against the local Cadence config registry for `CREATE_YIELDVAULT`
 4. **Two-phase commit**: `startProcessingBatch()` marks PROCESSING and deducts balance, `completeProcessing()` marks COMPLETED/FAILED (refunds credited to `claimableRefunds` on failure)
 
 ### Contract Components
@@ -61,6 +61,7 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 ### Key Design Patterns
 
 - **COA Bridge**: Cadence Owned Account bridges funds between EVM and Cadence via FlowEVMBridge
+- **Immutable CREATE Configs**: EVM requests store `createVaultConfigId`; Cadence resolves identifiers locally; config onboarding should use `cadence/transactions/register_create_yieldvault_config_everywhere.cdc`
 - **Sentinel Values**: `NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF`, `NO_YIELDVAULT_ID = type(uint64).max`
 - **Ownership Tracking**: Parallel mappings on both EVM (`userOwnsYieldVault`) and Cadence (`yieldVaultOwnershipLookup`) for O(1) lookups
 - **Scheduler/Worker Split**: SchedulerHandler runs at fixed interval, schedules WorkerHandlers for individual requests
