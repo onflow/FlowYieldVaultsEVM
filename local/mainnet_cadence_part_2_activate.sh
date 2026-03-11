@@ -38,6 +38,10 @@ WBTC_ADDRESS="${WBTC_ADDRESS:-0x717DAE2BaF7656BE9a9B01deE31d571a9d4c9579}"
 PYUSD0_ADDRESS="${PYUSD0_ADDRESS:-0x99aF3EeA856556646C98c8B9b2548Fe815240750}"
 EVM_EXPLORER_BASE_URL="${EVM_EXPLORER_BASE_URL:-https://evm.flowscan.io}"
 COA_TARGET_BALANCE="${COA_TARGET_BALANCE:-${COA_FUNDING_AMOUNT:-400.0}}"
+SCHEDULER_BASE_EFFORT="${SCHEDULER_BASE_EFFORT:-950}"
+SCHEDULER_PER_REQUEST_EFFORT="${SCHEDULER_PER_REQUEST_EFFORT:-250}"
+SCHEDULER_WAKEUP_INTERVAL="${SCHEDULER_WAKEUP_INTERVAL:-10.0}"
+MAX_PROCESSING_REQUESTS="${MAX_PROCESSING_REQUESTS:-5}"
 MAX_UINT256="115792089237316195423570985008687907853269984665640564039457584007913129639935"
 
 flow_cmd() {
@@ -185,6 +189,41 @@ echo ""
 echo "✅ Refund tokens approved for contract refunds"
 echo ""
 
+set_execution_effort_constant() {
+    local key="$1"
+    local value="$2"
+
+    echo "   - Setting $key = $value"
+    flow_cmd transactions send "$PROJECT_ROOT/cadence/transactions/set_execution_effort_constant.cdc" \
+        "$key" \
+        "$value" \
+        --network "$FLOW_NETWORK" \
+        --signer "$FLOW_SIGNER" \
+        --compute-limit 9999
+}
+
+set_scheduler_wakeup_interval() {
+    local value="$1"
+
+    echo "   - Setting schedulerWakeupInterval = $value"
+    flow_cmd transactions send "$PROJECT_ROOT/cadence/transactions/set_scheduler_wakeup_interval.cdc" \
+        "$value" \
+        --network "$FLOW_NETWORK" \
+        --signer "$FLOW_SIGNER" \
+        --compute-limit 9999
+}
+
+set_max_processing_requests() {
+    local value="$1"
+
+    echo "   - Setting maxProcessingRequests = $value"
+    flow_cmd transactions send "$PROJECT_ROOT/cadence/transactions/set_max_processing_requests.cdc" \
+        "$value" \
+        --network "$FLOW_NETWORK" \
+        --signer "$FLOW_SIGNER" \
+        --compute-limit 9999
+}
+
 # ==========================================
 # Step 4: Setup worker or update the address if it already exists
 # ==========================================
@@ -214,9 +253,23 @@ fi
 echo ""
 
 # ==========================================
-# Step 5: Initialize scheduler handlers and schedule the first execution
+# Step 5: Apply tuned scheduler configuration
 # ==========================================
-echo "🔧 Step 5: Initializing FlowYieldVaultsEVMWorkerOps handlers and scheduler..."
+echo "⚙️  Step 5: Applying scheduler configuration..."
+
+set_execution_effort_constant "schedulerBaseEffort" "$SCHEDULER_BASE_EFFORT"
+set_execution_effort_constant "schedulerPerRequestEffort" "$SCHEDULER_PER_REQUEST_EFFORT"
+set_scheduler_wakeup_interval "$SCHEDULER_WAKEUP_INTERVAL"
+set_max_processing_requests "$MAX_PROCESSING_REQUESTS"
+
+echo ""
+echo "✅ Scheduler configuration applied"
+echo ""
+
+# ==========================================
+# Step 6: Initialize scheduler handlers and schedule the first execution
+# ==========================================
+echo "🔧 Step 6: Initializing FlowYieldVaultsEVMWorkerOps handlers and scheduler..."
 
 flow_cmd transactions send "$PROJECT_ROOT/cadence/transactions/scheduler/init_and_schedule.cdc" \
     --network "$FLOW_NETWORK" \
@@ -228,9 +281,9 @@ echo "✅ Transaction handler initialized and initial execution scheduled"
 echo ""
 
 # ==========================================
-# Step 6: Refresh exported addresses
+# Step 7: Refresh exported addresses
 # ==========================================
-echo "📦 Step 6: Exporting artifacts and refreshing contract addresses..."
+echo "📦 Step 7: Exporting artifacts and refreshing contract addresses..."
 
 "$PROJECT_ROOT/scripts/export-artifacts.sh" \
     --network "$FLOW_NETWORK" \
@@ -253,6 +306,9 @@ echo "   authorizedCOA:    Verified"
 echo "   COA Balance:      $CURRENT_COA_BALANCE_FLOW FLOW before top-up"
 echo "   COA Target:       $COA_TARGET_BALANCE FLOW"
 echo "   Token Approvals:  WFLOW, WETH, WBTC, PYUSD0"
+echo "   Scheduler Effort: base=$SCHEDULER_BASE_EFFORT perRequest=$SCHEDULER_PER_REQUEST_EFFORT"
+echo "   Scheduler Wakeup: $SCHEDULER_WAKEUP_INTERVAL seconds"
+echo "   Max Processing:   $MAX_PROCESSING_REQUESTS"
 echo "   Worker Setup:     Completed"
 echo "   Scheduler Init:   Completed"
 echo ""
