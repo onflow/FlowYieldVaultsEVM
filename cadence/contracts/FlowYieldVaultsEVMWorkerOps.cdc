@@ -477,6 +477,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
             let worker = self.workerCap.borrow()!
 
+            // Always clear failed/stale worker entries before capacity and backlog checks.
+            // Otherwise a reverted in-flight worker can remain stuck until new pending work arrives.
+            self._checkForFailedWorkerRequests(manager: manager, worker: worker)
+
             var message = ""
             var nextRunCapacity: UInt8 = 0
             var pendingCount: Int? = nil
@@ -556,12 +560,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         /// @notice Main scheduler logic
         /// @dev Flow:
-        ///      1. Check for failed worker requests
-        ///         - If a failure is identified, mark the request as failed and remove it from scheduledRequests
-        ///      2. If fetchCount > 0, fetch pending requests from EVM
-        ///      3. Preprocess requests to drop invalid requests
-        ///      4. Start processing requests (PENDING -> PROCESSING)
-        ///      5. Schedule WorkerHandlers and assign request ids to them
+        ///      1. If fetchCount > 0, fetch pending requests from EVM
+        ///      2. Preprocess requests to drop invalid requests
+        ///      3. Start processing requests (PENDING -> PROCESSING)
+        ///      4. Schedule WorkerHandlers and assign request ids to them
         /// @param manager The scheduler manager
         /// @param worker The worker resource
         /// @param fetchCount Number of pending requests to fetch in this run
@@ -571,9 +573,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             worker: &FlowYieldVaultsEVM.Worker,
             fetchCount: Int,
         ): String? {
-            // Check for failed worker requests
-            self._checkForFailedWorkerRequests(manager: manager, worker: worker)
-
             // Fetch pending requests from EVM
             if fetchCount > 0 {
                 if let pendingRequests = worker.getPendingRequestsFromEVM(
