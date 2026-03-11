@@ -12,17 +12,20 @@ NC='\033[0m' # No Color
 # Parse arguments
 NETWORK=""
 EVM_ADDRESS=""
+CADENCE_ADDRESS=""
 
 usage() {
-    echo "Usage: $0 [--network <testnet|mainnet>] [--evm-address <address>]"
+    echo "Usage: $0 [--network <testnet|mainnet>] [--evm-address <address>] [--cadence-address <address>]"
     echo ""
     echo "Options:"
     echo "  --network      Network to update (testnet or mainnet)"
     echo "  --evm-address  EVM contract address for FlowYieldVaultsRequests"
+    echo "  --cadence-address  Cadence account address for FlowYieldVaultsEVM"
     echo ""
     echo "Examples:"
     echo "  $0                                          # Only export ABIs"
     echo "  $0 --network testnet --evm-address 0x123   # Export ABIs and update testnet addresses"
+    echo "  $0 --network mainnet --evm-address 0x123 --cadence-address 0xabc"
     exit 1
 }
 
@@ -36,6 +39,10 @@ while [[ $# -gt 0 ]]; do
             EVM_ADDRESS="$2"
             shift 2
             ;;
+        --cadence-address)
+            CADENCE_ADDRESS="$2"
+            shift 2
+            ;;
         -h|--help)
             usage
             ;;
@@ -47,8 +54,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate arguments
-if [[ -n "$EVM_ADDRESS" && -z "$NETWORK" ]]; then
-    echo -e "${RED}Error: --network is required when --evm-address is provided${NC}"
+if [[ (-n "$EVM_ADDRESS" || -n "$CADENCE_ADDRESS") && -z "$NETWORK" ]]; then
+    echo -e "${RED}Error: --network is required when --evm-address or --cadence-address is provided${NC}"
     usage
 fi
 
@@ -79,6 +86,7 @@ if [[ -n "$NETWORK" ]]; then
 
     ADDRESSES_FILE="deployments/contract-addresses.json"
     FLOW_JSON="flow.json"
+    CADENCE_ADDRESS_SOURCE="flow.json"
 
     # Check if jq is available
     if ! command -v jq &> /dev/null; then
@@ -86,12 +94,16 @@ if [[ -n "$NETWORK" ]]; then
         exit 1
     fi
 
-    # Get Cadence address from flow.json
-    CADENCE_ADDRESS=$(jq -r ".contracts.FlowYieldVaultsEVM.aliases.${NETWORK} // empty" "$FLOW_JSON")
-
     if [[ -z "$CADENCE_ADDRESS" ]]; then
-        echo -e "${RED}Error: Could not find FlowYieldVaultsEVM address for ${NETWORK} in flow.json${NC}"
-        exit 1
+        # Get Cadence address from flow.json
+        CADENCE_ADDRESS=$(jq -r ".contracts.FlowYieldVaultsEVM.aliases.${NETWORK} // empty" "$FLOW_JSON")
+
+        if [[ -z "$CADENCE_ADDRESS" ]]; then
+            echo -e "${RED}Error: Could not find FlowYieldVaultsEVM address for ${NETWORK} in flow.json. Pass --cadence-address to override.${NC}"
+            exit 1
+        fi
+    else
+        CADENCE_ADDRESS_SOURCE="--cadence-address"
     fi
 
     # Add 0x prefix if not present
@@ -99,7 +111,7 @@ if [[ -n "$NETWORK" ]]; then
         CADENCE_ADDRESS="0x${CADENCE_ADDRESS}"
     fi
 
-    echo -e "  Cadence FlowYieldVaultsEVM: ${GREEN}${CADENCE_ADDRESS}${NC} (from flow.json)"
+    echo -e "  Cadence FlowYieldVaultsEVM: ${GREEN}${CADENCE_ADDRESS}${NC} (from ${CADENCE_ADDRESS_SOURCE})"
 
     # Update Cadence address
     TEMP_FILE=$(mktemp)
