@@ -953,7 +953,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             self.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT: 6500,
             self.WORKER_WITHDRAW_REQUEST_EFFORT: 3000,
             self.WORKER_DEPOSIT_REQUEST_EFFORT: 1500,
-            self.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT: 4500
+            self.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT: 5000
         }
 
         self.scheduledRequests = {}

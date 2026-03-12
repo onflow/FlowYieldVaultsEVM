@@ -509,7 +509,7 @@ Execution effort values are configurable via the `executionEffortConstants` dict
 | `workerCreateYieldVaultRequestEffort` | 6500 | Effort for CREATE_YIELDVAULT requests |
 | `workerDepositRequestEffort` | 1500 | Effort for DEPOSIT_TO_YIELDVAULT requests |
 | `workerWithdrawRequestEffort` | 3000 | Effort for WITHDRAW_FROM_YIELDVAULT requests |
-| `workerCloseYieldVaultRequestEffort` | 4500 | Effort for CLOSE_YIELDVAULT requests |
+| `workerCloseYieldVaultRequestEffort` | 5000 | Effort for CLOSE_YIELDVAULT requests |
 
 Priority is dynamically determined based on execution effort:
 - **Low**: effort ≤ 2500
