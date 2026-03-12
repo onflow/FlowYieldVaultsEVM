@@ -477,8 +477,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
             let worker = self.workerCap.borrow()!
 
-            // Always clear failed/stale worker entries before capacity and backlog checks.
-            // Otherwise a reverted in-flight worker can remain stuck until new pending work arrives.
+            // Check and recover panicked worker entries
             self._checkForFailedWorkerRequests(manager: manager, worker: worker)
 
             var message = ""
