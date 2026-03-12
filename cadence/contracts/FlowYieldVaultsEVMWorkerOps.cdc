@@ -477,7 +477,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
             let worker = self.workerCap.borrow()!
 
-            // Check and recover panicked worker entries
+            // Always clear failed/stale worker entries before capacity and backlog checks.
+            // This keeps failed requests recoverable even when no new EVM requests are pending.
             self._checkForFailedWorkerRequests(manager: manager, worker: worker)
 
             var message = ""
@@ -747,7 +748,15 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             let perRequestEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
                 FlowYieldVaultsEVMWorkerOps.SCHEDULER_PER_REQUEST_EFFORT
             ]!
-            let executionEffort = baseEffort + UInt64(forNumberOfRequests) * perRequestEffort
+            // Budget for the larger of:
+            // - requests expected to be processed next run
+            // - tracked worker entries that may need recovery before any new work is scheduled
+            let trackedRecoveryWorkload = UInt64(FlowYieldVaultsEVMWorkerOps.scheduledRequests.length)
+            let requestedProcessingWorkload = UInt64(forNumberOfRequests)
+            let schedulerWorkload = trackedRecoveryWorkload > requestedProcessingWorkload
+                ? trackedRecoveryWorkload
+                : requestedProcessingWorkload
+            let executionEffort = baseEffort + schedulerWorkload * perRequestEffort
 
             let transactionId = self._scheduleTransaction(
                 manager: manager,
@@ -939,12 +948,12 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         self.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT = "workerCloseYieldVaultRequestEffort"
 
         self.executionEffortConstants = {
-            self.SCHEDULER_BASE_EFFORT: 700,
-            self.SCHEDULER_PER_REQUEST_EFFORT: 1000,
-            self.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT: 5000,
-            self.WORKER_WITHDRAW_REQUEST_EFFORT: 2000,
-            self.WORKER_DEPOSIT_REQUEST_EFFORT: 2000,
-            self.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT: 5000
+            self.SCHEDULER_BASE_EFFORT: 950,
+            self.SCHEDULER_PER_REQUEST_EFFORT: 250,
+            self.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT: 6500,
+            self.WORKER_WITHDRAW_REQUEST_EFFORT: 3000,
+            self.WORKER_DEPOSIT_REQUEST_EFFORT: 1500,
+            self.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT: 4500
         }
 
         self.scheduledRequests = {}

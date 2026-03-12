@@ -97,12 +97,33 @@ transaction {
     }
 
     execute {
+        let workerCreateEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+            FlowYieldVaultsEVMWorkerOps.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT
+        ]!
+        let workerWithdrawEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+            FlowYieldVaultsEVMWorkerOps.WORKER_WITHDRAW_REQUEST_EFFORT
+        ]!
+        let workerDepositEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+            FlowYieldVaultsEVMWorkerOps.WORKER_DEPOSIT_REQUEST_EFFORT
+        ]!
+        let workerCloseEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+            FlowYieldVaultsEVMWorkerOps.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT
+        ]!
 
         // Make sure WorkerHandler is registered in the manager
         if self.manager.getHandlerTypeIdentifiers()[self.workerHandlerTypeIdentifier] == nil {
             // Schedule dummy (data=nil) WorkerHandler transaction to register the WorkerHandler in the manager
             let workerHandlerPriority = FlowTransactionScheduler.Priority.Medium
-            let workerHandlerExecutionEffort = 5000 as UInt64
+            var workerHandlerExecutionEffort = workerCreateEffort
+            if workerWithdrawEffort > workerHandlerExecutionEffort {
+                workerHandlerExecutionEffort = workerWithdrawEffort
+            }
+            if workerDepositEffort > workerHandlerExecutionEffort {
+                workerHandlerExecutionEffort = workerDepositEffort
+            }
+            if workerCloseEffort > workerHandlerExecutionEffort {
+                workerHandlerExecutionEffort = workerCloseEffort
+            }
             let transactionId = _scheduleTransaction(
                 manager: self.manager,
                 handlerCap: self.workerHandlerCap,
@@ -130,7 +151,9 @@ transaction {
         // Schedule scheduler
         if !schedulerRunning {
             let schedulerPriority = FlowTransactionScheduler.Priority.Medium
-            let schedulerExecutionEffort = 700 as UInt64
+            let schedulerExecutionEffort = FlowYieldVaultsEVMWorkerOps.executionEffortConstants[
+                FlowYieldVaultsEVMWorkerOps.SCHEDULER_BASE_EFFORT
+            ]!
             // First scheduler run will be scheduled without any requests to preprocess
             // If there are pending requests, they will be preprocessed in the next scheduler execution
             let schedulerTransactionId = _scheduleTransaction(
