@@ -4,6 +4,7 @@
 			"source": "./lib/FlowYieldVaults/cadence/contracts/FlowYieldVaults.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
+				"mainnet": "b1d63873c3cc9f79",
 				"testing": "0000000000000007",
 				"testnet": "d2580caf2ef07c2f"
 			}
@@ -12,6 +13,7 @@
 			"source": "./lib/FlowYieldVaults/cadence/contracts/FlowYieldVaultsClosedBeta.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
+				"mainnet": "b1d63873c3cc9f79",
 				"testing": "0000000000000007",
 				"testnet": "d2580caf2ef07c2f"
 			}
@@ -20,6 +22,7 @@
 			"source": "./cadence/contracts/FlowYieldVaultsEVM.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
+				"mainnet": "a7d9a1bece1378a3",
 				"testing": "0000000000000007",
 				"testnet": "d7940879cde632b6"
 			}
@@ -28,6 +31,7 @@
 			"source": "./cadence/contracts/FlowYieldVaultsEVMWorkerOps.cdc",
 			"aliases": {
 				"emulator": "045a1763c93006ca",
+				"mainnet": "a7d9a1bece1378a3",
 				"testing": "0000000000000007",
 				"testnet": "d7940879cde632b6"
 			}
@@ -542,6 +546,22 @@
 				"hashAlgorithm": "SHA2_256",
 				"resourceID": "projects/dl-flow-devex-staging/locations/us-central1/keyRings/tidal-keyring/cryptoKeys/tidal_admin_pk/cryptoKeyVersions/1"
 			}
+		},
+		"mainnet-account": {
+			"address": "a7d9a1bece1378a3",
+			"key": {
+				"type": "google-kms",
+				"hashAlgorithm": "SHA2_256",
+				"resourceID": "projects/dl-flow-devex-production/locations/us-central1/keyRings/tidal-keyring/cryptoKeys/tidal_admin_pk/cryptoKeyVersions/1"
+			}
+		},
+		"mainnet-admin": {
+			"address": "b1d63873c3cc9f79",
+			"key": {
+				"type": "google-kms",
+				"hashAlgorithm": "SHA2_256",
+				"resourceID": "projects/dl-flow-devex-production/locations/us-central1/keyRings/tidal-keyring/cryptoKeys/tidal_admin_pk/cryptoKeyVersions/1"
+			}
 		}
 	},
 	"deployments": {
@@ -553,6 +573,12 @@
 		},
 		"testnet": {
 			"testnet-account": [
+				"FlowYieldVaultsEVMWorkerOps",
+				"FlowYieldVaultsEVM"
+			]
+		},
+		"mainnet": {
+			"mainnet-account": [
 				"FlowYieldVaultsEVMWorkerOps",
 				"FlowYieldVaultsEVM"
 			]
