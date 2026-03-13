@@ -73,7 +73,7 @@ STRATEGY_IDENTIFIER="${STRATEGY_IDENTIFIER:-A.045a1763c93006ca.MockStrategies.Tr
 CADENCE_CONTRACT_ADDR="045a1763c93006ca"
 
 # Scheduler configuration
-SCHEDULER_WAKEUP_INTERVAL=2  # Default scheduler wakeup interval in seconds
+SCHEDULER_WAKEUP_INTERVAL=1  # Default scheduler wakeup interval in seconds
 AUTO_PROCESS_TIMEOUT=10      # Timeout for waiting for automatic processing
 
 # ============================================

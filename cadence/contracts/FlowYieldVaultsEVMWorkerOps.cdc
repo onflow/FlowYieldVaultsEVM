@@ -70,6 +70,11 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @notice Maximum number of WorkerHandlers to be scheduled simultaneously
     access(self) var maxProcessingRequests: UInt8
 
+    /// @notice Grace period (in seconds) before checking if a worker transaction failed
+    /// @dev This accounts for the FlowTransactionScheduler's optimistic status update,
+    ///      where status is set to Executed before the handler actually runs
+    access(self) var crashRecoveryGracePeriod: UFix64
+
     // ============================================
     // Configuration Variables (Execution Effort)
     // ============================================
@@ -216,6 +221,15 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 maxProcessingRequests > 0: "Max processing requests must be greater than 0"
             }
             FlowYieldVaultsEVMWorkerOps.maxProcessingRequests = maxProcessingRequests
+        }
+
+        /// @notice Sets the grace period for crash recovery checks
+        /// @param gracePeriod The grace period in seconds (must be >= 1.0)
+        access(all) fun setCrashRecoveryGracePeriod(gracePeriod: UFix64) {
+            pre {
+                gracePeriod >= 1.0: "Grace period must be at least 1 second"
+            }
+            FlowYieldVaultsEVMWorkerOps.crashRecoveryGracePeriod = gracePeriod
         }
 
         /// @notice Sets the execution effort constants
@@ -426,6 +440,14 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
     /// @notice Recurrent handler that checks for pending requests and schedules WorkerHandlers to process them
     /// @dev Also manages crash recovery for scheduled WorkerHandlers
+    /// @dev Flow:
+    ///      1. Check for failed worker requests
+    ///      2. Check capacity and fetch pending requests
+    ///      3. If fetchCount > 0, run main scheduler logic
+    ///         - Preprocess requests to drop invalid requests
+    ///         - Start processing requests (PENDING -> PROCESSING)
+    ///         - Schedule WorkerHandlers and assign request ids to them
+    ///      4. Schedule the next execution
     access(all) resource SchedulerHandler: FlowTransactionScheduler.TransactionHandler {
 
         /// @notice Capability to the Worker resource for processing requests
@@ -477,6 +499,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             let manager = FlowYieldVaultsEVMWorkerOps._getManagerFromStorage()!
             let worker = self.workerCap.borrow()!
 
+            // Step 1: Check for failed worker requests
+            self._checkForFailedWorkerRequests(manager: manager, worker: worker)
+
+            // Step 2: Check capacity and fetch pending requests
             var message = ""
             var nextRunCapacity: UInt8 = 0
             var pendingCount: Int? = nil
@@ -516,7 +542,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                         // fetchCount = min(pendingRequestCount, capacity)
                         fetchCount = pendingRequestCount > Int(capacity) ? Int(capacity) : pendingRequestCount
 
-                        // Run main scheduler logic
+                        // Step 3: Run main scheduler logic
                         if let errorMessage = self._runScheduler(
                             manager: manager,
                             worker: worker,
@@ -537,7 +563,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 }
             }
 
-            // Schedule the next execution
+            // Step 4: Schedule the next execution
             let nextTransactionId = self.scheduleNextSchedulerExecution(
                 manager: manager,
                 forNumberOfRequests: nextRunCapacity,
@@ -571,8 +597,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             worker: &FlowYieldVaultsEVM.Worker,
             fetchCount: Int,
         ): String? {
-            // Check for failed worker requests
-            self._checkForFailedWorkerRequests(manager: manager, worker: worker)
 
             // Fetch pending requests from EVM
             if fetchCount > 0 {
@@ -614,12 +638,19 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             manager: &{FlowTransactionSchedulerUtils.Manager},
             worker: &FlowYieldVaultsEVM.Worker,
         ) {
+            let currentTimestamp = getCurrentBlock().timestamp
+            // gracePeriod:
+            // Time window after scheduled execution to check for failure.
+            // If worker transaction is not executed within this period, it is considered failed.
+            // FlowTransactionScheduler optimistically updates status to Executed before the handler actually runs.
+            let gracePeriod = FlowYieldVaultsEVMWorkerOps.crashRecoveryGracePeriod
+
             for requestId in FlowYieldVaultsEVMWorkerOps.scheduledRequests.keys {
                 let request = FlowYieldVaultsEVMWorkerOps.scheduledRequests[requestId]!
+                let checkAfterTimestamp = request.workerScheduledTimestamp + gracePeriod
 
-                // Check block height
-                if getCurrentBlock().timestamp <= request.workerScheduledTimestamp {
-                    // Expected timestamp is not reached yet, skip
+                // Skip if grace period hasn't elapsed (worker may still be executing)
+                if currentTimestamp <= checkAfterTimestamp {
                     continue
                 }
 
@@ -941,7 +972,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         self.WORKER_CLOSE_YIELDVAULT_REQUEST_EFFORT = "workerCloseYieldVaultRequestEffort"
 
         self.executionEffortConstants = {
-            self.SCHEDULER_BASE_EFFORT: 700,
+            self.SCHEDULER_BASE_EFFORT: 1200,
             self.SCHEDULER_PER_REQUEST_EFFORT: 1000,
             self.WORKER_CREATE_YIELDVAULT_REQUEST_EFFORT: 5000,
             self.WORKER_WITHDRAW_REQUEST_EFFORT: 2000,
@@ -954,6 +985,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         self.schedulerWakeupInterval = 1.0
         self.maxProcessingRequests = 3
+        self.crashRecoveryGracePeriod = 10.0
 
         let admin <- create Admin()
         self.account.storage.save(<-admin, to: self.AdminStoragePath)
