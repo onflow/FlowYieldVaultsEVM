@@ -70,11 +70,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     /// @notice Maximum number of WorkerHandlers to be scheduled simultaneously
     access(self) var maxProcessingRequests: UInt8
 
-    /// @notice Grace period (in seconds) before checking if a worker transaction failed
-    /// @dev This accounts for the FlowTransactionScheduler's optimistic status update,
-    ///      where status is set to Executed before the handler actually runs
-    access(self) var crashRecoveryGracePeriod: UFix64
-
     // ============================================
     // Configuration Variables (Execution Effort)
     // ============================================
@@ -221,15 +216,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                 maxProcessingRequests > 0: "Max processing requests must be greater than 0"
             }
             FlowYieldVaultsEVMWorkerOps.maxProcessingRequests = maxProcessingRequests
-        }
-
-        /// @notice Sets the grace period for crash recovery checks
-        /// @param gracePeriod The grace period in seconds (must be >= 1.0)
-        access(all) fun setCrashRecoveryGracePeriod(gracePeriod: UFix64) {
-            pre {
-                gracePeriod >= 1.0: "Grace period must be at least 1 second"
-            }
-            FlowYieldVaultsEVMWorkerOps.crashRecoveryGracePeriod = gracePeriod
         }
 
         /// @notice Sets the execution effort constants
@@ -639,15 +625,11 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
             worker: &FlowYieldVaultsEVM.Worker,
         ) {
             let currentTimestamp = getCurrentBlock().timestamp
-            // gracePeriod:
-            // Time window after scheduled execution to check for failure.
-            // If worker transaction is not executed within this period, it is considered failed.
-            // FlowTransactionScheduler optimistically updates status to Executed before the handler actually runs.
-            let gracePeriod = FlowYieldVaultsEVMWorkerOps.crashRecoveryGracePeriod
 
             for requestId in FlowYieldVaultsEVMWorkerOps.scheduledRequests.keys {
                 let request = FlowYieldVaultsEVMWorkerOps.scheduledRequests[requestId]!
-                let checkAfterTimestamp = request.workerScheduledTimestamp + gracePeriod
+                // Hardcoded to preserve contract storage layout for upgrade compatibility.
+                let checkAfterTimestamp = request.workerScheduledTimestamp + 10.0
 
                 // Skip if grace period hasn't elapsed (worker may still be executing)
                 if currentTimestamp <= checkAfterTimestamp {
@@ -985,7 +967,6 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
 
         self.schedulerWakeupInterval = 1.0
         self.maxProcessingRequests = 3
-        self.crashRecoveryGracePeriod = 10.0
 
         let admin <- create Admin()
         self.account.storage.save(<-admin, to: self.AdminStoragePath)
