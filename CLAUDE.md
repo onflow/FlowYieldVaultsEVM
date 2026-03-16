@@ -152,6 +152,15 @@ This means scenarios like "Transaction A completes but Transaction B sees stale 
 2. **Panic-based error handling** in `processRequest()` is the correct pattern - it ensures atomicity across Cadence and EVM state
 3. **State removal before vs after processing** doesn't create race conditions - if processing fails, the entire transaction (including removal) reverts
 
+## Common Gotchas
+
+1. **Amount units**: EVM uses wei (10^18), Cadence uses UFix64. Conversion required at the bridge boundary.
+2. **Type identifiers**: Vault/strategy identifiers are Cadence type strings like `A.xxx.FlowToken.Vault`
+3. **Request IDs start at 1**, not 0 (Solidity `nextRequestId` initialized to 1)
+4. **Pending requests array**: Pagination via `getPendingRequestsUnpacked(offset, limit)`
+5. **Cadence test cleanup**: Always clean `./imports/` and `./db/` directories before running Cadence tests (handled by `run_cadence_tests.sh`)
+6. **Test accounts**: Tests use mock EVM addresses like `0x0000...0011` and well-known private keys (`0x2`-`0x6`) - never use on mainnet
+
 ## Dependencies
 
 This project depends on `lib/FlowYieldVaults` (git submodule) which contains the core YieldVaults Cadence protocol including `FlowYieldVaults.cdc` and `FlowYieldVaultsClosedBeta.cdc`.
