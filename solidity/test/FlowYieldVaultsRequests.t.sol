@@ -603,6 +603,15 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
+    function test_BatchAddToBlocklist_RevertZeroAddress() public {
+        address[] memory addrs = new address[](1);
+        addrs[0] = address(0);
+
+        vm.prank(c.owner());
+        vm.expectRevert(FlowYieldVaultsRequests.CannotBlocklistZeroAddress.selector);
+        c.batchAddToBlocklist(addrs);
+    }
+
     function test_BlocklistTakesPrecedence() public {
         address[] memory addrs = new address[](1);
         addrs[0] = user;

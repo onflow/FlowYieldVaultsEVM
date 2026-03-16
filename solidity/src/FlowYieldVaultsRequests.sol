@@ -199,6 +199,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Cannot add zero address to allowlist
     error CannotAllowlistZeroAddress();
 
+    /// @notice Cannot add zero address to blocklist
+    error CannotBlocklistZeroAddress();
+
     /// @notice Amount must be greater than zero
     error AmountMustBeGreaterThanZero();
 
@@ -589,7 +592,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
         for (uint256 i = 0; i < _addresses.length; ) {
             if (_addresses[i] == address(0))
-                revert CannotAllowlistZeroAddress();
+                revert CannotBlocklistZeroAddress();
             blocklisted[_addresses[i]] = true;
             unchecked {
                 ++i;
