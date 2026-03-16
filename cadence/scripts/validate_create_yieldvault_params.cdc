@@ -4,7 +4,7 @@ import "FlowYieldVaults"
 /// Returns a struct with validation results for both vaultIdentifier and strategyIdentifier
 ///
 /// @param vaultIdentifier The Cadence vault type identifier (e.g., "A.0ae53cb6e3f42a79.FlowToken.Vault")
-/// @param strategyIdentifier The Cadence strategy type identifier (e.g., "A.xxx.FlowYieldVaultsStrategies.TracerStrategy")
+/// @param strategyIdentifier The Cadence strategy type identifier (e.g., "A.xxx.MockStrategies.TracerStrategy")
 /// @return ValidationResult containing isValid flag and detailed error messages if invalid
 access(all) struct ValidationResult {
     access(all) let isValid: Bool

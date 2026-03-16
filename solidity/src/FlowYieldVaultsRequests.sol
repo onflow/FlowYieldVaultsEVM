@@ -28,7 +28,7 @@ import {
  *      4. CLOSE_YIELDVAULT: User requests closure → COA closes YieldVault and bridges all funds back
  *
  *      Processing uses atomic two-phase commit:
- *      - startProcessing(): Marks request as PROCESSING, deducts user balance
+ *      - startProcessingBatch(): Marks requests as PROCESSING, deducts user balances
  *      - completeProcessing(): Marks as COMPLETED/FAILED, credits claimable refunds on failure
  *
  *      PRECISION NOTE: EVM uses uint256 with 18 decimals, while Cadence uses UFix64 with 8 decimals.
@@ -66,7 +66,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param status Current status of the request
     /// @param tokenAddress Token being deposited/withdrawn (NATIVE_FLOW for native $FLOW)
     /// @param amount Amount of tokens involved
-    /// @param yieldVaultId Associated YieldVault Id (0 for CREATE_YIELDVAULT until completed; NO_YIELDVAULT_ID only on failed CREATE)
+    /// @param yieldVaultId Associated YieldVault Id
     /// @param timestamp Block timestamp when request was created
     /// @param message Status message or error reason
     /// @param vaultIdentifier Cadence vault type identifier for CREATE_YIELDVAULT
@@ -108,8 +108,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @dev On Cadence side, WFLOW is automatically unwrapped to native FlowToken by FlowEVMBridge
     address public immutable WFLOW;
 
-    /// @notice Sentinel value for "no yieldvault" (used when CREATE_YIELDVAULT fails before yieldvault is created)
-    /// @dev Uses type(uint64).max since valid yieldVaultIds can be 0. Matches FlowYieldVaultsEVM.noYieldVaultId
+    /// @notice Sentinel value for "no yieldvault"
+    /// @dev Uses type(uint64).max since valid yieldVaultIds can be 0
     uint64 public constant NO_YIELDVAULT_ID = type(uint64).max;
 
     /// @dev Auto-incrementing counter for request IDs, starts at 1
@@ -226,7 +226,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     error CanOnlyCancelPending();
 
     /// @notice Request is not in expected status for this operation
-    error RequestAlreadyFinalized();
+    error InvalidRequestState();
 
     /// @notice Insufficient balance for withdrawal
     error InsufficientBalance(
@@ -247,8 +247,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice YieldVault Id is invalid or not owned by user
     error InvalidYieldVaultId(uint64 yieldVaultId, address user);
 
+    /// @notice YieldVault Id has already been registered
+    error YieldVaultIdAlreadyRegistered(uint64 yieldVaultId);
+
+    /// @notice YieldVault Id does not match the request's value
+    error YieldVaultIdMismatch(uint64 expectedId, uint64 providedId);
+
     /// @notice YieldVault token is not set
     error YieldVaultTokenNotSet(uint64 yieldVaultId);
+
+    /// @notice Cannot register sentinel value NO_YIELDVAULT_ID as a valid YieldVault
+    error CannotRegisterSentinelYieldVaultId();
 
     /// @notice Token does not match YieldVault's configured token
     error YieldVaultTokenMismatch(
@@ -279,7 +288,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestType Type of operation requested
     /// @param tokenAddress Token involved in the request
     /// @param amount Amount of tokens
-    /// @param yieldVaultId Associated YieldVault Id (0 for CREATE_YIELDVAULT until assigned by Cadence; NO_YIELDVAULT_ID only on failed CREATE)
+    /// @param yieldVaultId Associated YieldVault Id
     /// @param timestamp Block timestamp when request was created
     /// @param vaultIdentifier Cadence vault type identifier (for CREATE_YIELDVAULT)
     /// @param strategyIdentifier Cadence strategy type identifier (for CREATE_YIELDVAULT)
@@ -430,9 +439,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param requestId Request ID that closed this YieldVault
     event YieldVaultIdUnregistered(uint64 indexed yieldVaultId, address indexed owner, uint256 indexed requestId);
 
-    /// @notice Emitted when requests are dropped by admin
+    /// @notice Emitted when requests are dropped
     /// @param requestIds Dropped request IDs
-    /// @param droppedBy Admin who dropped the requests
+    /// @param droppedBy Admin/COA who dropped the requests
     event RequestsDropped(uint256[] requestIds, address indexed droppedBy);
 
     /// @notice Emitted when a user claims their refund
@@ -672,92 +681,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function dropRequests(
         uint256[] calldata requestIds
     ) external onlyOwner nonReentrant {
-        // Pre-allocate array for tracking successfully dropped request IDs
-        uint256[] memory droppedIds = new uint256[](requestIds.length);
-        uint256 droppedCount = 0;
-
-        // Process each request ID in the input array
-        for (uint256 i = 0; i < requestIds.length; ) {
-            uint256 requestId = requestIds[i];
-            Request storage request = requests[requestId];
-
-            // Only process valid requests that are still in PENDING status
-            // This check prevents double-processing and handles invalid IDs gracefully
-            if (
-                request.id == requestId &&
-                request.status == RequestStatus.PENDING
-            ) {
-                // Mark request as failed with admin message
-                request.status = RequestStatus.FAILED;
-                request.message = "Dropped by admin";
-
-                // For CREATE/DEPOSIT requests, move funds to claimableRefunds
-                // User must call claimRefund() to withdraw them (pull pattern)
-                // WITHDRAW/CLOSE requests don't escrow funds, so nothing to do
-                if (
-                    (request.requestType == RequestType.CREATE_YIELDVAULT ||
-                        request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
-                    request.amount > 0
-                ) {
-                    uint256 newBalance =
-                        pendingUserBalances[request.user][request.tokenAddress] -
-                            request.amount;
-                    pendingUserBalances[request.user][request.tokenAddress] = newBalance;
-                    emit BalanceUpdated(
-                        request.user,
-                        request.tokenAddress,
-                        newBalance
-                    );
-                    claimableRefunds[request.user][request.tokenAddress] += request.amount;
-                    emit RefundCredited(
-                        request.user,
-                        request.tokenAddress,
-                        request.amount,
-                        requestId
-                    );
-                }
-
-                // Update user's pending request count
-                if (userPendingRequestCount[request.user] > 0) {
-                    userPendingRequestCount[request.user]--;
-                }
-
-                // Remove from pending queues (both global and user-specific)
-                _removePendingRequest(requestId);
-
-                emit RequestProcessed(
-                    requestId,
-                    request.user,
-                    request.requestType,
-                    RequestStatus.FAILED,
-                    request.yieldVaultId,
-                    "Dropped by admin"
-                );
-
-                // Track this request as successfully dropped
-                droppedIds[droppedCount] = requestId;
-                unchecked {
-                    ++droppedCount;
-                }
-            }
-
-            unchecked {
-                ++i;
-            }
-        }
-
-        // Emit batch event only if requests were actually dropped
-        if (droppedCount > 0) {
-            // Create properly-sized array for the event
-            uint256[] memory actualDroppedIds = new uint256[](droppedCount);
-            for (uint256 j = 0; j < droppedCount; ) {
-                actualDroppedIds[j] = droppedIds[j];
-                unchecked {
-                    ++j;
-                }
-            }
-            emit RequestsDropped(actualDroppedIds, msg.sender);
-        }
+        _dropRequestsInternal(requestIds);
     }
 
     // ============================================
@@ -797,7 +721,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 RequestType.CREATE_YIELDVAULT,
                 tokenAddress,
                 amount,
-                0,
+                NO_YIELDVAULT_ID,
                 vaultIdentifier,
                 strategyIdentifier
             );
@@ -990,89 +914,30 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     // ============================================
 
     /**
-     * @notice Begins processing a request by transitioning it to PROCESSING status.
-     * @dev This is the first phase of the two-phase commit pattern. Must be called by the
-     *      authorized COA before executing Cadence-side operations.
-     *
-     *      For CREATE/DEPOSIT requests:
-     *      - Validates sufficient escrowed balance exists
-     *      - Atomically deducts user's escrowed balance
-     *      - Transfers funds to the COA for bridging to Cadence
-     *
-     *      For WITHDRAW/CLOSE requests:
-     *      - Only transitions status (no fund movement on EVM side)
-     *      - Funds will be bridged back from Cadence in completeProcessing
-     *
-     *      The PROCESSING status prevents request cancellation and double-processing.
-     * @param requestId The unique identifier of the request to start processing.
+     * @notice Processes a batch of PENDING requests.
+     * @dev For successful requests, marks them as PROCESSING.
+     *      For rejected requests, marks them as FAILED.
+     *      Single-request processing is supported by passing one request id in
+     *      successfulRequestIds and an empty rejectedRequestIds array.
+     * @param successfulRequestIds The request ids to start processing (PENDING -> PROCESSING)
+     * @param rejectedRequestIds The request ids to drop (PENDING -> FAILED)
      */
-    function startProcessing(uint256 requestId) external onlyAuthorizedCOA nonReentrant {
-        Request storage request = requests[requestId];
+    function startProcessingBatch(
+        uint256[] calldata successfulRequestIds,
+        uint256[] calldata rejectedRequestIds
+    ) external onlyAuthorizedCOA nonReentrant {
 
-        // === VALIDATION ===
-        if (request.id != requestId) revert RequestNotFound();
-        if (request.status != RequestStatus.PENDING)
-            revert RequestAlreadyFinalized();
+        // === REJECTED REQUESTS ===
+        _dropRequestsInternal(rejectedRequestIds);
 
-        // === TRANSITION TO PROCESSING ===
-        // This prevents cancellation and ensures atomicity with completeProcessing
-        request.status = RequestStatus.PROCESSING;
+        // === SUCCESSFUL REQUESTS ===
+        for (uint256 i = 0; i < successfulRequestIds.length; ) {
+            _startProcessingInternal(successfulRequestIds[i]);
 
-        // === HANDLE FUND TRANSFER FOR CREATE/DEPOSIT ===
-        // WITHDRAW/CLOSE don't have escrowed funds on EVM side
-        if (
-            request.requestType == RequestType.CREATE_YIELDVAULT ||
-            request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT
-        ) {
-            // Verify sufficient escrowed balance
-            uint256 currentBalance = pendingUserBalances[request.user][
-                request.tokenAddress
-            ];
-            if (currentBalance < request.amount) {
-                revert InsufficientBalance(
-                    request.tokenAddress,
-                    request.amount,
-                    currentBalance
-                );
+            unchecked {
+                ++i;
             }
-
-            // Deduct from user's escrowed balance
-            pendingUserBalances[request.user][request.tokenAddress] =
-                currentBalance -
-                request.amount;
-            emit BalanceUpdated(
-                request.user,
-                request.tokenAddress,
-                pendingUserBalances[request.user][request.tokenAddress]
-            );
-
-            // Transfer escrowed funds to COA for bridging to Cadence
-            if (isNativeFlow(request.tokenAddress)) {
-                // Native FLOW: send via low-level call
-                (bool success, ) = authorizedCOA.call{value: request.amount}("");
-                if (!success) revert TransferFailed();
-            } else {
-                // ERC20: use SafeERC20 transfer
-                IERC20(request.tokenAddress).safeTransfer(
-                    authorizedCOA,
-                    request.amount
-                );
-            }
-            emit FundsWithdrawn(
-                authorizedCOA,
-                request.tokenAddress,
-                request.amount
-            );
         }
-
-        emit RequestProcessed(
-            requestId,
-            request.user,
-            request.requestType,
-            RequestStatus.PROCESSING,
-            request.yieldVaultId,
-            "Processing started"
-        );
     }
 
     /**
@@ -1105,9 +970,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
         // === VALIDATION ===
         if (request.id != requestId) revert RequestNotFound();
-        // Only PROCESSING requests can be completed (must call startProcessing first)
+        // Only PROCESSING requests can be completed (must call startProcessingBatch first)
         if (request.status != RequestStatus.PROCESSING)
-            revert RequestAlreadyFinalized();
+            revert InvalidRequestState();
 
         // === UPDATE REQUEST STATUS ===
         RequestStatus newStatus = success
@@ -1115,10 +980,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             : RequestStatus.FAILED;
         request.status = newStatus;
         request.message = message;
-        request.yieldVaultId = yieldVaultId;
+
+        // Enforce strong ID binding for DEPOSIT/WITHDRAW/CLOSE by requiring the
+        // supplied yieldVaultId matches the request's stored yieldVaultId
+        if (request.requestType == RequestType.CREATE_YIELDVAULT) {
+            request.yieldVaultId = yieldVaultId;
+        } else if (request.yieldVaultId != yieldVaultId) {
+            revert YieldVaultIdMismatch(request.yieldVaultId, yieldVaultId);
+        }
 
         // === HANDLE REFUNDS FOR FAILED CREATE/DEPOSIT ===
-        // COA must return the funds that were transferred in startProcessing
+        // COA must return the funds that were transferred in startProcessingBatch
         if (
             !success &&
             (request.requestType == RequestType.CREATE_YIELDVAULT ||
@@ -1164,12 +1036,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (success && request.requestType == RequestType.CLOSE_YIELDVAULT) {
             _unregisterYieldVault(yieldVaultId, request.user, requestId);
         }
-
-        // === CLEANUP PENDING STATE ===
-        if (userPendingRequestCount[request.user] > 0) {
-            userPendingRequestCount[request.user]--;
-        }
-        _removePendingRequest(requestId);
 
         emit RequestProcessed(requestId, request.user, request.requestType, newStatus, yieldVaultId, message);
     }
@@ -1316,6 +1182,52 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         return requests[requestId];
     }
 
+    /// @notice Gets a specific request by ID in unpacked format (tuple)
+    /// @param requestId The request ID to fetch
+    /// @return id Request id
+    /// @return user User address
+    /// @return requestType Request type
+    /// @return status Request status
+    /// @return tokenAddress Token address
+    /// @return amount Amount
+    /// @return yieldVaultId YieldVault Id
+    /// @return timestamp Timestamp
+    /// @return message Status message
+    /// @return vaultIdentifier Vault identifier
+    /// @return strategyIdentifier Strategy identifier
+    function getRequestUnpacked(
+        uint256 requestId
+    )
+        external
+        view
+        returns (
+            uint256 id,
+            address user,
+            uint8 requestType,
+            uint8 status,
+            address tokenAddress,
+            uint256 amount,
+            uint64 yieldVaultId,
+            uint256 timestamp,
+            string memory message,
+            string memory vaultIdentifier,
+            string memory strategyIdentifier
+        )
+    {
+        Request storage req = requests[requestId];
+        id = req.id;
+        user = req.user;
+        requestType = uint8(req.requestType);
+        status = uint8(req.status);
+        tokenAddress = req.tokenAddress;
+        amount = req.amount;
+        yieldVaultId = req.yieldVaultId;
+        timestamp = req.timestamp;
+        message = req.message;
+        vaultIdentifier = req.vaultIdentifier;
+        strategyIdentifier = req.strategyIdentifier;
+    }
+
     /// @notice Checks if a YieldVault Id is valid
     /// @param yieldVaultId YieldVault Id to check
     /// @return True if valid
@@ -1431,6 +1343,181 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     // ============================================
     // Internal Functions
     // ============================================
+
+    /**
+     * @dev Internal implementation for dropping pending requests.
+     *      Silently skips requests that don't exist or aren't in PENDING status.
+     *      For CREATE/DEPOSIT requests, escrowed funds are moved to claimableRefunds.
+     * @param requestIds Array of request IDs to drop. Invalid/non-pending IDs are skipped.
+     */
+    function _dropRequestsInternal(uint256[] calldata requestIds) internal {
+        // Pre-allocate array for tracking successfully dropped request IDs
+        uint256[] memory droppedIds = new uint256[](requestIds.length);
+        uint256 droppedCount = 0;
+
+        // Process each request ID in the input array
+        for (uint256 i = 0; i < requestIds.length; ) {
+            uint256 requestId = requestIds[i];
+            Request storage request = requests[requestId];
+
+            // Only process valid requests that are still in PENDING status
+            // This check prevents double-processing and handles invalid IDs gracefully
+            if (
+                request.id == requestId &&
+                request.status == RequestStatus.PENDING
+            ) {
+                // Mark request as failed with admin message
+                request.status = RequestStatus.FAILED;
+                request.message = "Dropped";
+
+                // For CREATE/DEPOSIT requests, move funds to claimableRefunds
+                // User must call claimRefund() to withdraw them (pull pattern)
+                // WITHDRAW/CLOSE requests don't escrow funds, so nothing to do
+                if (
+                    (request.requestType == RequestType.CREATE_YIELDVAULT ||
+                        request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT) &&
+                    request.amount > 0
+                ) {
+                    uint256 newBalance =
+                        pendingUserBalances[request.user][request.tokenAddress] -
+                            request.amount;
+                    pendingUserBalances[request.user][request.tokenAddress] = newBalance;
+                    emit BalanceUpdated(
+                        request.user,
+                        request.tokenAddress,
+                        newBalance
+                    );
+                    claimableRefunds[request.user][request.tokenAddress] += request.amount;
+                    emit RefundCredited(
+                        request.user,
+                        request.tokenAddress,
+                        request.amount,
+                        requestId
+                    );
+                }
+
+                // Update user's pending request count
+                if (userPendingRequestCount[request.user] > 0) {
+                    userPendingRequestCount[request.user]--;
+                }
+
+                // Remove from pending queues (both global and user-specific)
+                _removePendingRequest(requestId);
+
+                emit RequestProcessed(
+                    requestId,
+                    request.user,
+                    request.requestType,
+                    RequestStatus.FAILED,
+                    request.yieldVaultId,
+                    "Dropped"
+                );
+
+                // Track this request as successfully dropped
+                droppedIds[droppedCount] = requestId;
+                unchecked {
+                    ++droppedCount;
+                }
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        // Emit batch event only if requests were actually dropped
+        if (droppedCount > 0) {
+            // Create properly-sized array for the event
+            uint256[] memory actualDroppedIds = new uint256[](droppedCount);
+            for (uint256 j = 0; j < droppedCount; ) {
+                actualDroppedIds[j] = droppedIds[j];
+                unchecked {
+                    ++j;
+                }
+            }
+            emit RequestsDropped(actualDroppedIds, msg.sender);
+        }
+    }
+
+    /**
+     * @dev Internal implementation for starting request processing.
+     *      Transitions request to PROCESSING status and handles fund transfers.
+     * @param requestId The unique identifier of the request to start processing.
+     */
+    function _startProcessingInternal(uint256 requestId) internal {
+        Request storage request = requests[requestId];
+
+        // === VALIDATION ===
+        if (request.id != requestId) revert RequestNotFound();
+        if (request.status != RequestStatus.PENDING)
+            revert InvalidRequestState();
+
+        // === TRANSITION TO PROCESSING ===
+        // This prevents cancellation and ensures atomicity with completeProcessing
+        request.status = RequestStatus.PROCESSING;
+
+        // === HANDLE FUND TRANSFER FOR CREATE/DEPOSIT ===
+        // WITHDRAW/CLOSE don't have escrowed funds on EVM side
+        if (
+            request.requestType == RequestType.CREATE_YIELDVAULT ||
+            request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT
+        ) {
+            // Verify sufficient escrowed balance
+            uint256 currentBalance = pendingUserBalances[request.user][
+                request.tokenAddress
+            ];
+            if (currentBalance < request.amount) {
+                revert InsufficientBalance(
+                    request.tokenAddress,
+                    request.amount,
+                    currentBalance
+                );
+            }
+
+            // Deduct from user's escrowed balance
+            pendingUserBalances[request.user][request.tokenAddress] =
+                currentBalance -
+                request.amount;
+            emit BalanceUpdated(
+                request.user,
+                request.tokenAddress,
+                pendingUserBalances[request.user][request.tokenAddress]
+            );
+
+            // Transfer escrowed funds to COA for bridging to Cadence
+            if (isNativeFlow(request.tokenAddress)) {
+                // Native FLOW: send via low-level call
+                (bool success, ) = authorizedCOA.call{value: request.amount}("");
+                if (!success) revert TransferFailed();
+            } else {
+                // ERC20: use SafeERC20 transfer
+                IERC20(request.tokenAddress).safeTransfer(
+                    authorizedCOA,
+                    request.amount
+                );
+            }
+            emit FundsWithdrawn(
+                authorizedCOA,
+                request.tokenAddress,
+                request.amount
+            );
+        }
+
+        // === CLEANUP PENDING STATE ===
+        if (userPendingRequestCount[request.user] > 0) {
+            userPendingRequestCount[request.user]--;
+        }
+        _removePendingRequest(requestId);
+
+        emit RequestProcessed(
+            requestId,
+            request.user,
+            request.requestType,
+            RequestStatus.PROCESSING,
+            request.yieldVaultId,
+            "Processing started"
+        );
+    }
 
     /**
      * @dev Validates deposit parameters and transfers tokens to this contract for escrow.
@@ -1550,6 +1637,13 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         address tokenAddress,
         uint256 requestId
     ) internal {
+        // Uniqueness guard, reject registering an already-valid yieldVaultId
+        if (validYieldVaultIds[yieldVaultId]) {
+            revert YieldVaultIdAlreadyRegistered(yieldVaultId);
+        }
+        // Reject sentinel value to prevent corruption of "no yieldvault" semantics
+        if (yieldVaultId == NO_YIELDVAULT_ID) revert CannotRegisterSentinelYieldVaultId();
+
         // Mark YieldVault as valid and set owner
         validYieldVaultIds[yieldVaultId] = true;
         yieldVaultOwners[yieldVaultId] = user;
@@ -1575,6 +1669,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @param requestId The CLOSE_YIELDVAULT request ID that closed this YieldVault.
      */
     function _unregisterYieldVault(uint64 yieldVaultId, address user, uint256 requestId) internal {
+        // Prove the yieldVaultId is actually registered under the provided user
+        if (yieldVaultOwners[yieldVaultId] != user) {
+            revert InvalidYieldVaultId(yieldVaultId, user);
+        }
+
         uint64[] storage userYieldVaults = yieldVaultsByUser[user];
         uint256 indexToRemove = _yieldVaultIndexInUserArray[user][yieldVaultId];
 
@@ -1617,7 +1716,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @param requestType The type of request (CREATE, DEPOSIT, WITHDRAW, CLOSE).
      * @param tokenAddress The token involved in this request.
      * @param amount The amount of tokens involved (0 for CLOSE requests).
-     * @param yieldVaultId The YieldVault Id (0 for CREATE until assigned by Cadence; NO_YIELDVAULT_ID only on failed CREATE).
+     * @param yieldVaultId The YieldVault Id
      * @param vaultIdentifier Cadence vault type identifier (only for CREATE requests).
      * @param strategyIdentifier Cadence strategy type identifier (only for CREATE requests).
      * @return The newly created request ID.

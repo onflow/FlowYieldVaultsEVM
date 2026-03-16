@@ -2,7 +2,7 @@ name: Claude Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened, ready_for_review]
     # Optional: Only run on specific file changes
     # paths:
     #   - "src/**/*.ts"
@@ -10,8 +10,13 @@ on:
     #   - "src/**/*.js"
     #   - "src/**/*.jsx"
 
+concurrency:
+  group: claude-code-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   claude-review:
+    if: github.event.pull_request.draft == false
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
@@ -21,9 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
+      actions: read
 
     steps:
       - name: Checkout repository
@@ -35,23 +41,64 @@ jobs:
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          additional_permissions: |
+            actions: read
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Please review this pull request and provide feedback on:
-            - Code quality and best practices
-            - Potential bugs or issues
-            - Performance considerations
-            - Security concerns
-            - Test coverage
+            Review this pull request as a senior reviewer. Report only concrete issues worth fixing.
+            Prioritize:
+            - correctness, regressions, and broken edge cases
+            - security and authorization issues
+            - breaking changes
+            - performance issues with material impact
+            - missing or weak tests for changed behavior
 
-            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+            The PR branch is already checked out in the working directory.
 
-            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+            Use the repository's CLAUDE.md for guidance. The "Blockchain Execution Model" and
+            "Common Gotchas" sections are mandatory context for this repository.
+            - Do not report partial-state or on-chain race-condition issues that contradict
+              atomic blockchain transactions or sequential execution.
+            - Check request type synchronization between Solidity and Cadence.
+            - Check refund/accounting invariants, ownership tracking, sentinel values, unit
+              conversions at the bridge boundary, request ID assumptions, and pagination
+              assumptions.
+            - Check SchedulerHandler/WorkerHandler failure handling and whether request lifecycle
+              changes have corresponding tests or a solid justification.
+
+            Use `mcp__github_inline_comment__create_inline_comment` with `confirmed: true` for
+            file-specific findings.
+            Post one top-level summary comment for the overall review.
+            Start the comment body with `<!-- claude-code-review -->`.
+            If no material issues are found, post a brief "no material issues found" summary so
+            the sticky comment still exists.
+            Post the summary with:
+            `gh pr comment ${{ github.event.pull_request.number }} --edit-last --create-if-none --body-file -`
+            Do not use `gh api` to post comments.
+            Only post GitHub comments - do not submit the review as a plain assistant message.
 
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://docs.claude.com/en/docs/claude-code/cli-reference for available options
-          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+          use_sticky_comment: true
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"
 
+      - name: Verify Claude sticky comment exists
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          pr='${{ github.event.pull_request.number }}'
+
+          count="$(gh api "repos/${repo}/issues/${pr}/comments" --paginate --jq \
+            '[.[] | select((.user.login == "claude[bot]" or .user.login == "claude") and (.body | contains("<!-- claude-code-review -->")))] | length')"
+
+          if [ "${count}" -lt 1 ]; then
+            echo "::error::No Claude sticky review comment found (claude or claude[bot] + marker)."
+            exit 1
+          fi

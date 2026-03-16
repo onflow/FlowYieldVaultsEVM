@@ -1,15 +1,20 @@
-import "FlowYieldVaultsTransactionHandler"
+import "FlowYieldVaultsEVMWorkerOps"
 
-/// @title Destroy FlowYieldVaults Transaction Handler
+/// @title Destroy FlowYieldVaultsEVMWorkerOps Scheduler and Worker Handlers
 /// @notice Removes the Handler resource from storage
 transaction() {
     prepare(signer: auth(LoadValue, UnpublishCapability) &Account) {
-        // Unpublish the public capability first
-        signer.capabilities.unpublish(FlowYieldVaultsTransactionHandler.HandlerPublicPath)
 
-        // Load and destroy the handler resource
-        if let handler <- signer.storage.load<@FlowYieldVaultsTransactionHandler.Handler>(
-            from: FlowYieldVaultsTransactionHandler.HandlerStoragePath
+        // Load and destroy the SchedulerHandler resource
+        if let handler <- signer.storage.load<@FlowYieldVaultsEVMWorkerOps.SchedulerHandler>(
+            from: FlowYieldVaultsEVMWorkerOps.SchedulerHandlerStoragePath
+        ) {
+            destroy handler
+        }
+
+        // Load and destroy the WorkerHandler resource
+        if let handler <- signer.storage.load<@FlowYieldVaultsEVMWorkerOps.WorkerHandler>(
+            from: FlowYieldVaultsEVMWorkerOps.WorkerHandlerStoragePath
         ) {
             destroy handler
         }

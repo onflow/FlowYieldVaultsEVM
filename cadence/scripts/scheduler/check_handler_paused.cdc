@@ -1,9 +1,9 @@
-import "FlowYieldVaultsTransactionHandler"
+import "FlowYieldVaultsEVMWorkerOps"
 
-/// @title Check Handler Paused
-/// @notice Returns whether the transaction handler is currently paused
+/// @title Check Scheduler Handler Paused
+/// @notice Returns whether the scheduler handler is currently paused
 /// @return True if paused, false otherwise
 ///
 access(all) fun main(): Bool {
-    return FlowYieldVaultsTransactionHandler.isPaused
+    return FlowYieldVaultsEVMWorkerOps.getIsSchedulerPaused()
 }

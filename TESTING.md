@@ -31,7 +31,7 @@ solidity/test/
 **Test Categories**:
 - User request lifecycle - 7 tests
 - Claim refunds - 4 tests
-- COA processing (startProcessing/completeProcessing) - 7 tests
+- COA processing (startProcessingBatch/completeProcessing) - 7 tests
 - Admin functions - 6 tests
 - Ownership transfer - 4 tests
 - Access control (allowlist/blocklist) - 3 tests
@@ -68,6 +68,7 @@ local/
 ├── deploy_full_stack.sh        # Funds local EOAs, deploys EVM contract, configures Cadence Worker
 ├── run_e2e_tests.sh            # End-to-end user flows (create/deposit/withdraw/close/cancel)
 ├── run_admin_e2e_tests.sh      # End-to-end admin flows (allowlist/blocklist/token config/max requests)
+├── run_worker_tests.sh         # Scheduled worker tests
 ├── run_cadence_tests.sh         # Wrapper for flow test (cleans db/imports)
 ├── run_solidity_tests.sh        # Wrapper for forge test
 ├── testnet-e2e.sh              # Testnet CLI for state checks + user/admin actions
@@ -116,6 +117,15 @@ for test in cadence/tests/*_test.cdc; do
 done
 ```
 
+### Scheduled Worker E2E (Emulator)
+
+```bash
+# Full local sequence
+./local/setup_and_run_emulator.sh
+./local/deploy_full_stack.sh
+./local/run_worker_tests.sh
+```
+
 ### Local E2E (Emulator)
 
 ```bash
@@ -149,7 +159,7 @@ Set `CONTRACT`/`CADENCE_CONTRACT` or update `deployments/contract-addresses.json
 |----------|-------|-----------|
 | User request lifecycle | 7 | CREATE/DEPOSIT/WITHDRAW/CLOSE, cancel |
 | Claim refunds | 4 | claimRefund flow, balances, events |
-| COA processing | 7 | startProcessing/completeProcessing authorization and state |
+| COA processing | 7 | startProcessingBatch/completeProcessing authorization and state |
 | Admin functions | 6 | COA, token config, max requests, dropRequests |
 | Ownership transfer | 4 | Two-step ownership, admin rights |
 | Access control | 3 | Allowlist/blocklist enforcement |
@@ -168,7 +178,7 @@ Set `CONTRACT`/`CADENCE_CONTRACT` or update `deployments/contract-addresses.json
 **Key Validations**:
 - Request IDs increment, pending balances track escrow, refunds are claimable
 - Only authorized COA can start/complete processing
-- Two-phase commit (startProcessing → completeProcessing) maintains consistency
+- Two-phase commit (startProcessingBatch → completeProcessing) maintains consistency
 - Allowlist/blocklist and admin controls enforce access
 - FIFO order and per-user indexes remain consistent after removals
 
@@ -252,7 +262,7 @@ access_control_test.cdc: 7 tests PASS
 - testRequestsAddressCanBeUpdated
 - testWorkerCreationRequiresCOA
 - testWorkerCreationRequiresBetaBadge
-- testYieldVaultsByEVMAddressMapping
+- testYieldVaultRegistryMapping
 
 error_handling_test.cdc: 4 tests PASS
 - testInvalidRequestType
