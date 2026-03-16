@@ -1,6 +1,6 @@
 [submodule "lib/FlowYieldVaults"]
 	path = lib/FlowYieldVaults
-	url = https://github.com/onflow/FlowYieldVaults.git
+	url = https://github.com/onflow/FlowYieldVaults
 [submodule "solidity/lib/forge-std"]
 	path = solidity/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std

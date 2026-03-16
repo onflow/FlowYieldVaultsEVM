@@ -50,7 +50,7 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
 
     /// @dev Default strategy identifier (emulator)
     string constant DEFAULT_STRATEGY_IDENTIFIER =
-        "A.045a1763c93006ca.FlowYieldVaultsStrategies.TracerStrategy";
+        "A.045a1763c93006ca.MockStrategies.TracerStrategy";
 
     /// @notice Creates a new YieldVault by depositing native $FLOW
     /// @param contractAddress The FlowYieldVaultsRequests contract address

@@ -84,25 +84,24 @@
 #
 # Expected behavior:
 #   1. Request created with status PENDING (EVM contract doesn't validate identifiers)
-#   2. TransactionHandler picks up request
-#   3. startProcessing() called - funds moved from Contract to COA
-#   4. Worker attempts to parse identifiers on Cadence side
+#   2. SchedulerHandler picks up request
+#   4. Preprocessing: preprocessRequests() attempts to parse identifiers on Cadence side
 #   5. Validation fails: "Invalid vaultIdentifier/strategyIdentifier: X is not a valid Cadence type"
-#   6. completeProcessing(FAILED) called - credits claimableRefunds
+#   6. PENDING -> FAILED
 #   7. No YieldVault created, yieldVaultId set to NO_YIELDVAULT_ID (max uint64)
 #
 # Balance changes:
 #   - User wallet:      -amount (+ gas fees) - funds left wallet
-#   - Pending balance:  0 (escrow was deducted at startProcessing)
+#   - Pending balance:  0 (escrow was deducted at startProcessingBatch)
 #   - Contract balance: +amount (funds returned by COA during completeProcessing)
 #   - COA balance:      unchanged (funds returned to contract)
 #   - YieldVault:       none created
 #
 # REFUND MECHANISM:
 # -----------------
-# When a CREATE/DEPOSIT request fails after startProcessing():
-#   1. startProcessing() transfers funds: Contract -> COA
-#   2. Cadence worker detects validation failure
+# When a CREATE/DEPOSIT request fails/panics after PROCESSING state:
+#   1. PROCESSING state transfers funds: Contract -> COA
+#   2. SchedulerHandler detects validation failure in case of panic
 #   3. completeProcessing(FAILED) is called with refund:
 #      - Native FLOW: COA sends funds back via msg.value
 #      - ERC20 (WFLOW): COA approves contract, then contract pulls via transferFrom
@@ -145,15 +144,19 @@ RPC_URL="${TESTNET_RPC_URL:-https://testnet.evm.nodes.onflow.org}"
 CONTRACT="${CONTRACT:-}"
 CADENCE_CONTRACT="${CADENCE_CONTRACT:-}"
 WFLOW="0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e"
+PYUSD0="0xd7d43ab7b365f0d0789aE83F4385fA710FfdC98F"
 NATIVE_FLOW="0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF"
 DEFAULT_CONTRACT="0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d"
-DEFAULT_CADENCE_CONTRACT="0xdf111ffc5064198a"
+DEFAULT_CADENCE_CONTRACT="0x764bdff06a0ee77e"
 REFUND_CHECK_MAX_ATTEMPTS="${REFUND_CHECK_MAX_ATTEMPTS:-60}"
 REFUND_CHECK_DELAY_SECONDS="${REFUND_CHECK_DELAY_SECONDS:-5}"
 
 # Default correct parameters
 DEFAULT_VAULT="A.7e60df042a9c0868.FlowToken.Vault"
 DEFAULT_STRATEGY="A.d2580caf2ef07c2f.FlowYieldVaultsStrategies.mUSDCStrategy"
+DEFAULT_PYUSD0_VAULT="A.dfc20aee650fcbdf.EVMVMBridgedToken_d7d43ab7b365f0d0789ae83f4385fa710ffdc98f.Vault"
+DEFAULT_PYUSD0_STRATEGY="A.d2580caf2ef07c2f.PMStrategiesV1.FUSDEVStrategy"
+PYUSD0_DECIMALS=6
 
 # Get user address from private key
 if [ -n "$PRIVATE_KEY" ]; then
@@ -323,6 +326,37 @@ ether_to_wei() {
     echo "scale=0; $ether * 1000000000000000000 / 1" | bc
 }
 
+# Convert a decimal string to integer token units for the requested decimals.
+decimal_to_units() {
+    local amount=$1
+    local decimals=$2
+
+    if ! [[ "$amount" =~ ^([0-9]+)(\.([0-9]+))?$ ]]; then
+        print_error "Invalid amount: $amount"
+        exit 1
+    fi
+
+    local whole="${BASH_REMATCH[1]}"
+    local frac="${BASH_REMATCH[3]:-}"
+
+    if [ "${#frac}" -gt "$decimals" ]; then
+        print_error "Amount $amount has more than $decimals decimal places"
+        exit 1
+    fi
+
+    while [ "${#frac}" -lt "$decimals" ]; do
+        frac="${frac}0"
+    done
+
+    local units="${whole}${frac}"
+    units=$(echo "$units" | sed 's/^0*//')
+    if [ -z "$units" ]; then
+        units=0
+    fi
+
+    echo "$units"
+}
+
 # Validate that input is a valid number (integer or decimal)
 validate_amount() {
     local amount=$1
@@ -409,61 +443,204 @@ check_full_state() {
 
 create_yieldvault_flow() {
     local amount=$1
+    shift
+
+    # Parse remaining arguments, looking for multiplier (x100) pattern
+    local vault="$DEFAULT_VAULT"
+    local strategy="$DEFAULT_STRATEGY"
+    local count=1
+
+    for arg in "$@"; do
+        if [[ "$arg" =~ ^x([0-9]+)$ ]]; then
+            count="${BASH_REMATCH[1]}"
+        elif [ "$vault" = "$DEFAULT_VAULT" ] && [ -n "$arg" ]; then
+            vault="$arg"
+        elif [ "$strategy" = "$DEFAULT_STRATEGY" ] && [ -n "$arg" ]; then
+            strategy="$arg"
+        fi
+    done
+
     validate_amount "$amount"
-    local vault="${2:-$DEFAULT_VAULT}"
-    local strategy="${3:-$DEFAULT_STRATEGY}"
     local amount_wei=$(ether_to_wei "$amount")
 
-    print_header "Creating YieldVault with $amount Native FLOW"
+    if [ "$count" -gt 1 ]; then
+        print_header "Creating $count YieldVaults with $amount Native FLOW each"
+    else
+        print_header "Creating YieldVault with $amount Native FLOW"
+    fi
     echo "Vault:    $vault"
     echo "Strategy: $strategy"
     echo ""
 
-    cast send "$CONTRACT" "createYieldVault(address,uint256,string,string)" \
-        "$NATIVE_FLOW" \
-        "$amount_wei" \
-        "$vault" \
-        "$strategy" \
-        --value "$amount_wei" \
-        --private-key "$PRIVATE_KEY" \
-        --rpc-url "$RPC_URL"
+    for ((i = 1; i <= count; i++)); do
+        if [ "$count" -gt 1 ]; then
+            echo -e "${YELLOW}[$i/$count]${NC} Sending transaction..."
+        fi
 
-    print_success "Transaction sent"
+        cast send "$CONTRACT" "createYieldVault(address,uint256,string,string)" \
+            "$NATIVE_FLOW" \
+            "$amount_wei" \
+            "$vault" \
+            "$strategy" \
+            --value "$amount_wei" \
+            --private-key "$PRIVATE_KEY" \
+            --rpc-url "$RPC_URL" \
+            --gas-limit 1000000
+
+        if [ "$count" -gt 1 ]; then
+            print_success "Transaction $i/$count sent"
+        else
+            print_success "Transaction sent"
+        fi
+    done
+
+    if [ "$count" -gt 1 ]; then
+        echo ""
+        print_success "All $count transactions sent"
+    fi
 }
 
 create_yieldvault_wflow() {
     local amount=$1
+    shift
+
+    # Parse remaining arguments, looking for multiplier (x100) pattern
+    local vault="$DEFAULT_VAULT"
+    local strategy="$DEFAULT_STRATEGY"
+    local count=1
+
+    for arg in "$@"; do
+        if [[ "$arg" =~ ^x([0-9]+)$ ]]; then
+            count="${BASH_REMATCH[1]}"
+        elif [ "$vault" = "$DEFAULT_VAULT" ] && [ -n "$arg" ]; then
+            vault="$arg"
+        elif [ "$strategy" = "$DEFAULT_STRATEGY" ] && [ -n "$arg" ]; then
+            strategy="$arg"
+        fi
+    done
+
     validate_amount "$amount"
-    local vault="${2:-$DEFAULT_VAULT}"
-    local strategy="${3:-$DEFAULT_STRATEGY}"
     local amount_wei=$(ether_to_wei "$amount")
 
-    print_header "Creating YieldVault with $amount WFLOW"
+    # Calculate total amount needed for approval
+    local total_wei=$(echo "$amount_wei * $count" | bc)
+
+    if [ "$count" -gt 1 ]; then
+        print_header "Creating $count YieldVaults with $amount WFLOW each"
+    else
+        print_header "Creating YieldVault with $amount WFLOW"
+    fi
     echo "Vault:    $vault"
     echo "Strategy: $strategy"
     echo ""
 
-    # First approve WFLOW
-    echo "Approving WFLOW..."
+    # Approve total WFLOW upfront
+    echo "Approving WFLOW (total: $(wei_to_ether $total_wei) WFLOW)..."
     cast send "$WFLOW" "approve(address,uint256)" \
         "$CONTRACT" \
-        "$amount_wei" \
+        "$total_wei" \
         --private-key "$PRIVATE_KEY" \
         --rpc-url "$RPC_URL" > /dev/null
 
     print_success "WFLOW approved"
 
-    # Then create YieldVault
-    echo "Creating YieldVault..."
-    cast send "$CONTRACT" "createYieldVault(address,uint256,string,string)" \
-        "$WFLOW" \
-        "$amount_wei" \
-        "$vault" \
-        "$strategy" \
-        --private-key "$PRIVATE_KEY" \
-        --rpc-url "$RPC_URL"
+    for ((i = 1; i <= count; i++)); do
+        if [ "$count" -gt 1 ]; then
+            echo -e "${YELLOW}[$i/$count]${NC} Creating YieldVault..."
+        else
+            echo "Creating YieldVault..."
+        fi
 
-    print_success "Transaction sent"
+        cast send "$CONTRACT" "createYieldVault(address,uint256,string,string)" \
+            "$WFLOW" \
+            "$amount_wei" \
+            "$vault" \
+            "$strategy" \
+            --private-key "$PRIVATE_KEY" \
+            --rpc-url "$RPC_URL"
+
+        if [ "$count" -gt 1 ]; then
+            print_success "Transaction $i/$count sent"
+        else
+            print_success "Transaction sent"
+        fi
+    done
+
+    if [ "$count" -gt 1 ]; then
+        echo ""
+        print_success "All $count transactions sent"
+    fi
+}
+
+create_yieldvault_pyusd0() {
+    local amount=$1
+    shift
+
+    local vault="$DEFAULT_PYUSD0_VAULT"
+    local strategy="$DEFAULT_PYUSD0_STRATEGY"
+    local count=1
+
+    for arg in "$@"; do
+        if [[ "$arg" =~ ^x([0-9]+)$ ]]; then
+            count="${BASH_REMATCH[1]}"
+        elif [ "$vault" = "$DEFAULT_PYUSD0_VAULT" ] && [ -n "$arg" ]; then
+            vault="$arg"
+        elif [ "$strategy" = "$DEFAULT_PYUSD0_STRATEGY" ] && [ -n "$arg" ]; then
+            strategy="$arg"
+        fi
+    done
+
+    validate_amount "$amount"
+    local amount_units
+    amount_units=$(decimal_to_units "$amount" "$PYUSD0_DECIMALS")
+    local total_units=$(echo "$amount_units * $count" | bc)
+
+    if [ "$count" -gt 1 ]; then
+        print_header "Creating $count YieldVaults with $amount PYUSD0 each"
+    else
+        print_header "Creating YieldVault with $amount PYUSD0"
+    fi
+    echo "Token:    $PYUSD0"
+    echo "Vault:    $vault"
+    echo "Strategy: $strategy"
+    echo ""
+
+    echo "Approving PYUSD0 (total units: $total_units)..."
+    cast send "$PYUSD0" "approve(address,uint256)" \
+        "$CONTRACT" \
+        "$total_units" \
+        --private-key "$PRIVATE_KEY" \
+        --rpc-url "$RPC_URL" > /dev/null
+
+    print_success "PYUSD0 approved"
+
+    for ((i = 1; i <= count; i++)); do
+        if [ "$count" -gt 1 ]; then
+            echo -e "${YELLOW}[$i/$count]${NC} Creating YieldVault..."
+        else
+            echo "Creating YieldVault..."
+        fi
+
+        cast send "$CONTRACT" "createYieldVault(address,uint256,string,string)" \
+            "$PYUSD0" \
+            "$amount_units" \
+            "$vault" \
+            "$strategy" \
+            --private-key "$PRIVATE_KEY" \
+            --rpc-url "$RPC_URL" \
+            --gas-limit 1000000
+
+        if [ "$count" -gt 1 ]; then
+            print_success "Transaction $i/$count sent"
+        else
+            print_success "Transaction sent"
+        fi
+    done
+
+    if [ "$count" -gt 1 ]; then
+        echo ""
+        print_success "All $count transactions sent"
+    fi
 }
 
 claim_refund() {
@@ -806,6 +983,14 @@ admin_cancel_request() {
     print_success "Request $request_id cancelled"
 }
 
+admin_run_scheduler() {
+    print_header "Running Scheduler Manually"
+
+    cd "$PROJECT_DIR"
+    flow transactions send cadence/transactions/scheduler/run_scheduler_manual.cdc --network testnet --signer testnet-account
+    print_success "Scheduler run submitted"
+}
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -821,10 +1006,15 @@ show_help() {
     echo "  cadence-state                      Check Cadence state only"
     echo ""
     echo "USER COMMANDS:"
-    echo "  create-flow <amount> [vault] [strategy]"
+    echo "  create-flow <amount> [vault] [strategy] [xN]"
     echo "                                     Create YieldVault with Native FLOW"
-    echo "  create-wflow <amount> [vault] [strategy]"
+    echo "                                     Use xN to create N requests (e.g., x100)"
+    echo "  create-wflow <amount> [vault] [strategy] [xN]"
     echo "                                     Create YieldVault with WFLOW"
+    echo "                                     Use xN to create N requests (e.g., x100)"
+    echo "  create-pyusd0 <amount> [vault] [strategy] [xN]"
+    echo "                                     Create YieldVault with PYUSD0 (6 decimals)"
+    echo "                                     Uses PMStrategiesV1.FUSDEVStrategy by default"
     echo "  refund-check <amount> [vault] [strategy]"
     echo "                                     Force failure, then claim refund (defaults: InvalidVault/InvalidStrategy)"
     echo "  claim-refund [token]"
@@ -854,19 +1044,24 @@ show_help() {
     echo "  set-max-requests <count>           Set max pending requests per user"
     echo "  drop-requests <count>              Drop N oldest pending requests"
     echo "  cancel-request <id>                Cancel a specific request"
+    echo "  run-scheduler                      Run the worker scheduler once"
     echo ""
     echo "DEFAULT PARAMETERS:"
     echo "  Vault:       $DEFAULT_VAULT"
     echo "  Strategy:    $DEFAULT_STRATEGY"
     echo "  NATIVE_FLOW: $NATIVE_FLOW"
     echo "  WFLOW:       $WFLOW"
+    echo "  PYUSD0:      $PYUSD0"
     echo "  CONTRACT:    $CONTRACT"
     echo "  CADENCE:     $CADENCE_CONTRACT"
     echo ""
     echo "EXAMPLES:"
     echo "  $0 state"
     echo "  $0 create-flow 1.2"
+    echo "  $0 create-flow 1.2 x100                    # Create 100 requests"
     echo "  $0 create-flow 1.5 InvalidVault InvalidStrategy"
+    echo "  $0 create-wflow 1.0 x50                    # Create 50 WFLOW requests"
+    echo "  $0 create-pyusd0 1.0                       # Create 1 PYUSD0-backed request"
     echo "  $0 refund-check 0.1"
     echo "  $0 request 10"
     echo ""
@@ -881,6 +1076,7 @@ show_help() {
     echo "  $0 add-allowlist 0x1234... 0x5678..."
     echo "  $0 set-max-requests 10"
     echo "  $0 cancel-request 15"
+    echo "  $0 run-scheduler"
 }
 
 case "$1" in
@@ -901,14 +1097,21 @@ case "$1" in
             print_error "Amount required"
             exit 1
         fi
-        create_yieldvault_flow "$2" "$3" "$4"
+        create_yieldvault_flow "$2" "$3" "$4" "$5"
         ;;
     create-wflow)
         if [ -z "$2" ]; then
             print_error "Amount required"
             exit 1
         fi
-        create_yieldvault_wflow "$2" "$3" "$4"
+        create_yieldvault_wflow "$2" "$3" "$4" "$5"
+        ;;
+    create-pyusd0)
+        if [ -z "$2" ]; then
+            print_error "Amount required"
+            exit 1
+        fi
+        create_yieldvault_pyusd0 "$2" "$3" "$4" "$5"
         ;;
     refund-check)
         refund_check "$2" "$3" "$4"
@@ -1043,6 +1246,9 @@ case "$1" in
             exit 1
         fi
         admin_cancel_request "$2"
+        ;;
+    run-scheduler)
+        admin_run_scheduler
         ;;
 
     help|--help|-h)

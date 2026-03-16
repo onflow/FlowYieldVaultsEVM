@@ -1,16 +1,15 @@
-import "FlowYieldVaultsTransactionHandler"
+import "FlowYieldVaultsEVMWorkerOps"
 
-/// @title Unpause Transaction Handler
-/// @notice Unpauses the automated transaction handler
-/// @dev After unpausing, manually schedule a new execution using
-///      init_and_schedule.cdc to restart the chain.
+/// @title Unpause Scheduler Handler
+/// @notice Unpauses the scheduler handler
+/// @dev After unpausing, new requests will be scheduled.
 ///
 transaction() {
     prepare(signer: auth(BorrowValue) &Account) {
-        let admin = signer.storage.borrow<&FlowYieldVaultsTransactionHandler.Admin>(
-            from: FlowYieldVaultsTransactionHandler.AdminStoragePath
+        let admin = signer.storage.borrow<&FlowYieldVaultsEVMWorkerOps.Admin>(
+            from: FlowYieldVaultsEVMWorkerOps.AdminStoragePath
         ) ?? panic("Could not borrow Admin resource")
 
-        admin.unpause()
+        admin.unpauseScheduler()
     }
 }

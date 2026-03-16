@@ -244,7 +244,7 @@ const userRequests = ids.filter(
 | Scenario                  | What Happens                                  | User Action                      |
 | ------------------------- | --------------------------------------------- | -------------------------------- |
 | Request cancelled by user | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
-| Request dropped by admin  | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
+| Request dropped  | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
 | Cadence processing fails  | CREATE/DEPOSIT funds → `claimableRefunds`     | Call `claimRefund(tokenAddress)` |
 
 **Important:** `claimRefund()` only withdraws actual refunds. It does NOT touch funds escrowed for active pending requests. WITHDRAW/CLOSE requests never escrow funds and never generate refunds.
@@ -322,7 +322,7 @@ contract.on("RefundClaimed", (user, tokenAddress, amount) => {
 
 ```typescript
 // BalanceUpdated fires when escrowed balance (pendingUserBalances) changes
-// This happens on: request creation, startProcessing, cancelRequest, dropRequests
+// This happens on: request creation, startProcessingBatch, cancelRequest, dropRequests
 contract.on("BalanceUpdated", (user, tokenAddress, newBalance) => {
   if (user.toLowerCase() === currentUser.toLowerCase()) {
     // Update UI with new escrowed balance for active pending requests
@@ -357,7 +357,7 @@ fcl.config({
 });
 
 // Contract addresses (testnet)
-const FLOW_YIELD_VAULTS_EVM_ADDRESS = "0xdf111ffc5064198a"; // FlowYieldVaultsEVM
+const FLOW_YIELD_VAULTS_EVM_ADDRESS = "0x764bdff06a0ee77e"; // FlowYieldVaultsEVM
 const FLOW_YIELD_VAULTS_ADDRESS = "0xd2580caf2ef07c2f"; // FlowYieldVaults
 ```
 
@@ -365,7 +365,7 @@ const FLOW_YIELD_VAULTS_ADDRESS = "0xd2580caf2ef07c2f"; // FlowYieldVaults
 
 ```typescript
 const GET_USER_YIELDVAULTS = `
-import FlowYieldVaultsEVM from 0xdf111ffc5064198a
+import FlowYieldVaultsEVM from 0x764bdff06a0ee77e
 
 access(all) fun main(evmAddress: String): [UInt64] {
     var normalizedAddress = evmAddress.toLower()
@@ -505,12 +505,12 @@ const strategies = await fcl.query({ cadence: GET_SUPPORTED_STRATEGIES });
 
 ```typescript
 const CHECK_SYSTEM_STATUS = `
-import FlowYieldVaultsEVM from 0xdf111ffc5064198a
+import FlowYieldVaultsEVM from 0x764bdff06a0ee77e
 
 access(all) fun main(): {String: AnyStruct} {
     return {
         "flowYieldVaultsRequestsAddress": FlowYieldVaultsEVM.getFlowYieldVaultsRequestsAddress()?.toString() ?? "not set",
-        "totalEVMUsers": FlowYieldVaultsEVM.yieldVaultsByEVMAddress.keys.length
+        "totalEVMUsers": FlowYieldVaultsEVM.yieldVaultRegistry.keys.length
     }
 }
 `;
@@ -614,9 +614,9 @@ if (wallet.type === "evm") {
 // Sentinel address for native FLOW token
 const NATIVE_FLOW = "0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF";
 
-// Sentinel value for "no YieldVault" (Cadence may return this on failed CREATE)
+// Sentinel value for "no YieldVault" (also used as placeholder for CREATE until processed)
 const NO_YIELDVAULT_ID = 18446744073709551615n; // type(uint64).max
-// CREATE requests start with yieldVaultId = 0 until processed
+// CREATE requests start with yieldVaultId = NO_YIELDVAULT_ID until processed
 
 // Request Types
 enum RequestType {

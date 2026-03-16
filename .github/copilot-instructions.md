@@ -47,7 +47,7 @@ flow test cadence/tests/<file>.cdc  # Single test (after deps installed)
 Both contracts maintain parallel ownership mappings for O(1) lookups:
 
 - Solidity: `userOwnsYieldVault[address][yieldVaultId]`
-- Cadence: `yieldVaultOwnershipLookup[evmAddrString][yieldVaultId]`
+- Cadence: `yieldVaultRegistry[evmAddrString][yieldVaultId]`
 
 ### COA Bridge Pattern
 
