@@ -200,3 +200,34 @@ fun testRequestStatusFailedStructure() {
     Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue, failedRequest.status)
     Test.assertEqual("Insufficient balance", failedRequest.message)
 }
+
+access(all)
+fun testMarkRequestAsFailedRejectsFalseApproveRefunds() {
+    let requestsResult = updateRequestsAddress(admin, mockRequestsAddr.toString())
+    Test.expect(requestsResult, Test.beSucceeded())
+
+    let requestFailedCountBefore = Test.eventsOfType(Type<FlowYieldVaultsEVM.RequestFailed>()).length
+    let falseApproveTokenAddress = deployFalseApproveToken(admin)
+
+    let markFailedResult = _executeTransaction(
+        "transactions/mark_request_as_failed_false_approve.cdc",
+        [falseApproveTokenAddress],
+        admin
+    )
+    Test.expect(markFailedResult, Test.beSucceeded())
+
+    let requestFailedEvents = Test.eventsOfType(Type<FlowYieldVaultsEVM.RequestFailed>())
+    Test.assert(
+        requestFailedEvents.length > requestFailedCountBefore,
+        message: "Expected RequestFailed events for the approve(false) refund path"
+    )
+
+    let lastEvent = requestFailedEvents[requestFailedEvents.length - 1] as! FlowYieldVaultsEVM.RequestFailed
+    let expectedTokenAddress = EVM.addressFromString(falseApproveTokenAddress).toString()
+    Test.assertEqual(4242 as UInt256, lastEvent.requestId)
+    Test.assertEqual(expectedTokenAddress, lastEvent.tokenAddress)
+    Test.assertEqual(
+        "ERC20 approve for refund returned false or invalid bool data",
+        lastEvent.reason
+    )
+}

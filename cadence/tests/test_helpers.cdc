@@ -14,6 +14,7 @@ access(all) let admin = Test.getAccount(0x0000000000000007) // testing alias
 
 access(all) let mockRequestsAddr = EVM.addressFromString("0x0000000000000000000000000000000000000002")
 access(all) let nativeFlowAddr = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF")
+access(all) let falseApproveTokenBytecode = "60808060405234601457608690816100198239f35b5f80fdfe60808060405260043610156011575f80fd5b5f90813560e01c63095ea7b3146025575f80fd5b34604c576040366003190112604c576004356001600160a01b03811603604c576020918152f35b5080fdfea2646970667358221220c7ff278b8e5279cc5adf7df58cc234302dfea0dbc7ef9d6bbe613015e424a98064736f6c63430008140033"
 
 /* --- Mock Vault and Strategy Identifiers --- */
 
@@ -261,6 +262,31 @@ fun setupCOA(_ signer: Test.TestAccount): Test.TransactionResult {
         [],
         signer
     )
+}
+
+access(all)
+fun deployEVMContract(_ signer: Test.TestAccount, _ bytecode: String, _ gasLimit: UInt64): String {
+    let deployResult = _executeTransaction(
+        "../transactions/deploy_evm_contract.cdc",
+        [bytecode, gasLimit],
+        signer
+    )
+    Test.expect(deployResult, Test.beSucceeded())
+
+    let txnEvents = Test.eventsOfType(Type<EVM.TransactionExecuted>())
+    Test.assert(txnEvents.length > 0, message: "Expected an EVM.TransactionExecuted event after deployment")
+
+    let evt = txnEvents[txnEvents.length - 1] as? EVM.TransactionExecuted
+        ?? panic("Latest event is not EVM.TransactionExecuted")
+    let contractAddress = evt.contractAddress
+    Test.assert(contractAddress.length > 0, message: "Deployed contract address should not be empty")
+
+    return contractAddress
+}
+
+access(all)
+fun deployFalseApproveToken(_ signer: Test.TestAccount): String {
+    return deployEVMContract(signer, falseApproveTokenBytecode, UInt64(15_000_000))
 }
 
 /* --- FlowYieldVaultsEVM specific script helpers --- */
