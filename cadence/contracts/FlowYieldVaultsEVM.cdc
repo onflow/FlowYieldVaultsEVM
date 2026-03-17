@@ -1705,14 +1705,26 @@ access(all) contract FlowYieldVaultsEVM {
         let pendingBalancesRaw = decoded[11] as! [UInt256]
         let claimableRefundsRaw = decoded[12] as! [UInt256]
 
+        assert(
+            balanceTokens.length == pendingBalancesRaw.length
+                && balanceTokens.length == claimableRefundsRaw.length,
+            message: "Balance array length mismatch in ABI decode"
+        )
+
         // Build per-token balance dictionaries
         var pendingBalances: {String: UFix64} = {}
         var claimableRefundsMap: {String: UFix64} = {}
         var j = 0
         while j < balanceTokens.length {
             let tokenAddr = balanceTokens[j].toString()
-            pendingBalances[tokenAddr] = FlowEVMBridgeUtils.uint256ToUFix64(value: pendingBalancesRaw[j], decimals: 18)
-            claimableRefundsMap[tokenAddr] = FlowEVMBridgeUtils.uint256ToUFix64(value: claimableRefundsRaw[j], decimals: 18)
+            pendingBalances[tokenAddr] = FlowYieldVaultsEVM.ufix64FromUInt256(
+                pendingBalancesRaw[j],
+                tokenAddress: balanceTokens[j]
+            )
+            claimableRefundsMap[tokenAddr] = FlowYieldVaultsEVM.ufix64FromUInt256(
+                claimableRefundsRaw[j],
+                tokenAddress: balanceTokens[j]
+            )
             j = j + 1
         }
 

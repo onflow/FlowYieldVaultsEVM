@@ -1274,7 +1274,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return messages Messages
     /// @return vaultIdentifiers Vault identifiers
     /// @return strategyIdentifiers Strategy identifiers
-    /// @return balanceTokens Token addresses for balance arrays (NATIVE_FLOW, WFLOW)
+    /// @return balanceTokens Token addresses for balance arrays (NATIVE_FLOW and, when configured, WFLOW)
     /// @return pendingBalances Escrowed balances for active pending requests per token
     /// @return claimableRefundsArray Claimable refund amounts per token
     function getPendingRequestsByUserUnpacked(
@@ -1332,8 +1332,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        // Get balances for all supported tokens (NATIVE_FLOW and WFLOW)
-        // WFLOW address could be 0 if not configured, but we include it for completeness
+        // Get balances for NATIVE_FLOW and, when configured, WFLOW
         uint256 tokenCount = WFLOW != address(0) ? 2 : 1;
         balanceTokens = new address[](tokenCount);
         pendingBalances = new uint256[](tokenCount);
