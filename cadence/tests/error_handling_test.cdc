@@ -203,12 +203,19 @@ fun testRequestStatusFailedStructure() {
 
 access(all)
 fun testMarkRequestAsFailedRejectsFalseApproveRefunds() {
+    // completeProcessing only needs the configured requests contract address as the
+    // spender for approve(address,uint256). The call should fail before any request
+    // contract interaction, so a dummy address is enough for this regression path.
     let requestsResult = updateRequestsAddress(admin, mockRequestsAddr.toString())
     Test.expect(requestsResult, Test.beSucceeded())
 
     let requestFailedCountBefore = Test.eventsOfType(Type<FlowYieldVaultsEVM.RequestFailed>()).length
+    // Deploy a minimal ERC20-shaped contract that returns false from approve(...)
+    // without reverting, matching the bug class fixed by this PR.
     let falseApproveTokenAddress = deployFalseApproveToken(admin)
 
+    // The transaction itself asserts that markRequestAsFailed(...) returns false after
+    // the refund approval check, rather than silently succeeding.
     let markFailedResult = _executeTransaction(
         "transactions/mark_request_as_failed_false_approve.cdc",
         [falseApproveTokenAddress],
@@ -222,6 +229,8 @@ fun testMarkRequestAsFailedRejectsFalseApproveRefunds() {
         message: "Expected RequestFailed events for the approve(false) refund path"
     )
 
+    // markRequestAsFailed emits one RequestFailed immediately. The last event should
+    // be the follow-up failure emitted by completeProcessing after approve(false).
     let lastEvent = requestFailedEvents[requestFailedEvents.length - 1] as! FlowYieldVaultsEVM.RequestFailed
     let expectedTokenAddress = EVM.addressFromString(falseApproveTokenAddress).toString()
     Test.assertEqual(4242 as UInt256, lastEvent.requestId)

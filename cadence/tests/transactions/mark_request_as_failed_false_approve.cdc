@@ -7,6 +7,8 @@ transaction(tokenAddress: String) {
             from: FlowYieldVaultsEVM.WorkerStoragePath
         ) ?? panic("Could not borrow FlowYieldVaultsEVM worker")
 
+        // Any failed CREATE or DEPOSIT request with a non-native token and a positive
+        // amount enters the refund approval path inside completeProcessing(...).
         let request = FlowYieldVaultsEVM.EVMRequest(
             id: 4242,
             user: EVM.addressFromString("0x0000000000000000000000000000000000000099"),
@@ -21,6 +23,8 @@ transaction(tokenAddress: String) {
             strategyIdentifier: ""
         )
 
+        // The regression is fixed only if this returns false after approve(false)
+        // instead of letting the request look successfully completed.
         let result = worker.markRequestAsFailed(
             request,
             message: "Synthetic failure before refund approval"

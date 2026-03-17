@@ -14,6 +14,8 @@ access(all) let admin = Test.getAccount(0x0000000000000007) // testing alias
 
 access(all) let mockRequestsAddr = EVM.addressFromString("0x0000000000000000000000000000000000000002")
 access(all) let nativeFlowAddr = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF")
+// Creation bytecode for solidity/src/test/FalseApproveToken.sol. It is embedded so
+// the Cadence test suite can deploy the mock without depending on a Forge build step.
 access(all) let falseApproveTokenBytecode = "60808060405234601457608690816100198239f35b5f80fdfe60808060405260043610156011575f80fd5b5f90813560e01c63095ea7b3146025575f80fd5b34604c576040366003190112604c576004356001600160a01b03811603604c576020918152f35b5080fdfea2646970667358221220c7ff278b8e5279cc5adf7df58cc234302dfea0dbc7ef9d6bbe613015e424a98064736f6c63430008140033"
 
 /* --- Mock Vault and Strategy Identifiers --- */
@@ -273,6 +275,8 @@ fun deployEVMContract(_ signer: Test.TestAccount, _ bytecode: String, _ gasLimit
     )
     Test.expect(deployResult, Test.beSucceeded())
 
+    // The deployment transaction itself has no return value, so the deployed address
+    // is recovered from the latest EVM.TransactionExecuted event.
     let txnEvents = Test.eventsOfType(Type<EVM.TransactionExecuted>())
     Test.assert(txnEvents.length > 0, message: "Expected an EVM.TransactionExecuted event after deployment")
 
@@ -286,6 +290,8 @@ fun deployEVMContract(_ signer: Test.TestAccount, _ bytecode: String, _ gasLimit
 
 access(all)
 fun deployFalseApproveToken(_ signer: Test.TestAccount): String {
+    // Reuse the generic deploy helper so the regression test exercises the same COA
+    // deployment path we use for other EVM fixtures.
     return deployEVMContract(signer, falseApproveTokenBytecode, UInt64(15_000_000))
 }
 
