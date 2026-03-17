@@ -2,6 +2,7 @@
 pragma solidity 0.8.20;
 
 import "forge-std/Test.sol";
+import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import "../src/FlowYieldVaultsRequests.sol";
 
 contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
@@ -20,11 +21,12 @@ contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
 
 contract FlowYieldVaultsRequestsTest is Test {
     FlowYieldVaultsRequestsTestHelper public c;
+    ERC20Mock public wflow;
     address user = makeAddr("user");
     address user2 = makeAddr("user2");
     address coa = makeAddr("coa");
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
-    address constant WFLOW = 0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e;
+    address WFLOW;
 
     // Events for testing (from OpenZeppelin Ownable2Step)
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
@@ -44,6 +46,10 @@ contract FlowYieldVaultsRequestsTest is Test {
     function setUp() public {
         vm.deal(user, 100 ether);
         vm.deal(user2, 100 ether);
+        wflow = new ERC20Mock();
+        WFLOW = address(wflow);
+        wflow.mint(user, 100 ether);
+        wflow.mint(user2, 100 ether);
         c = new FlowYieldVaultsRequestsTestHelper(coa, WFLOW);
         c.testRegisterYieldVaultId(42, user, NATIVE_FLOW);
     }
@@ -1001,6 +1007,68 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(amounts[1], 2 ether);
         assertEq(balanceTokens[0], NATIVE_FLOW, "First balance token should be NATIVE_FLOW");
         assertEq(pendingBalances[0], 3 ether, "Pending balance should be sum of amounts");
+    }
+
+    function test_GetPendingRequestsByUserUnpacked_WFLOWBalances() public {
+        vm.startPrank(user);
+        wflow.approve(address(c), 2 ether);
+
+        uint256 reqId = c.createYieldVault(WFLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+
+        (
+            uint256[] memory ids,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            address[] memory balanceTokens,
+            uint256[] memory pendingBalances,
+            uint256[] memory claimableRefundsArr
+        ) = c.getPendingRequestsByUserUnpacked(user);
+
+        assertEq(ids.length, 1, "User should have 1 pending request");
+        assertEq(ids[0], reqId, "Pending request should be the WFLOW create request");
+        assertEq(balanceTokens.length, 2, "Should return NATIVE_FLOW and WFLOW balances");
+        assertEq(balanceTokens[0], NATIVE_FLOW, "First balance token should be NATIVE_FLOW");
+        assertEq(balanceTokens[1], WFLOW, "Second balance token should be WFLOW");
+        assertEq(pendingBalances[0], 0, "NATIVE_FLOW pending balance should be 0");
+        assertEq(pendingBalances[1], 2 ether, "WFLOW pending balance should match request amount");
+        assertEq(claimableRefundsArr[0], 0, "NATIVE_FLOW refund balance should be 0");
+        assertEq(claimableRefundsArr[1], 0, "WFLOW refund balance should be 0 before cancellation");
+        assertEq(c.getUserPendingBalance(user, WFLOW), pendingBalances[1], "Direct WFLOW getter should match unpacked view");
+        assertEq(c.getClaimableRefund(user, WFLOW), claimableRefundsArr[1], "Direct WFLOW refund getter should match unpacked view");
+
+        c.cancelRequest(reqId);
+
+        (
+            uint256[] memory idsAfterCancel,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            address[] memory balanceTokensAfterCancel,
+            uint256[] memory pendingBalancesAfterCancel,
+            uint256[] memory claimableRefundsAfterCancel
+        ) = c.getPendingRequestsByUserUnpacked(user);
+
+        assertEq(idsAfterCancel.length, 0, "Cancelled WFLOW request should no longer be pending");
+        assertEq(balanceTokensAfterCancel.length, 2, "Token balance slots should remain stable");
+        assertEq(balanceTokensAfterCancel[1], WFLOW, "Second balance token should remain WFLOW");
+        assertEq(pendingBalancesAfterCancel[1], 0, "WFLOW pending balance should be cleared after cancellation");
+        assertEq(claimableRefundsAfterCancel[1], 2 ether, "WFLOW refund balance should match cancelled amount");
+        assertEq(c.getUserPendingBalance(user, WFLOW), 0, "Direct WFLOW pending getter should be cleared after cancellation");
+        assertEq(c.getClaimableRefund(user, WFLOW), 2 ether, "Direct WFLOW refund getter should match cancelled amount");
+        vm.stopPrank();
     }
 
     function test_GetPendingRequestsByUserUnpacked_MultipleUsers() public {
