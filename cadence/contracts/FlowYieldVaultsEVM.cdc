@@ -2012,7 +2012,7 @@ access(all) contract FlowYieldVaultsEVM {
     /// @notice Validates ERC20 bool return data semantics
     /// @dev ERC20 methods may return no data (accepted for compatibility) or ABI-encoded bool.
     ///      When return data is present, it must be exactly 32 bytes with value `1` (true).
-    access(self) fun isERC20BoolReturnSuccess(_ data: [UInt8]): Bool {
+    access(all) view fun isERC20BoolReturnSuccess(_ data: [UInt8]): Bool {
         if data.length == 0 {
             return true
         }
