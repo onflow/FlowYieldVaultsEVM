@@ -26,37 +26,39 @@ access(all) fun main(contractAddress: String, addressToCheck: String): Allowlist
     let fromAddress = EVM.addressFromString("0x0000000000000000000000000000000000000001")
 
     // Read allowlistEnabled
-    let enabledCalldata = EVM.encodeABIWithSignature("allowlistEnabled()", [])
-    let enabledResult = EVM.dryCall(
+    let enabledResult = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: enabledCalldata,
+        signature: "allowlistEnabled()",
+        args: [],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<Bool>()]
     )
 
     var enabled = false
     if enabledResult.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<Bool>()], data: enabledResult.data)
-        enabled = decoded[0] as! Bool
+        assert(enabledResult.results.length == 1, message: "Invalid response from allowlistEnabled()")
+        enabled = enabledResult.results[0] as! Bool
     }
 
     // Check if address is allowlisted (if provided)
     var isAllowlisted = false
     if addressToCheck.length > 0 {
         let checkAddress = EVM.addressFromString(addressToCheck)
-        let allowlistedCalldata = EVM.encodeABIWithSignature("allowlisted(address)", [checkAddress])
-        let allowlistedResult = EVM.dryCall(
+        let allowlistedResult = EVM.dryCallWithSigAndArgs(
             from: fromAddress,
             to: evmContractAddress,
-            data: allowlistedCalldata,
+            signature: "allowlisted(address)",
+            args: [checkAddress],
             gasLimit: 100_000,
-            value: EVM.Balance(attoflow: 0)
+            value: 0,
+            resultTypes: [Type<Bool>()]
         )
 
         if allowlistedResult.status == EVM.Status.successful {
-            let decoded = EVM.decodeABI(types: [Type<Bool>()], data: allowlistedResult.data)
-            isAllowlisted = decoded[0] as! Bool
+            assert(allowlistedResult.results.length == 1, message: "Invalid response from allowlisted()")
+            isAllowlisted = allowlistedResult.results[0] as! Bool
         }
     }
 

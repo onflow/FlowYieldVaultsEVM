@@ -15,21 +15,19 @@ access(all) fun main(contractAddress: String, userAddress: String): UInt256 {
     let evmUserAddress = EVM.addressFromString(userAddress)
 
     // Read getUserPendingRequestCount(address)
-    let calldata = EVM.encodeABIWithSignature(
-        "getUserPendingRequestCount(address)",
-        [evmUserAddress]
-    )
-    let result = EVM.dryCall(
+    let result = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: calldata,
+        signature: "getUserPendingRequestCount(address)",
+        args: [evmUserAddress],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<UInt256>()]
     )
 
     if result.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<UInt256>()], data: result.data)
-        return decoded[0] as! UInt256
+        assert(result.results.length == 1, message: "Invalid response from getUserPendingRequestCount()")
+        return result.results[0] as! UInt256
     }
 
     return 0

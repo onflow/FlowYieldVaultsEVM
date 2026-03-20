@@ -39,77 +39,82 @@ access(all) fun main(contractAddress: String): EVMContractConfig {
 
     // Read authorizedCOA
     var authorizedCOA = ""
-    let coaCalldata = EVM.encodeABIWithSignature("authorizedCOA()", [])
-    let coaResult = EVM.dryCall(
+    let coaResult = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: coaCalldata,
+        signature: "authorizedCOA()",
+        args: [],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<EVM.EVMAddress>()]
     )
     if coaResult.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<EVM.EVMAddress>()], data: coaResult.data)
-        authorizedCOA = (decoded[0] as! EVM.EVMAddress).toString()
+        assert(coaResult.results.length == 1, message: "Invalid response from authorizedCOA()")
+        authorizedCOA = (coaResult.results[0] as! EVM.EVMAddress).toString()
     }
 
     // Read allowlistEnabled
     var allowlistEnabled = false
-    let allowlistCalldata = EVM.encodeABIWithSignature("allowlistEnabled()", [])
-    let allowlistResult = EVM.dryCall(
+    let allowlistResult = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: allowlistCalldata,
+        signature: "allowlistEnabled()",
+        args: [],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<Bool>()]
     )
     if allowlistResult.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<Bool>()], data: allowlistResult.data)
-        allowlistEnabled = decoded[0] as! Bool
+        assert(allowlistResult.results.length == 1, message: "Invalid response from allowlistEnabled()")
+        allowlistEnabled = allowlistResult.results[0] as! Bool
     }
 
     // Read blocklistEnabled
     var blocklistEnabled = false
-    let blocklistCalldata = EVM.encodeABIWithSignature("blocklistEnabled()", [])
-    let blocklistResult = EVM.dryCall(
+    let blocklistResult = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: blocklistCalldata,
+        signature: "blocklistEnabled()",
+        args: [],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<Bool>()]
     )
     if blocklistResult.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<Bool>()], data: blocklistResult.data)
-        blocklistEnabled = decoded[0] as! Bool
+        assert(blocklistResult.results.length == 1, message: "Invalid response from blocklistEnabled()")
+        blocklistEnabled = blocklistResult.results[0] as! Bool
     }
 
     // Read maxPendingRequestsPerUser
     var maxPendingRequestsPerUser: UInt256 = 0
-    let maxCalldata = EVM.encodeABIWithSignature("maxPendingRequestsPerUser()", [])
-    let maxResult = EVM.dryCall(
+    let maxResult = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: maxCalldata,
+        signature: "maxPendingRequestsPerUser()",
+        args: [],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<UInt256>()]
     )
     if maxResult.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<UInt256>()], data: maxResult.data)
-        maxPendingRequestsPerUser = decoded[0] as! UInt256
+        assert(maxResult.results.length == 1, message: "Invalid response from maxPendingRequestsPerUser()")
+        maxPendingRequestsPerUser = maxResult.results[0] as! UInt256
     }
 
     // Read getPendingRequestCount
     var pendingRequestCount: UInt256 = 0
-    let countCalldata = EVM.encodeABIWithSignature("getPendingRequestCount()", [])
-    let countResult = EVM.dryCall(
+    let countResult = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: countCalldata,
+        signature: "getPendingRequestCount()",
+        args: [],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<UInt256>()]
     )
     if countResult.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<UInt256>()], data: countResult.data)
-        pendingRequestCount = decoded[0] as! UInt256
+        assert(countResult.results.length == 1, message: "Invalid response from getPendingRequestCount()")
+        pendingRequestCount = countResult.results[0] as! UInt256
     }
 
     return EVMContractConfig(

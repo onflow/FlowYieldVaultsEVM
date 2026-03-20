@@ -15,21 +15,19 @@ access(all) fun main(contractAddress: String, userAddress: String): [UInt64] {
     let evmUserAddress = EVM.addressFromString(userAddress)
 
     // Read getYieldVaultIdsForUser(address)
-    let calldata = EVM.encodeABIWithSignature(
-        "getYieldVaultIdsForUser(address)",
-        [evmUserAddress]
-    )
-    let result = EVM.dryCall(
+    let result = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: calldata,
+        signature: "getYieldVaultIdsForUser(address)",
+        args: [evmUserAddress],
         gasLimit: 500_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<[UInt64]>()]
     )
 
     if result.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<[UInt64]>()], data: result.data)
-        return decoded[0] as! [UInt64]
+        assert(result.results.length == 1, message: "Invalid response from getYieldVaultIdsForUser()")
+        return result.results[0] as! [UInt64]
     }
 
     return []

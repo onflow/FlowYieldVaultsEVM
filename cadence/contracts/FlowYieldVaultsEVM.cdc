@@ -981,20 +981,17 @@ access(all) contract FlowYieldVaultsEVM {
             successfulRequestIds: [UInt256],
             rejectedRequestIds: [UInt256],
         ): String? {
-            let calldata = EVM.encodeABIWithSignature(
-                "startProcessingBatch(uint256[],uint256[])",
-                [successfulRequestIds, rejectedRequestIds]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "startProcessingBatch(uint256[],uint256[])",
+                args: [successfulRequestIds, rejectedRequestIds],
                 gasLimit: 15_000_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 return "startProcessingBatch failed: \(errorMsg)"
             }
 
@@ -1029,11 +1026,6 @@ access(all) contract FlowYieldVaultsEVM {
             // Don't use optional for EVM since valid Ids can be 0
             let evmYieldVaultId = yieldVaultId ?? UInt64.max
 
-            let calldata = EVM.encodeABIWithSignature(
-                "completeProcessing(uint256,bool,uint64,string)",
-                [requestId, success, evmYieldVaultId, message]
-            )
-
             // Determine if refund is needed (failed CREATE or DEPOSIT)
             let needsRefund = !success
                 && refundAmount > 0
@@ -1053,18 +1045,16 @@ access(all) contract FlowYieldVaultsEVM {
                     refundValue = FlowYieldVaultsEVM.balanceFromUFix64(refundUFix64, tokenAddress: tokenAddress)
                 } else {
                     // ERC20: approve contract to pull funds
-                    let approveCalldata = EVM.encodeABIWithSignature(
-                        "approve(address,uint256)",
-                        [FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!, refundAmount]
-                    )
-                    let approveResult = coaRef.call(
+                    let approveResult = coaRef.callWithSigAndArgs(
                         to: tokenAddress,
-                        data: approveCalldata,
+                        signature: "approve(address,uint256)",
+                        args: [FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!, refundAmount],
                         gasLimit: 100_000,
-                        value: EVM.Balance(attoflow: 0)
+                        value: 0,
+                        resultTypes: nil
                     )
                     if approveResult.status != EVM.Status.successful {
-                        let errorMsg = FlowYieldVaultsEVM.decodeEVMError(approveResult.data)
+                        let errorMsg = FlowYieldVaultsEVM.decodeEVMError(approveResult.results as! [UInt8])
                         emit RequestFailed(
                             requestId: requestId,
                             userAddress: "",
@@ -1079,15 +1069,17 @@ access(all) contract FlowYieldVaultsEVM {
                 }
             }
 
-            let result = coaRef.call(
+            let result = coaRef.callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "completeProcessing(uint256,bool,uint64,string)",
+                args: [requestId, success, evmYieldVaultId, message],
                 gasLimit: 15_000_000,
-                value: refundValue
+                value: refundValue.attoflow,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 emit RequestFailed(
                     requestId: requestId,
                     userAddress: "",
@@ -1206,20 +1198,17 @@ access(all) contract FlowYieldVaultsEVM {
                 feeProvider: feeProvider
             )
 
-            let transferCalldata = EVM.encodeABIWithSignature(
-                "transfer(address,uint256)",
-                [recipient, amountUInt256]
-            )
-
-            let transferResult = coaRef.call(
+            let transferResult = coaRef.callWithSigAndArgs(
                 to: tokenAddress,
-                data: transferCalldata,
+                signature: "transfer(address,uint256)",
+                args: [recipient, amountUInt256],
                 gasLimit: 100_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if transferResult.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(transferResult.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(transferResult.results as! [UInt8])
                 panic("ERC20 transfer to recipient failed: \(errorMsg)")
             }
         }
@@ -1231,29 +1220,25 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Gets the count of pending requests from the EVM contract
         /// @return The number of pending requests
         access(all) fun getPendingRequestCountFromEVM(): Int? {
-            let calldata = EVM.encodeABIWithSignature("getPendingRequestCount()", [])
-
-            let callResult = self.getCOARef().dryCall(
+            let callResult = self.getCOARef().dryCallWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "getPendingRequestCount()",
+                args: [],
                 gasLimit: 100_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: [Type<UInt256>()]
             )
 
             if callResult.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(callResult.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(callResult.results as! [UInt8])
                 emit ErrorEncountered(
                     message: "getPendingRequestCount call failed: \(errorMsg)"
                 )
                 return nil
             }
 
-            let decoded = EVM.decodeABI(
-                types: [Type<UInt256>()],
-                data: callResult.data
-            )
-
-            let count256 = decoded[0] as! UInt256
+            assert(callResult.results.length == 1, message: "Invalid response from getPendingRequestCount()")
+            let count256 = callResult.results[0] as! UInt256
             return Int(count256)
         }
 
@@ -1264,23 +1249,14 @@ access(all) contract FlowYieldVaultsEVM {
         access(all) fun getPendingRequestsFromEVM(startIndex: Int, count: Int): [EVMRequest]? {
             let startIdx = UInt256(startIndex)
             let cnt = UInt256(count)
-            let calldata = EVM.encodeABIWithSignature("getPendingRequestsUnpacked(uint256,uint256)", [startIdx, cnt])
 
-            let callResult = self.getCOARef().dryCall(
+            let callResult = self.getCOARef().dryCallWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "getPendingRequestsUnpacked(uint256,uint256)",
+                args: [startIdx, cnt],
                 gasLimit: 15_000_000,
-                value: EVM.Balance(attoflow: 0)
-            )
-
-            if callResult.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(callResult.data)
-                emit ErrorEncountered(message: "getPendingRequestsUnpacked call failed: \(errorMsg)")
-                return nil
-            }
-
-            let decoded = EVM.decodeABI(
-                types: [
+                value: 0,
+                resultTypes: [
                     Type<[UInt256]>(),
                     Type<[EVM.EVMAddress]>(),
                     Type<[UInt8]>(),
@@ -1292,21 +1268,28 @@ access(all) contract FlowYieldVaultsEVM {
                     Type<[String]>(),
                     Type<[String]>(),
                     Type<[String]>()
-                ],
-                data: callResult.data
+                ]
             )
 
-            let ids = decoded[0] as! [UInt256]
-            let users = decoded[1] as! [EVM.EVMAddress]
-            let requestTypes = decoded[2] as! [UInt8]
-            let statuses = decoded[3] as! [UInt8]
-            let tokenAddresses = decoded[4] as! [EVM.EVMAddress]
-            let amounts = decoded[5] as! [UInt256]
-            let yieldVaultIds = decoded[6] as! [UInt64]
-            let timestamps = decoded[7] as! [UInt256]
-            let messages = decoded[8] as! [String]
-            let vaultIdentifiers = decoded[9] as! [String]
-            let strategyIdentifiers = decoded[10] as! [String]
+            if callResult.status != EVM.Status.successful {
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(callResult.results as! [UInt8])
+                emit ErrorEncountered(message: "getPendingRequestsUnpacked call failed: \(errorMsg)")
+                return nil
+            }
+
+            assert(callResult.results.length == 11, message: "Invalid response from getPendingRequestsUnpacked()")
+
+            let ids = callResult.results[0] as! [UInt256]
+            let users = callResult.results[1] as! [EVM.EVMAddress]
+            let requestTypes = callResult.results[2] as! [UInt8]
+            let statuses = callResult.results[3] as! [UInt8]
+            let tokenAddresses = callResult.results[4] as! [EVM.EVMAddress]
+            let amounts = callResult.results[5] as! [UInt256]
+            let yieldVaultIds = callResult.results[6] as! [UInt64]
+            let timestamps = callResult.results[7] as! [UInt256]
+            let messages = callResult.results[8] as! [String]
+            let vaultIdentifiers = callResult.results[9] as! [String]
+            let strategyIdentifiers = callResult.results[10] as! [String]
 
             let requests: [EVMRequest] = []
             var i = 0
@@ -1340,20 +1323,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Enables or disables the allowlist on the EVM contract
         /// @param enabled True to enable, false to disable
         access(all) fun setAllowlistEnabled(_ enabled: Bool) {
-            let calldata = EVM.encodeABIWithSignature(
-                "setAllowlistEnabled(bool)",
-                [enabled]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "setAllowlistEnabled(bool)",
+                args: [enabled],
                 gasLimit: 100_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("setAllowlistEnabled failed: \(errorMsg)")
             }
 
@@ -1363,20 +1343,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Adds multiple addresses to the allowlist on the EVM contract
         /// @param addresses The addresses to add to the allowlist
         access(all) fun batchAddToAllowlist(_ addresses: [EVM.EVMAddress]) {
-            let calldata = EVM.encodeABIWithSignature(
-                "batchAddToAllowlist(address[])",
-                [addresses]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "batchAddToAllowlist(address[])",
+                args: [addresses],
                 gasLimit: 300_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("batchAddToAllowlist failed: \(errorMsg)")
             }
 
@@ -1386,20 +1363,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Removes multiple addresses from the allowlist on the EVM contract
         /// @param addresses The addresses to remove from the allowlist
         access(all) fun batchRemoveFromAllowlist(_ addresses: [EVM.EVMAddress]) {
-            let calldata = EVM.encodeABIWithSignature(
-                "batchRemoveFromAllowlist(address[])",
-                [addresses]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "batchRemoveFromAllowlist(address[])",
+                args: [addresses],
                 gasLimit: 300_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("batchRemoveFromAllowlist failed: \(errorMsg)")
             }
 
@@ -1409,20 +1383,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Enables or disables the blocklist on the EVM contract
         /// @param enabled True to enable, false to disable
         access(all) fun setBlocklistEnabled(_ enabled: Bool) {
-            let calldata = EVM.encodeABIWithSignature(
-                "setBlocklistEnabled(bool)",
-                [enabled]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "setBlocklistEnabled(bool)",
+                args: [enabled],
                 gasLimit: 100_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("setBlocklistEnabled failed: \(errorMsg)")
             }
 
@@ -1432,20 +1403,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Adds multiple addresses to the blocklist on the EVM contract
         /// @param addresses The addresses to add to the blocklist
         access(all) fun batchAddToBlocklist(_ addresses: [EVM.EVMAddress]) {
-            let calldata = EVM.encodeABIWithSignature(
-                "batchAddToBlocklist(address[])",
-                [addresses]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "batchAddToBlocklist(address[])",
+                args: [addresses],
                 gasLimit: 300_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("batchAddToBlocklist failed: \(errorMsg)")
             }
 
@@ -1455,20 +1423,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Removes multiple addresses from the blocklist on the EVM contract
         /// @param addresses The addresses to remove from the blocklist
         access(all) fun batchRemoveFromBlocklist(_ addresses: [EVM.EVMAddress]) {
-            let calldata = EVM.encodeABIWithSignature(
-                "batchRemoveFromBlocklist(address[])",
-                [addresses]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "batchRemoveFromBlocklist(address[])",
+                args: [addresses],
                 gasLimit: 300_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("batchRemoveFromBlocklist failed: \(errorMsg)")
             }
 
@@ -1486,20 +1451,17 @@ access(all) contract FlowYieldVaultsEVM {
             minimumBalance: UInt256,
             isNative: Bool
         ) {
-            let calldata = EVM.encodeABIWithSignature(
-                "setTokenConfig(address,bool,uint256,bool)",
-                [tokenAddress, isSupported, minimumBalance, isNative]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "setTokenConfig(address,bool,uint256,bool)",
+                args: [tokenAddress, isSupported, minimumBalance, isNative],
                 gasLimit: 150_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("setTokenConfig failed: \(errorMsg)")
             }
 
@@ -1514,20 +1476,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Sets the authorized COA address on the EVM contract
         /// @param coa The new authorized COA address
         access(all) fun setAuthorizedCOA(_ coa: EVM.EVMAddress) {
-            let calldata = EVM.encodeABIWithSignature(
-                "setAuthorizedCOA(address)",
-                [coa]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "setAuthorizedCOA(address)",
+                args: [coa],
                 gasLimit: 100_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("setAuthorizedCOA failed: \(errorMsg)")
             }
 
@@ -1537,20 +1496,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Sets the maximum pending requests per user on the EVM contract
         /// @param maxRequests The new maximum pending requests per user (0 = unlimited)
         access(all) fun setMaxPendingRequestsPerUser(_ maxRequests: UInt256) {
-            let calldata = EVM.encodeABIWithSignature(
-                "setMaxPendingRequestsPerUser(uint256)",
-                [maxRequests]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "setMaxPendingRequestsPerUser(uint256)",
+                args: [maxRequests],
                 gasLimit: 100_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("setMaxPendingRequestsPerUser failed: \(errorMsg)")
             }
 
@@ -1562,20 +1518,17 @@ access(all) contract FlowYieldVaultsEVM {
         access(all) fun dropRequests(_ requestIds: [UInt256]): String? {
             let gasLimit: UInt64 = 500_000 + UInt64(requestIds.length) * 100_000
 
-            let calldata = EVM.encodeABIWithSignature(
-                "dropRequests(uint256[])",
-                [requestIds]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "dropRequests(uint256[])",
+                args: [requestIds],
                 gasLimit: gasLimit,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 return "dropRequests failed: \(errorMsg)"
             }
 
@@ -1586,20 +1539,17 @@ access(all) contract FlowYieldVaultsEVM {
         /// @notice Cancels a pending request on the EVM contract
         /// @param requestId The request ID to cancel
         access(all) fun cancelRequest(_ requestId: UInt256) {
-            let calldata = EVM.encodeABIWithSignature(
-                "cancelRequest(uint256)",
-                [requestId]
-            )
-
-            let result = self.getCOARef().call(
+            let result = self.getCOARef().callWithSigAndArgs(
                 to: FlowYieldVaultsEVM.flowYieldVaultsRequestsAddress!,
-                data: calldata,
+                signature: "cancelRequest(uint256)",
+                args: [requestId],
                 gasLimit: 300_000,
-                value: EVM.Balance(attoflow: 0)
+                value: 0,
+                resultTypes: nil
             )
 
             if result.status != EVM.Status.successful {
-                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.data)
+                let errorMsg = FlowYieldVaultsEVM.decodeEVMError(result.results as! [UInt8])
                 panic("cancelRequest failed: \(errorMsg)")
             }
 
@@ -1653,25 +1603,13 @@ access(all) contract FlowYieldVaultsEVM {
             ?? panic("Could not borrow public COA capability from /public/evm for contract account \(self.account.address)")
         let evmAddress = EVM.addressFromString(evmAddressHex)
 
-        let calldata = EVM.encodeABIWithSignature(
-            "getPendingRequestsByUserUnpacked(address)",
-            [evmAddress]
-        )
-
-        let callResult = coaRef.dryCall(
+        let callResult = coaRef.dryCallWithSigAndArgs(
             to: self.flowYieldVaultsRequestsAddress!,
-            data: calldata,
+            signature: "getPendingRequestsByUserUnpacked(address)",
+            args: [evmAddress],
             gasLimit: 15_000_000,
-            value: EVM.Balance(attoflow: 0)
-        )
-
-        if callResult.status != EVM.Status.successful {
-            let errorMsg = self.decodeEVMError(callResult.data)
-            panic("getPendingRequestsByUserUnpacked call failed for user \(evmAddressHex): \(errorMsg)")
-        }
-
-        let decoded = EVM.decodeABI(
-            types: [
+            value: 0,
+            resultTypes: [
                 Type<[UInt256]>(),        // ids
                 Type<[UInt8]>(),          // requestTypes
                 Type<[UInt8]>(),          // statuses
@@ -1684,22 +1622,28 @@ access(all) contract FlowYieldVaultsEVM {
                 Type<[String]>(),         // strategyIdentifiers
                 Type<UInt256>(),          // pendingBalance
                 Type<UInt256>()           // claimableRefund
-            ],
-            data: callResult.data
+            ]
         )
 
-        let ids = decoded[0] as! [UInt256]
-        let requestTypes = decoded[1] as! [UInt8]
-        let statuses = decoded[2] as! [UInt8]
-        let tokenAddresses = decoded[3] as! [EVM.EVMAddress]
-        let amounts = decoded[4] as! [UInt256]
-        let yieldVaultIds = decoded[5] as! [UInt64]
-        let timestamps = decoded[6] as! [UInt256]
-        let messages = decoded[7] as! [String]
-        let vaultIdentifiers = decoded[8] as! [String]
-        let strategyIdentifiers = decoded[9] as! [String]
-        let pendingBalanceRaw = decoded[10] as! UInt256
-        let claimableRefundRaw = decoded[11] as! UInt256
+        if callResult.status != EVM.Status.successful {
+            let errorMsg = self.decodeEVMError(callResult.results as! [UInt8])
+            panic("getPendingRequestsByUserUnpacked call failed for user \(evmAddressHex): \(errorMsg)")
+        }
+
+        assert(callResult.results.length == 12, message: "Invalid response from getPendingRequestsByUserUnpacked()")
+
+        let ids = callResult.results[0] as! [UInt256]
+        let requestTypes = callResult.results[1] as! [UInt8]
+        let statuses = callResult.results[2] as! [UInt8]
+        let tokenAddresses = callResult.results[3] as! [EVM.EVMAddress]
+        let amounts = callResult.results[4] as! [UInt256]
+        let yieldVaultIds = callResult.results[5] as! [UInt64]
+        let timestamps = callResult.results[6] as! [UInt256]
+        let messages = callResult.results[7] as! [String]
+        let vaultIdentifiers = callResult.results[8] as! [String]
+        let strategyIdentifiers = callResult.results[9] as! [String]
+        let pendingBalanceRaw = callResult.results[10] as! UInt256
+        let claimableRefundRaw = callResult.results[11] as! UInt256
 
         // Convert pending balance from wei to UFix64
         let pendingBalance = FlowEVMBridgeUtils.uint256ToUFix64(value: pendingBalanceRaw, decimals: 18)
@@ -1747,26 +1691,13 @@ access(all) contract FlowYieldVaultsEVM {
         let coaRef = self.account.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
             ?? panic("Could not borrow public COA capability from /public/evm for contract account \(self.account.address)")
 
-        let calldata = EVM.encodeABIWithSignature(
-            "getRequestUnpacked(uint256)",
-            [requestId]
-        )
-
-        let callResult = coaRef.dryCall(
+        let callResult = coaRef.dryCallWithSigAndArgs(
             to: self.flowYieldVaultsRequestsAddress!,
-            data: calldata,
+            signature: "getRequestUnpacked(uint256)",
+            args: [requestId],
             gasLimit: 15_000_000,
-            value: EVM.Balance(attoflow: 0)
-        )
-
-        if callResult.status != EVM.Status.successful {
-            let errorMsg = self.decodeEVMError(callResult.data)
-            emit ErrorEncountered(message: "getRequestUnpacked call failed: \(errorMsg)")
-            return nil
-        }
-
-        let decoded = EVM.decodeABI(
-            types: [
+            value: 0,
+            resultTypes: [
                 Type<UInt256>(),          // id
                 Type<EVM.EVMAddress>(),   // user
                 Type<UInt8>(),            // requestType
@@ -1778,21 +1709,28 @@ access(all) contract FlowYieldVaultsEVM {
                 Type<String>(),           // message
                 Type<String>(),           // vaultIdentifier
                 Type<String>()           // strategyIdentifier
-            ],
-            data: callResult.data
+            ]
         )
 
-        let id = decoded[0] as! UInt256
-        let user = decoded[1] as! EVM.EVMAddress
-        let requestType = decoded[2] as! UInt8
-        let status = decoded[3] as! UInt8
-        let tokenAddress = decoded[4] as! EVM.EVMAddress
-        let amount = decoded[5] as! UInt256
-        let yieldVaultId = decoded[6] as! UInt64
-        let timestamp = decoded[7] as! UInt256
-        let message = decoded[8] as! String
-        let vaultIdentifier = decoded[9] as! String
-        let strategyIdentifier = decoded[10] as! String
+        if callResult.status != EVM.Status.successful {
+            let errorMsg = self.decodeEVMError(callResult.results as! [UInt8])
+            emit ErrorEncountered(message: "getRequestUnpacked call failed: \(errorMsg)")
+            return nil
+        }
+
+        assert(callResult.results.length == 11, message: "Invalid response from getRequestUnpacked()")
+
+        let id = callResult.results[0] as! UInt256
+        let user = callResult.results[1] as! EVM.EVMAddress
+        let requestType = callResult.results[2] as! UInt8
+        let status = callResult.results[3] as! UInt8
+        let tokenAddress = callResult.results[4] as! EVM.EVMAddress
+        let amount = callResult.results[5] as! UInt256
+        let yieldVaultId = callResult.results[6] as! UInt64
+        let timestamp = callResult.results[7] as! UInt256
+        let message = callResult.results[8] as! String
+        let vaultIdentifier = callResult.results[9] as! String
+        let strategyIdentifier = callResult.results[10] as! String
 
         // Request not found
         if timestamp == 0 {
@@ -1827,26 +1765,23 @@ access(all) contract FlowYieldVaultsEVM {
         let coaRef = self.account.capabilities.borrow<&EVM.CadenceOwnedAccount>(/public/evm)
             ?? panic("Could not borrow public COA capability from /public/evm for contract account \(self.account.address)")
 
-        let calldata = EVM.encodeABIWithSignature("getPendingRequestCount()", [])
-
-        let callResult = coaRef.dryCall(
+        let callResult = coaRef.dryCallWithSigAndArgs(
             to: self.flowYieldVaultsRequestsAddress!,
-            data: calldata,
+            signature: "getPendingRequestCount()",
+            args: [],
             gasLimit: 100_000,
-            value: EVM.Balance(attoflow: 0)
+            value: 0,
+            resultTypes: [Type<UInt256>()]
         )
 
         if callResult.status != EVM.Status.successful {
-            let errorMsg = self.decodeEVMError(callResult.data)
+            let errorMsg = self.decodeEVMError(callResult.results as! [UInt8])
             panic("getPendingRequestCount call failed on contract \(self.flowYieldVaultsRequestsAddress!.toString()): \(errorMsg)")
         }
 
-        let decoded = EVM.decodeABI(
-            types: [Type<UInt256>()],
-            data: callResult.data
-        )
+        assert(callResult.results.length == 1, message: "Invalid response from getPendingRequestCount()")
 
-        let count256 = decoded[0] as! UInt256
+        let count256 = callResult.results[0] as! UInt256
         return Int(count256)
     }
 
