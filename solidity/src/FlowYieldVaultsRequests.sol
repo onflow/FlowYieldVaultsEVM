@@ -458,6 +458,16 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256 amount
     );
 
+    /// @notice Emitted when the contract owner recovers user tokens
+    /// @param to User who received the tokens
+    /// @param tokenAddress ERC20 token claimed
+    /// @param amount Amount recovered
+    event TokensRecovered(
+        address indexed to,
+        address indexed tokenAddress,
+        uint256 amount
+    );
+
     // ============================================
     // Modifiers
     // ============================================
@@ -514,15 +524,27 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     // ============================================
-    // Receive Function
-    // ============================================
-
-    /// @notice Allows contract to receive native $FLOW
-    receive() external payable {}
-
-    // ============================================
     // External Functions - Admin
     // ============================================
+
+    /// @notice Recovery mechanism for accidental user transfers of ERC20 tokens
+    /// @dev Tokens sent directly to the contract outside the intended request
+    ///      flows (including accidental transfers, airdrops etc) are only
+    ///      recoverable through this function here.
+    /// @param to The recipient address to transfer funds to.
+    /// @param tokenAddress The token to transfer.
+    /// @param amount The amount of tokens to transfer (in wei).
+    function recoverTokens(
+        address to,
+        address tokenAddress,
+        uint256 amount
+    ) external onlyOwner {
+        IERC20(tokenAddress).safeTransfer(
+            to,
+            amount
+        );
+        emit TokensRecovered(to, tokenAddress, amount);
+    }
 
     /// @notice Updates the authorized COA address
     /// @param _coa New COA address
