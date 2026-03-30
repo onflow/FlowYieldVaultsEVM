@@ -22,11 +22,13 @@ contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
 contract FlowYieldVaultsRequestsTest is Test {
     FlowYieldVaultsRequestsTestHelper public c;
     ERC20Mock public wflow;
+    ERC20Mock public tokenB;
     address user = makeAddr("user");
     address user2 = makeAddr("user2");
     address coa = makeAddr("coa");
     address constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
     address WFLOW;
+    address TOKEN_B;
 
     // Events for testing (from OpenZeppelin Ownable2Step)
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
@@ -47,9 +49,13 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.deal(user, 100 ether);
         vm.deal(user2, 100 ether);
         wflow = new ERC20Mock();
+        tokenB = new ERC20Mock();
         WFLOW = address(wflow);
+        TOKEN_B = address(tokenB);
         wflow.mint(user, 100 ether);
         wflow.mint(user2, 100 ether);
+        tokenB.mint(user, 100 ether);
+        tokenB.mint(user2, 100 ether);
         c = new FlowYieldVaultsRequestsTestHelper(coa, WFLOW);
         c.testRegisterYieldVaultId(42, user, NATIVE_FLOW);
     }
@@ -1069,6 +1075,82 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getUserPendingBalance(user, WFLOW), 0, "Direct WFLOW pending getter should be cleared after cancellation");
         assertEq(c.getClaimableRefund(user, WFLOW), 2 ether, "Direct WFLOW refund getter should match cancelled amount");
         vm.stopPrank();
+    }
+
+    function test_GetPendingRequestsByUserUnpacked_IncludesTrackedERC20Balances() public {
+        vm.prank(c.owner());
+        c.setTokenConfig(TOKEN_B, true, 0.5 ether, false);
+
+        vm.startPrank(user);
+        tokenB.approve(address(c), 3 ether);
+        uint256 reqId = c.createYieldVault(TOKEN_B, 3 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        (
+            uint256[] memory ids,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            address[] memory balanceTokens,
+            uint256[] memory pendingBalances,
+            uint256[] memory claimableRefundsArr
+        ) = c.getPendingRequestsByUserUnpacked(user);
+
+        assertEq(ids.length, 1, "User should have 1 pending request");
+        assertEq(ids[0], reqId, "Pending request should be the TokenB create request");
+        assertEq(balanceTokens.length, 3, "Should return all tracked token balances");
+        assertEq(balanceTokens[0], NATIVE_FLOW, "First balance token should be NATIVE_FLOW");
+        assertEq(balanceTokens[1], WFLOW, "Second balance token should be WFLOW");
+        assertEq(balanceTokens[2], TOKEN_B, "Third balance token should be TokenB");
+        assertEq(pendingBalances[0], 0, "NATIVE_FLOW pending balance should be 0");
+        assertEq(pendingBalances[1], 0, "WFLOW pending balance should be 0");
+        assertEq(pendingBalances[2], 3 ether, "TokenB pending balance should match request amount");
+        assertEq(claimableRefundsArr[2], 0, "TokenB refund balance should be 0 before cancellation");
+        assertEq(c.getUserPendingBalance(user, TOKEN_B), pendingBalances[2], "Direct TokenB getter should match unpacked view");
+        assertEq(c.getClaimableRefund(user, TOKEN_B), claimableRefundsArr[2], "Direct TokenB refund getter should match unpacked view");
+    }
+
+    function test_GetPendingRequestsByUserUnpacked_KeepsTrackedTokenVisibleAfterDisable() public {
+        vm.prank(c.owner());
+        c.setTokenConfig(TOKEN_B, true, 0.5 ether, false);
+
+        vm.startPrank(user);
+        tokenB.approve(address(c), 2 ether);
+        uint256 reqId = c.createYieldVault(TOKEN_B, 2 ether, VAULT_ID, STRATEGY_ID);
+        c.cancelRequest(reqId);
+        vm.stopPrank();
+
+        vm.prank(c.owner());
+        c.setTokenConfig(TOKEN_B, false, 0, false);
+
+        (
+            uint256[] memory ids,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            address[] memory balanceTokens,
+            uint256[] memory pendingBalances,
+            uint256[] memory claimableRefundsArr
+        ) = c.getPendingRequestsByUserUnpacked(user);
+
+        assertEq(ids.length, 0, "Cancelled TokenB request should no longer be pending");
+        assertEq(balanceTokens.length, 3, "Tracked token slots should remain stable after disable");
+        assertEq(balanceTokens[2], TOKEN_B, "Disabled tracked token should remain visible");
+        assertEq(pendingBalances[2], 0, "Disabled tracked token should have no pending balance after cancellation");
+        assertEq(claimableRefundsArr[2], 2 ether, "Disabled tracked token refund should remain visible");
+        assertEq(c.getClaimableRefund(user, TOKEN_B), 2 ether, "Direct TokenB refund getter should match unpacked view");
     }
 
     function test_GetPendingRequestsByUserUnpacked_MultipleUsers() public {

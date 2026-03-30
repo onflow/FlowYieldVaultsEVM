@@ -131,6 +131,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Token configurations indexed by token address
     mapping(address => TokenConfig) public allowedTokens;
 
+    /// @notice Token addresses surfaced in per-user balance views
+    address[] private _trackedTokens;
+
+    /// @notice O(1) lookup for tracked-token membership
+    mapping(address => bool) private _isTrackedToken;
+
     /// @notice Maximum number of pending requests allowed per user (0 = unlimited)
     uint256 public maxPendingRequestsPerUser;
 
@@ -494,19 +500,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         _requestIdCounter = 1;
         maxPendingRequestsPerUser = 10;
 
-        allowedTokens[NATIVE_FLOW] = TokenConfig({
-            isSupported: true,
-            minimumBalance: 1 ether,
-            isNative: true
-        });
+        _setTokenConfig(NATIVE_FLOW, true, 1 ether, true);
 
         // WFLOW is treated as ERC20 on EVM side, but unwraps to native FlowToken on Cadence
         if (wflowAddress != address(0)) {
-            allowedTokens[WFLOW] = TokenConfig({
-                isSupported: true,
-                minimumBalance: 1 ether,
-                isNative: false
-            });
+            _setTokenConfig(WFLOW, true, 1 ether, false);
         }
     }
 
@@ -627,11 +625,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256 minimumBalance,
         bool isNative
     ) external onlyOwner {
-        allowedTokens[tokenAddress] = TokenConfig({
-            isSupported: isSupported,
-            minimumBalance: minimumBalance,
-            isNative: isNative
-        });
+        _setTokenConfig(tokenAddress, isSupported, minimumBalance, isNative);
 
         emit TokenConfigured(
             tokenAddress,
@@ -1274,7 +1268,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return messages Messages
     /// @return vaultIdentifiers Vault identifiers
     /// @return strategyIdentifiers Strategy identifiers
-    /// @return balanceTokens Token addresses for balance arrays (NATIVE_FLOW and, when configured, WFLOW)
+    /// @return balanceTokens Token addresses for balance arrays
     /// @return pendingBalances Escrowed balances for active pending requests per token
     /// @return claimableRefundsArray Claimable refund amounts per token
     function getPendingRequestsByUserUnpacked(
@@ -1332,22 +1326,21 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        // Get balances for NATIVE_FLOW and, when configured, WFLOW
-        uint256 tokenCount = WFLOW != address(0) ? 2 : 1;
+        // Return balances for the full tracked token set so previously configured
+        // tokens remain visible even if later disabled.
+        uint256 tokenCount = _trackedTokens.length;
         balanceTokens = new address[](tokenCount);
         pendingBalances = new uint256[](tokenCount);
         claimableRefundsArray = new uint256[](tokenCount);
 
-        // Native FLOW balances
-        balanceTokens[0] = NATIVE_FLOW;
-        pendingBalances[0] = pendingUserBalances[user][NATIVE_FLOW];
-        claimableRefundsArray[0] = claimableRefunds[user][NATIVE_FLOW];
-
-        // WFLOW balances (if configured)
-        if (WFLOW != address(0)) {
-            balanceTokens[1] = WFLOW;
-            pendingBalances[1] = pendingUserBalances[user][WFLOW];
-            claimableRefundsArray[1] = claimableRefunds[user][WFLOW];
+        for (uint256 i = 0; i < tokenCount; ) {
+            address token = _trackedTokens[i];
+            balanceTokens[i] = token;
+            pendingBalances[i] = pendingUserBalances[user][token];
+            claimableRefundsArray[i] = claimableRefunds[user][token];
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -1447,6 +1440,25 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 }
             }
             emit RequestsDropped(actualDroppedIds, msg.sender);
+        }
+    }
+
+    /// @dev Stores token configuration and records tokens for future balance queries.
+    function _setTokenConfig(
+        address tokenAddress,
+        bool isSupported,
+        uint256 minimumBalance,
+        bool isNative
+    ) internal {
+        allowedTokens[tokenAddress] = TokenConfig({
+            isSupported: isSupported,
+            minimumBalance: minimumBalance,
+            isNative: isNative
+        });
+
+        if (!_isTrackedToken[tokenAddress]) {
+            _isTrackedToken[tokenAddress] = true;
+            _trackedTokens.push(tokenAddress);
         }
     }
 
