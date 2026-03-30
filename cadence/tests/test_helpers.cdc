@@ -14,9 +14,12 @@ access(all) let admin = Test.getAccount(0x0000000000000007) // testing alias
 
 access(all) let mockRequestsAddr = EVM.addressFromString("0x0000000000000000000000000000000000000002")
 access(all) let nativeFlowAddr = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF")
-// Creation bytecode for solidity/src/test/FalseApproveToken.sol. It is embedded so
-// the Cadence test suite can deploy the mock without depending on a Forge build step.
-access(all) let falseApproveTokenBytecode = "60808060405234601457608690816100198239f35b5f80fdfe60808060405260043610156011575f80fd5b5f90813560e01c63095ea7b3146025575f80fd5b34604c576040366003190112604c576004356001600160a01b03811603604c576020918152f35b5080fdfea2646970667358221220c128b17595d998b699a78b40cad92d7f4abc61b14795de2abd078778dd30397164736f6c63430008140033"
+// Creation bytecode for solidity/src/test/FalseApproveToken.sol. Regenerate it
+// with the repo's Foundry defaults from solidity/foundry.toml so the embedded
+// deployment bytecode stays in sync with the compiled mock. The mock returns
+// false for both approve(...) and transfer(...), and exposes decimals() so the
+// withdraw-path regression test can exercise ERC20 amount conversion as well.
+access(all) let falseApproveTokenBytecode = "608080604052346100155760bd908161001a8239f35b5f80fdfe608060405260043610156010575f80fd5b5f803560e01c908163095ea7b3146059578163313ce56714603d575063a9059cbb146039575f80fd5b6059565b3460565780600319360112605657602060405160128152f35b80fd5b3460835760403660031901126083576004356001600160a01b0381160360835760206040515f8152f35b5f80fdfea2646970667358221220f2d42f93a8dedb61e5106e91a3ecbe33acc335d24cd8bfa64d97be09fa49cf7064736f6c63430008140033"
 
 /* --- Mock Vault and Strategy Identifiers --- */
 
