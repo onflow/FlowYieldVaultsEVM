@@ -334,15 +334,30 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PROCESSING));
     }
 
-    function test_StartProcessingBatch_RevertNotPending() public {
+    function test_StartProcessingBatch_RevertRequestNotInQueueWhenQueueEmpty() public {
+        vm.startPrank(coa);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.RequestNotInQueue.selector,
+            1
+        ));
+        _startProcessingBatch(1);
+        vm.stopPrank();
+    }
+
+    function test_StartProcessingBatch_RevertRequestNotInQueueWhenQueueNonEmpty() public {
         vm.prank(user);
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.startPrank(coa);
-        _startProcessingBatch(reqId);
+        uint256[] memory successfulRequestIds = new uint256[](5);
+        successfulRequestIds[0] = reqId;
+        successfulRequestIds[1] = reqId+2;
 
-        vm.expectRevert(FlowYieldVaultsRequests.InvalidRequestState.selector);
-        _startProcessingBatch(reqId);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.RequestNotInQueue.selector,
+            reqId+2
+        ));
+        c.startProcessingBatch(successfulRequestIds, new uint256[](0));
         vm.stopPrank();
     }
 
@@ -353,6 +368,36 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.NotAuthorizedCOA.selector, user));
         _startProcessingBatch(reqId);
+    }
+
+    function test_StartProcessingBatch_WithMoreRequestIdsThanQueued() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        vm.prank(coa);
+        uint256[] memory successfulRequestIds = new uint256[](5);
+        successfulRequestIds[0] = req1;
+        successfulRequestIds[1] = req2;
+        successfulRequestIds[2] = req3;
+        successfulRequestIds[3] = req3+5;
+        successfulRequestIds[4] = req3+10;
+
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.RequestNotInQueue.selector,
+            req3+5
+        ));
+        c.startProcessingBatch(successfulRequestIds, new uint256[](0));
+
+        (uint256[] memory requestIds, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(requestIds.length, 3);
+
+        for (uint256 i = 0; i < requestIds.length; i++) {
+            FlowYieldVaultsRequests.Request memory req = c.getRequest(successfulRequestIds[i]);
+            assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PENDING));
+        }
     }
 
     function test_StartProcessingBatch_RevertRequestProcessOutOfOrder() public {
@@ -378,19 +423,76 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 req3 = c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
         uint256 req4 = c.createYieldVault{value: 4 ether}(NATIVE_FLOW, 4 ether, VAULT_ID, STRATEGY_ID);
         uint256 req5 = c.createYieldVault{value: 5 ether}(NATIVE_FLOW, 5 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req6 = c.createYieldVault{value: 6 ether}(NATIVE_FLOW, 6 ether, VAULT_ID, STRATEGY_ID);
         vm.stopPrank();
 
-        vm.prank(coa);
-        // All 5 successful, transition to PROCESSING
-        uint256[] memory successfulRequestIds = new uint256[](5);
+        vm.startPrank(coa);
+        // First 3 successful, transition to PROCESSING
+        uint256[] memory successfulRequestIds = new uint256[](3);
         successfulRequestIds[0] = req1;
         successfulRequestIds[1] = req2;
         successfulRequestIds[2] = req3;
-        successfulRequestIds[3] = req4;
-        successfulRequestIds[4] = req5;
         c.startProcessingBatch(successfulRequestIds, new uint256[](0));
 
         (uint256[] memory requestIds, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(requestIds.length, 3);
+
+        for (uint256 i = 0; i < successfulRequestIds.length; i++) {
+            FlowYieldVaultsRequests.Request memory req = c.getRequest(successfulRequestIds[i]);
+            assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PROCESSING));
+        }
+
+        // Remaining 3 successful, transition to PROCESSING
+        successfulRequestIds[0] = req4;
+        successfulRequestIds[1] = req5;
+        successfulRequestIds[2] = req6;
+        c.startProcessingBatch(successfulRequestIds, new uint256[](0));
+
+        (requestIds, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(requestIds.length, 0);
+
+        for (uint256 i = 0; i < successfulRequestIds.length; i++) {
+            FlowYieldVaultsRequests.Request memory req = c.getRequest(successfulRequestIds[i]);
+            assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PROCESSING));
+        }
+        vm.stopPrank();
+    }
+
+    function test_StartProcessingBatch_WithUserCancellationRace() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
+        c.cancelRequest(req2);
+        vm.stopPrank();
+
+        vm.startPrank(coa);
+        // First and third requests, transition to PROCESSING
+        uint256[] memory successfulRequestIds = new uint256[](2);
+        successfulRequestIds[0] = req1;
+        successfulRequestIds[1] = req3;
+        // Second request, transition to FAILED
+        uint256[] memory rejectedRequestIds = new uint256[](1);
+        rejectedRequestIds[0] = req2;
+
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.RequestNotInQueue.selector,
+            req2
+        ));
+        c.startProcessingBatch(successfulRequestIds, rejectedRequestIds);
+
+        (uint256[] memory requestIds, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        assertEq(requestIds.length, 2);
+
+        for (uint256 i = 0; i < successfulRequestIds.length; i++) {
+            FlowYieldVaultsRequests.Request memory req = c.getRequest(successfulRequestIds[i]);
+            assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PENDING));
+        }
+
+        // Try again, without the user-cancelled request
+        c.startProcessingBatch(successfulRequestIds, new uint256[](0));
+
+        (requestIds, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(requestIds.length, 0);
 
         for (uint256 i = 0; i < successfulRequestIds.length; i++) {
@@ -483,8 +585,8 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(
             FlowYieldVaultsRequests.RequestProcessOutOfOrder.selector,
-            req2, // the expected requestId, in the queue head, after rejections have already been removed
-            req3 // the provided requestId
+            req2, // queue[head+1] — the current queue position that doesn't match either input array
+            req4  // the first provided requestId, from successfulRequestIds
         ));
         c.startProcessingBatch(successfulRequestIds, rejectedRequestIds);
 
@@ -525,7 +627,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.expectRevert(abi.encodeWithSelector(
             FlowYieldVaultsRequests.RequestProcessOutOfOrder.selector,
             req1, // the expected requestId, in the queue head
-            req3 // the provided requestId
+            req4 // the first provided requestId, from successfulRequestIds
         ));
         c.startProcessingBatch(successfulRequestIds, rejectedRequestIds);
 
@@ -1468,7 +1570,6 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         assertEq(c.getPendingRequestCount(), numRequests);
 
-        // Process every other request (simulating out-of-order processing)
         vm.startPrank(coa);
         for (uint256 i = 0; i < numRequests / 2; i++) {
             _startProcessingBatch(requestIds[i]);
@@ -1485,7 +1586,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Pending requests should remain in order
         for (uint256 i = 0; i < ids.length - 1; i++) {
-            assertLt(ids[i], ids[i+1], "FIFO order not maintained");
+            assertEq(ids[i], requestIds[numRequests/2 + i], "FIFO order not maintained");
         }
     }
 

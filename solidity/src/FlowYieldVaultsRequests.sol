@@ -304,6 +304,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Processed request does not match the head of requestsQueue
     error RequestProcessOutOfOrder(uint256 expectedId, uint256 processedId);
 
+    /// @notice Request is not included in requestsQueue
+    error RequestNotInQueue(uint256 requestId);
+
     // ============================================
     // Events
     // ============================================
@@ -969,6 +972,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      *      Requests are classified as successful/rejected based on validation
      *      logic that is performed on Cadence side, and not on the authorized
      *      COA's discretion.
+     *      Both arrays containing the request IDs must be in ascending FIFO queue order.
      *      Single-request processing is supported by passing one request id in
      *      successfulRequestIds and an empty rejectedRequestIds array.
      * @param successfulRequestIds The request ids to start processing (PENDING -> PROCESSING)
@@ -978,22 +982,19 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256[] calldata successfulRequestIds,
         uint256[] calldata rejectedRequestIds
     ) external onlyAuthorizedCOA nonReentrant {
-        uint256 totalRequests = successfulRequestIds.length + rejectedRequestIds.length;
-
         uint256 j = 0;
         uint256 k = 0;
+        // Validate that the given IDs for successful/rejected requests,
+        // are according to the FIFO queue order.
+        uint256 totalRequests = successfulRequestIds.length + rejectedRequestIds.length;
         for (uint256 i = 0; i < totalRequests; i++) {
-            uint256 requestId = _requestsQueue[_requestsQueueHead+i];
-            uint256 reqId;
+            uint256 requestId;
+            // If reqId is 0, it means we went over the boundaries of
+            // _requestsQueue.
+            uint256 reqId = _requestsQueue[_requestsQueueHead+i];
             if (j < successfulRequestIds.length) {
-                reqId = successfulRequestIds[j];
-                Request storage request = requests[reqId];
-
-                // === VALIDATION ===
-                if (request.id != reqId) revert RequestNotFound();
-                if (request.status != RequestStatus.PENDING)
-                    revert InvalidRequestState();
-
+                requestId = successfulRequestIds[j];
+                if (reqId == 0) revert RequestNotInQueue(requestId);
                 if (reqId == requestId) {
                     j++;
                     continue;
@@ -1001,16 +1002,30 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
 
             if (k < rejectedRequestIds.length) {
-                reqId = rejectedRequestIds[k];
+                requestId = rejectedRequestIds[k];
+                if (reqId == 0) revert RequestNotInQueue(requestId);
                 if (reqId == requestId) {
                     k++;
                     continue;
                 }
             }
 
-            revert RequestProcessOutOfOrder(requestId, reqId);
+            // === VALIDATION ===
+            Request storage request = requests[reqId];
+            if (request.status != RequestStatus.PENDING)
+                revert InvalidRequestState();
+
+            // requestId currently holds the last-assigned candidate
+            // (from rejectedIds if both branches ran).
+            // Prefer the successful candidate for a clearer error.
+            uint256 candidateReqId = (j < successfulRequestIds.length)
+                ? successfulRequestIds[j]
+                : requestId;
+            revert RequestProcessOutOfOrder(reqId, candidateReqId);
         }
 
+        // First the rejected request IDs are dropped, so successful
+        // request IDs are contiguous at the head before dequeue
         // === REJECTED REQUESTS ===
         _dropRequestsInternal(rejectedRequestIds);
 
@@ -1558,6 +1573,14 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function _startProcessingInternal(uint256 requestId) internal {
         Request storage request = requests[requestId];
 
+        // === VALIDATION ===
+        if (request.id != requestId) revert RequestNotFound();
+        if (request.status != RequestStatus.PENDING)
+            revert InvalidRequestState();
+
+        uint256 reqId = _dequeueRequest();
+        if (reqId != requestId) revert RequestProcessOutOfOrder(reqId, requestId);
+
         // === TRANSITION TO PROCESSING ===
         // This prevents cancellation and ensures atomicity with completeProcessing
         request.status = RequestStatus.PROCESSING;
@@ -1615,8 +1638,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             userPendingRequestCount[request.user]--;
         }
         _removeUserPendingRequest(requestId);
-        uint256 reqId = _dequeueRequest();
-        if (reqId != requestId) revert RequestProcessOutOfOrder(reqId, requestId);
 
         emit RequestProcessed(
             requestId,
