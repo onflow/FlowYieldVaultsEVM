@@ -294,17 +294,29 @@ wait_for_request_status() {
 extract_request_id() {
   local tx_output="$1"
   local request_created_topic0="0x13e89e7f5f11ae17347a4657936695ef7097ee21e38f9250bd21466ccacccd5c"
-  # Extract the transactionHash from cast send output
-  local tx_hash=$(echo "$tx_output" | grep "transactionHash" | awk '{print $2}')
-  if [ -z "$tx_hash" ]; then
-    echo ""
-    return 1
+  # `cast send` already returns the logs array as JSON. Prefer parsing that directly so we
+  # do not depend on receipt formatting or accidentally match nested `transactionHash` fields.
+  local logs_json=$(printf '%s\n' "$tx_output" | awk '/^logs[[:space:]]+\[/ { sub(/^[^[]*/, ""); print; exit }')
+  local request_id_hex=""
+
+  if [ -n "$logs_json" ]; then
+    request_id_hex=$(printf '%s\n' "$logs_json" | jq -r --arg topic0 "$request_created_topic0" \
+      'first(.[]? | select((.topics[0] // "" | ascii_downcase) == ($topic0 | ascii_downcase)) | .topics[1]) // empty' 2>/dev/null)
   fi
-  # Read the JSON receipt and find the RequestCreated event deterministically.
-  # The requestId is indexed, so it is stored in topics[1].
-  local request_id_hex=$(cast receipt "$tx_hash" --json --rpc-url "$RPC_URL" 2>/dev/null | \
-    jq -r --arg topic0 "$request_created_topic0" \
-      'first(.logs[]? | select((.topics[0] // "" | ascii_downcase) == ($topic0 | ascii_downcase)) | .topics[1]) // empty')
+
+  if [ -z "$request_id_hex" ]; then
+    local tx_hash=$(printf '%s\n' "$tx_output" | awk '/^transactionHash[[:space:]]+0x[0-9a-fA-F]{64}$/ { print $2; exit }')
+    if [ -z "$tx_hash" ]; then
+      echo ""
+      return 1
+    fi
+    # Fall back to the JSON receipt when the logs line is not present.
+    # The requestId is indexed, so it is stored in topics[1].
+    request_id_hex=$(cast receipt "$tx_hash" --json --rpc-url "$RPC_URL" 2>/dev/null | \
+      jq -r --arg topic0 "$request_created_topic0" \
+        'first(.logs[]? | select((.topics[0] // "" | ascii_downcase) == ($topic0 | ascii_downcase)) | .topics[1]) // empty')
+  fi
+
   if [ -n "$request_id_hex" ]; then
     cast to-dec "$request_id_hex"
   else
