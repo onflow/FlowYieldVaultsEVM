@@ -15,7 +15,8 @@ contract ERC20DecimalsOnlyMock {
 }
 
 /// @notice Test-only EVM mock for Cadence query coverage.
-/// @dev Returns a stable getPendingRequestsByUserUnpacked payload for one user.
+/// @dev Mirrors the production getPendingRequestsByUserUnpacked ABI exactly,
+///      but returns synthetic fixed data instead of reading real request state.
 contract PendingRequestsByUserQueryMock {
     address internal constant TARGET_USER = 0x0000000000000000000000000000000000000011;
     address internal constant NATIVE_FLOW = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
