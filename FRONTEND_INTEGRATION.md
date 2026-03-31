@@ -19,9 +19,10 @@ import addresses from "./evm-contracts/deployments/contract-addresses.json";
 import abi from "./evm-contracts/deployments/artifacts/FlowYieldVaultsRequests.json";
 import { RequestType, RequestStatus } from "./evm-contracts/deployments/types";
 
+const network = getCurrentNetworkKey(); // e.g. "mainnet" | "testnet"
 const contractAddress =
-  addresses.contracts.FlowYieldVaultsRequests.addresses.testnet;
-const networkConfig = addresses.metadata.networks.testnet;
+  addresses.contracts.FlowYieldVaultsRequests.addresses[network];
+const networkConfig = addresses.metadata.networks[network];
 ```
 
 ### 3. Initialize ethers.js Contract
@@ -184,8 +185,8 @@ const [
   claimableRefunds,
 ] = await contract.getPendingRequestsByUserUnpacked(userAddress);
 
-// `balanceTokens` will contain `[NATIVE_FLOW, WFLOW]` when WFLOW is configured (otherwise `[NATIVE_FLOW]`).
-// The balance arrays are aligned by index.
+// `balanceTokens` contains the tracked token set configured on the contract.
+// The balance arrays are aligned by index and may include disabled tokens if users still have balances/refunds.
 const pendingByToken = Object.fromEntries(
   balanceTokens.map((token, i) => [token, pendingBalances[i]])
 );
@@ -350,22 +351,23 @@ The EVM contract only stores **request queue data** and **ownership mappings**. 
 ```typescript
 import * as fcl from "@onflow/fcl";
 
-// Configure for testnet
-fcl.config({
-  "accessNode.api": "https://rest-testnet.onflow.org",
-  "flow.network": "testnet",
-});
+const network = getCurrentNetworkKey(); // e.g. "mainnet" | "testnet"
+const cadenceConfig = getCadenceConfig(network);
 
-// Contract addresses (testnet)
-const FLOW_YIELD_VAULTS_EVM_ADDRESS = "0x764bdff06a0ee77e"; // FlowYieldVaultsEVM
-const FLOW_YIELD_VAULTS_ADDRESS = "0xd2580caf2ef07c2f"; // FlowYieldVaults
+// Configure FCL using your selected network
+fcl.config({
+  "accessNode.api": cadenceConfig.accessNodeApi,
+  "flow.network": cadenceConfig.flowNetwork,
+  "0xFlowYieldVaultsEVM": cadenceConfig.flowYieldVaultsEVM,
+  "0xFlowYieldVaults": cadenceConfig.flowYieldVaults,
+});
 ```
 
 ### Get User's YieldVault IDs (from Cadence)
 
 ```typescript
 const GET_USER_YIELDVAULTS = `
-import FlowYieldVaultsEVM from 0x764bdff06a0ee77e
+import FlowYieldVaultsEVM from 0xFlowYieldVaultsEVM
 
 access(all) fun main(evmAddress: String): [UInt64] {
     var normalizedAddress = evmAddress.toLower()
@@ -391,7 +393,7 @@ This is **critical** for displaying actual position values. The balance lives on
 
 ```typescript
 const GET_YIELDVAULT_BALANCE = `
-import FlowYieldVaults from 0xd2580caf2ef07c2f
+import FlowYieldVaults from 0xFlowYieldVaults
 
 access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): UFix64? {
     let account = getAccount(managerAddress)
@@ -409,7 +411,7 @@ access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): UFix64? {
 const balance = await fcl.query({
   cadence: GET_YIELDVAULT_BALANCE,
   args: (arg, t) => [
-    arg(FLOW_YIELD_VAULTS_ADDRESS, t.Address),
+    arg(cadenceConfig.flowYieldVaults, t.Address),
     arg(yieldVaultId.toString(), t.UInt64),
   ],
 });
@@ -420,7 +422,7 @@ const balance = await fcl.query({
 
 ```typescript
 const GET_YIELDVAULT_DETAILS = `
-import FlowYieldVaults from 0xd2580caf2ef07c2f
+import FlowYieldVaults from 0xFlowYieldVaults
 
 access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): {String: AnyStruct}? {
     let account = getAccount(managerAddress)
@@ -442,7 +444,7 @@ access(all) fun main(managerAddress: Address, yieldVaultId: UInt64): {String: An
 const details = await fcl.query({
   cadence: GET_YIELDVAULT_DETAILS,
   args: (arg, t) => [
-    arg(FLOW_YIELD_VAULTS_ADDRESS, t.Address),
+    arg(cadenceConfig.flowYieldVaults, t.Address),
     arg(yieldVaultId.toString(), t.UInt64),
   ],
 });
@@ -466,7 +468,7 @@ async function getUserPositions(userEvmAddress: string) {
       const balance = await fcl.query({
         cadence: GET_YIELDVAULT_BALANCE,
         args: (arg, t) => [
-          arg(FLOW_YIELD_VAULTS_ADDRESS, t.Address),
+          arg(cadenceConfig.flowYieldVaults, t.Address),
           arg(id, t.UInt64),
         ],
       });
@@ -485,7 +487,7 @@ async function getUserPositions(userEvmAddress: string) {
 
 ```typescript
 const GET_SUPPORTED_STRATEGIES = `
-import FlowYieldVaults from 0xd2580caf2ef07c2f
+import FlowYieldVaults from 0xFlowYieldVaults
 
 access(all) fun main(): [String] {
     let strategies = FlowYieldVaults.getSupportedStrategies()
@@ -505,7 +507,7 @@ const strategies = await fcl.query({ cadence: GET_SUPPORTED_STRATEGIES });
 
 ```typescript
 const CHECK_SYSTEM_STATUS = `
-import FlowYieldVaultsEVM from 0x764bdff06a0ee77e
+import FlowYieldVaultsEVM from 0xFlowYieldVaultsEVM
 
 access(all) fun main(): {String: AnyStruct} {
     return {
@@ -585,6 +587,13 @@ if (claimable > 0n) {
   // Listen for RefundClaimed event to confirm
 }
 ```
+
+Important behavior for EVM wallets:
+
+- A `FAILED` `CREATE_YIELDVAULT` or `DEPOSIT_TO_YIELDVAULT` request means the funds were moved into `claimableRefunds`, not lost.
+- The claim action should be shown whenever `getClaimableRefund(userAddress, tokenAddress) > 0`, even if the failed request row itself is no longer actionable.
+- Refunds are aggregated per user and token, not per request. One failed PYUSD0 request can increase an existing PYUSD0 claimable balance, so the UI should render a token-level claim CTA using the total returned by `getClaimableRefund(...)`.
+- The button should call `claimRefund(tokenAddress)` on `FlowYieldVaultsRequests`.
 
 ### Flow vs EVM Wallet Differences
 

@@ -99,6 +99,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     address public constant NATIVE_FLOW =
         0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
 
+    /// @notice Default minimum deposit for initially supported tokens
+    uint256 public constant DEFAULT_MINIMUM_BALANCE = 1 ether;
+
     /// @notice WFLOW (Wrapped FLOW) ERC20 token address
     /// @dev On Cadence side, WFLOW is automatically unwrapped to native FlowToken by FlowEVMBridge
     address public immutable WFLOW;
@@ -199,11 +202,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice COA address cannot be zero
     error InvalidCOAAddress();
 
+    /// @notice Minimum balance must be non-zero for supported tokens
+    error InvalidMinimumBalance();
+
     /// @notice Address array cannot be empty
     error EmptyAddressArray();
 
     /// @notice Cannot add zero address to allowlist
     error CannotAllowlistZeroAddress();
+
+    /// @notice Cannot add zero address to blocklist
+    error CannotBlocklistZeroAddress();
 
     /// @notice Amount must be greater than zero
     error AmountMustBeGreaterThanZero();
@@ -495,16 +504,18 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param coaAddress Address of the authorized COA
     /// @param wflowAddress Address of the WFLOW (Wrapped FLOW) ERC20 token
     constructor(address coaAddress, address wflowAddress) Ownable(msg.sender) {
+        if (coaAddress == address(0)) revert InvalidCOAAddress();
+
         authorizedCOA = coaAddress;
         WFLOW = wflowAddress;
         _requestIdCounter = 1;
         maxPendingRequestsPerUser = 10;
 
-        _setTokenConfig(NATIVE_FLOW, true, 1 ether, true);
+        _setTokenConfig(NATIVE_FLOW, true, DEFAULT_MINIMUM_BALANCE, true);
 
         // WFLOW is treated as ERC20 on EVM side, but unwraps to native FlowToken on Cadence
         if (wflowAddress != address(0)) {
-            _setTokenConfig(WFLOW, true, 1 ether, false);
+            _setTokenConfig(WFLOW, true, DEFAULT_MINIMUM_BALANCE, false);
         }
     }
 
@@ -587,7 +598,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
         for (uint256 i = 0; i < _addresses.length; ) {
             if (_addresses[i] == address(0))
-                revert CannotAllowlistZeroAddress();
+                revert CannotBlocklistZeroAddress();
             blocklisted[_addresses[i]] = true;
             unchecked {
                 ++i;
@@ -1450,6 +1461,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256 minimumBalance,
         bool isNative
     ) internal {
+        if (isSupported && minimumBalance == 0) revert InvalidMinimumBalance();
+
         allowedTokens[tokenAddress] = TokenConfig({
             isSupported: isSupported,
             minimumBalance: minimumBalance,

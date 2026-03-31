@@ -457,6 +457,11 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.setAuthorizedCOA(address(0));
     }
 
+    function test_Constructor_RevertZeroCOAAddress() public {
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidCOAAddress.selector);
+        new FlowYieldVaultsRequestsTestHelper(address(0), WFLOW);
+    }
+
     function test_SetTokenConfig() public {
         address token = makeAddr("token");
 
@@ -467,6 +472,14 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(isSupported, true);
         assertEq(minBalance, 0.5 ether);
         assertEq(isNative, false);
+    }
+
+    function test_SetTokenConfig_RevertZeroMinimumForSupportedToken() public {
+        address token = makeAddr("token");
+
+        vm.prank(c.owner());
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidMinimumBalance.selector);
+        c.setTokenConfig(token, true, 0, false);
     }
 
     function test_SetMaxPendingRequestsPerUser() public {
@@ -613,6 +626,15 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.Blocklisted.selector, user));
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+    }
+
+    function test_BatchAddToBlocklist_RevertZeroAddress() public {
+        address[] memory addrs = new address[](1);
+        addrs[0] = address(0);
+
+        vm.prank(c.owner());
+        vm.expectRevert(FlowYieldVaultsRequests.CannotBlocklistZeroAddress.selector);
+        c.batchAddToBlocklist(addrs);
     }
 
     function test_BlocklistTakesPrecedence() public {
