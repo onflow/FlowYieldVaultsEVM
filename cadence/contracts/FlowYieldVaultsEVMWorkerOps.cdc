@@ -146,10 +146,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         nextRunCapacity: UInt8?,
     )
 
-    /// @notice Emitted when a WorkerHandler has panicked and SchedulerHandler has marked the request as FAILED
+    /// @notice Emitted when SchedulerHandler detects a failed WorkerHandler execution
     /// @param status The status of the transaction (Unknown, Scheduled, Executed, Canceled)
-    /// @param markedAsFailed Whether the request was marked as FAILED
-    /// @param request The request that was marked as FAILED
+    /// @param markedAsFailed Whether the request was successfully marked as FAILED on EVM
+    /// @param request The tracked request being recovered
     access(all) event WorkerHandlerPanicDetected(
         status: UInt8?,
         markedAsFailed: Bool,
@@ -171,6 +171,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     )
 
     /// @notice Emitted when stopAll() cannot mark a cancelled request as FAILED
+    /// @dev The request remains tracked in scheduledRequests so a later recovery attempt can retry finalization.
     /// @param requestId EVM request ID that could not be marked as FAILED
     /// @param workerTransactionId Cancelled WorkerHandler transaction ID
     access(all) event StopAllMarkFailedSkipped(
@@ -332,6 +333,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                         requestId: scheduledRequestId,
                         workerTransactionId: request.workerTransactionId,
                     )
+                    continue
                 }
 
                 FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: scheduledRequestId)
@@ -583,7 +585,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         /// @notice Main scheduler logic
         /// @dev Flow:
         ///      1. Check for failed worker requests
-        ///         - If a failure is identified, mark the request as failed and remove it from scheduledRequests
+        ///         - If a failure is identified, attempt to mark the request as FAILED
+        ///         - Remove it from scheduledRequests only after EVM finalization succeeds
         ///      2. If fetchCount > 0, fetch pending requests from EVM
         ///      3. Preprocess requests to drop invalid requests
         ///      4. Start processing requests (PENDING -> PROCESSING)
@@ -631,7 +634,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
         ///         - Only acceptable transaction status is Scheduled (pending execution)
         ///         - No status is considered not acceptable because it means the manager cleaned up the request
         ///      4. If the transaction status is invalid, mark the request as FAILED providing the transaction ID
-        ///      5. Remove the request from scheduledRequests
+        ///      5. Remove the request from scheduledRequests only after it has been marked as FAILED on EVM
         /// @param manager The scheduler manager
         /// @param worker The worker capability
         access(self) fun _checkForFailedWorkerRequests(
@@ -669,9 +672,10 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                         message: "Worker transaction did not execute successfully. Transaction ID: \(txId.toString())",
                     )
 
-                    // Remove request from scheduledRequests
-                    // Success is not checked because errors are not considered transient
-                    FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                    // Keep the request tracked if EVM finalization fails so crash recovery can retry later.
+                    if success {
+                        FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
+                    }
 
                     emit WorkerHandlerPanicDetected(
                         status: txStatus?.rawValue,

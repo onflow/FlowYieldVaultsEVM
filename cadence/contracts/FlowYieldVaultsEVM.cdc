@@ -660,7 +660,9 @@ access(all) contract FlowYieldVaultsEVM {
         }
 
         /// @notice Marks a request as FAILED
-        /// @dev Calls completeProcessing to mark the request as failed with the given message
+        /// @dev Calls completeProcessing to mark the request as failed with the given message.
+        ///      Uses the same refund computation as the normal completion path to keep
+        ///      failed CREATE/DEPOSIT and failed WITHDRAW/CLOSE behavior consistent.
         /// @param request The EVM request to mark as failed
         /// @param message The error message to include in the result
         /// @return True if the request was marked as failed on EVM, false otherwise
@@ -671,12 +673,17 @@ access(all) contract FlowYieldVaultsEVM {
 
             FlowYieldVaultsEVM.emitRequestFailed(request, message: message)
 
+            let refundAmount = FlowYieldVaultsEVM.refundAmountForCompletion(
+                request: request,
+                success: false,
+            )
+
             return self.completeProcessing(
                 requestId: request.id,
                 success: false,
                 yieldVaultId: request.yieldVaultId,
                 message: message,
-                refundAmount: request.amount,
+                refundAmount: refundAmount,
                 tokenAddress: request.tokenAddress,
                 requestType: request.requestType,
             )

@@ -338,6 +338,21 @@ unpause_scheduler() {
     --compute-limit 9999 2>&1
 }
 
+# Run scheduler manually with explicit capacity
+run_scheduler_with_capacity() {
+  local run_capacity=$1
+  flow transactions send ./cadence/tests/transactions/scheduler/run_scheduler_with_capacity.cdc "$run_capacity" \
+    --signer emulator-flow-yield-vaults \
+    --compute-limit 9999 2>&1
+}
+
+# Stop all scheduled worker and scheduler transactions
+stop_all_scheduled_transactions() {
+  flow transactions send ./cadence/transactions/scheduler/stop_all_scheduled_transactions.cdc \
+    --signer emulator-flow-yield-vaults \
+    --compute-limit 9999 2>&1
+}
+
 # Initialize scheduler handlers
 init_scheduler() {
   flow transactions send ./cadence/transactions/scheduler/init_and_schedule.cdc \
@@ -1055,10 +1070,110 @@ else
 fi
 
 # ============================================
-# SCENARIO 6: PREPROCESSING VALIDATION TESTS
+# SCENARIO 6: FAILED WITHDRAW RECOVERY VIA STOPALL
 # ============================================
 
-log_section "SCENARIO 6: Preprocessing Validation Tests"
+log_section "SCENARIO 6: Failed Withdraw Recovery Via stopAll()"
+
+log_test "Pause scheduler before creating withdraw recovery requests"
+
+PAUSE_OUTPUT=$(pause_scheduler)
+assert_tx_success "$PAUSE_OUTPUT" "Scheduler paused for withdraw recovery scenario"
+
+WITHDRAW_RECOVERY_VAULTS=$(get_user_yieldvaults "$USER_A_EOA")
+WITHDRAW_RECOVERY_VAULT_ID=$(get_latest_yieldvault_id "$WITHDRAW_RECOVERY_VAULTS")
+WITHDRAW_RECOVERY_AMOUNT_1="50000000000000000"
+WITHDRAW_RECOVERY_AMOUNT_2="60000000000000000"
+WITHDRAW_RECOVERY_AMOUNT_3="70000000000000000"
+
+if [ -n "$WITHDRAW_RECOVERY_VAULT_ID" ]; then
+  log_info "Using YieldVault ID $WITHDRAW_RECOVERY_VAULT_ID for withdraw recovery"
+
+  USER_A_WITHDRAW_RECOVERY_REFUND_BEFORE=$(get_claimable_refund "$USER_A_EOA")
+  USER_A_WITHDRAW_RECOVERY_REFUND_BEFORE=$(clean_wei "$USER_A_WITHDRAW_RECOVERY_REFUND_BEFORE")
+
+  log_test "Create three withdraw requests while scheduler is paused"
+
+  # Same-user worker requests are scheduled with 1s offsets.
+  # We assert on the third request so stopAll() can cancel it before its delayed worker executes.
+  TX_WITHDRAW_RECOVERY_1=$(cast_send "$USER_A_PK" \
+    "withdrawFromYieldVault(uint64,uint256)" \
+    "$WITHDRAW_RECOVERY_VAULT_ID" \
+    "$WITHDRAW_RECOVERY_AMOUNT_1" 2>&1)
+  assert_evm_tx_success "$TX_WITHDRAW_RECOVERY_1" "First withdraw recovery request submitted"
+
+  sleep 1
+
+  TX_WITHDRAW_RECOVERY_2=$(cast_send "$USER_A_PK" \
+    "withdrawFromYieldVault(uint64,uint256)" \
+    "$WITHDRAW_RECOVERY_VAULT_ID" \
+    "$WITHDRAW_RECOVERY_AMOUNT_2" 2>&1)
+  assert_evm_tx_success "$TX_WITHDRAW_RECOVERY_2" "Second withdraw recovery request submitted"
+
+  sleep 1
+
+  TX_WITHDRAW_RECOVERY_3=$(cast_send "$USER_A_PK" \
+    "withdrawFromYieldVault(uint64,uint256)" \
+    "$WITHDRAW_RECOVERY_VAULT_ID" \
+    "$WITHDRAW_RECOVERY_AMOUNT_3" 2>&1)
+  assert_evm_tx_success "$TX_WITHDRAW_RECOVERY_3" "Third withdraw recovery request submitted"
+
+  WITHDRAW_RECOVERY_REQUEST_ID_1=$(extract_request_id "$TX_WITHDRAW_RECOVERY_1")
+  WITHDRAW_RECOVERY_REQUEST_ID_2=$(extract_request_id "$TX_WITHDRAW_RECOVERY_2")
+  WITHDRAW_RECOVERY_REQUEST_ID_3=$(extract_request_id "$TX_WITHDRAW_RECOVERY_3")
+
+  if [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_1" ] && [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_2" ] && [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_3" ]; then
+    log_success "Withdraw recovery request IDs extracted ($WITHDRAW_RECOVERY_REQUEST_ID_1, $WITHDRAW_RECOVERY_REQUEST_ID_2, $WITHDRAW_RECOVERY_REQUEST_ID_3)"
+  else
+    log_fail "Could not extract all withdraw recovery request IDs"
+  fi
+
+  log_test "Preprocess withdraw requests into PROCESSING without waiting for automatic scheduler runs"
+
+  UNPAUSE_OUTPUT=$(unpause_scheduler)
+  assert_tx_success "$UNPAUSE_OUTPUT" "Scheduler unpaused for manual preprocessing"
+
+  MANUAL_SCHEDULER_OUTPUT=$(run_scheduler_with_capacity 3)
+  assert_tx_success "$MANUAL_SCHEDULER_OUTPUT" "Manual scheduler run with capacity 3 submitted"
+
+  if [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_3" ]; then
+    WITHDRAW_RECOVERY_STATUS_PROCESSING=$(get_request_status "$WITHDRAW_RECOVERY_REQUEST_ID_3")
+    assert_eq "1" "$WITHDRAW_RECOVERY_STATUS_PROCESSING" "Third withdraw recovery request reached PROCESSING"
+  fi
+
+  log_test "Cancel scheduled worker transactions and verify failed withdraw finalization"
+
+  STOP_ALL_OUTPUT=$(stop_all_scheduled_transactions)
+  assert_tx_success "$STOP_ALL_OUTPUT" "stopAll() transaction submitted"
+
+  if [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_3" ]; then
+    WITHDRAW_RECOVERY_STATUS_FINAL=$(get_request_status "$WITHDRAW_RECOVERY_REQUEST_ID_3")
+    assert_eq "3" "$WITHDRAW_RECOVERY_STATUS_FINAL" "Third withdraw recovery request marked FAILED after stopAll()"
+
+    WITHDRAW_RECOVERY_MESSAGE=$(get_request_message "$WITHDRAW_RECOVERY_REQUEST_ID_3")
+    if echo "$WITHDRAW_RECOVERY_MESSAGE" | grep -q "cancelled by admin stopAll"; then
+      log_success "Failed withdraw request recorded stopAll() recovery message"
+    else
+      log_fail "Failed withdraw request message did not mention stopAll() cancellation"
+    fi
+  fi
+
+  USER_A_WITHDRAW_RECOVERY_REFUND_AFTER=$(get_claimable_refund "$USER_A_EOA")
+  USER_A_WITHDRAW_RECOVERY_REFUND_AFTER=$(clean_wei "$USER_A_WITHDRAW_RECOVERY_REFUND_AFTER")
+  USER_A_WITHDRAW_RECOVERY_REFUND_DELTA=$(subtract_wei "$USER_A_WITHDRAW_RECOVERY_REFUND_AFTER" "$USER_A_WITHDRAW_RECOVERY_REFUND_BEFORE")
+  assert_wei_eq "0" "$USER_A_WITHDRAW_RECOVERY_REFUND_DELTA" "Failed withdraw recovery did not create a bogus refund"
+
+  UNPAUSE_OUTPUT=$(unpause_scheduler)
+  assert_tx_success "$UNPAUSE_OUTPUT" "Scheduler resumed after stopAll() recovery"
+else
+  log_fail "Could not determine a YieldVault ID for withdraw recovery scenario"
+fi
+
+# ============================================
+# SCENARIO 7: PREPROCESSING VALIDATION TESTS
+# ============================================
+
+log_section "SCENARIO 7: Preprocessing Validation Tests"
 
 # This test verifies that the preprocessing logic correctly rejects
 # various types of invalid requests
@@ -1192,10 +1307,10 @@ else
 fi
 
 # ============================================
-# SCENARIO 7: MAX PROCESSING CAPACITY TEST
+# SCENARIO 8: MAX PROCESSING CAPACITY TEST
 # ============================================
 
-log_section "SCENARIO 7: Max Processing Capacity Test"
+log_section "SCENARIO 8: Max Processing Capacity Test"
 
 # This test verifies that the scheduler respects the maxProcessingRequests limit (default: 3)
 # When more requests are submitted than capacity allows, some should stay PENDING
