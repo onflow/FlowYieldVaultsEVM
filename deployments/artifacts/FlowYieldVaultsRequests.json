@@ -315,6 +315,11 @@
         "name": "message",
         "type": "string",
         "internalType": "string"
+      },
+      {
+        "name": "refundAmount",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -1997,6 +2002,22 @@
     "type": "error",
     "name": "InvalidCOAAddress",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidRefundAmount",
+    "inputs": [
+      {
+        "name": "expectedOrMaximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

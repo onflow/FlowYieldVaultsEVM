@@ -198,6 +198,13 @@ get_claimable_refund() {
     sed 's/ \[.*\]$//' | tr -d ' '
 }
 
+# Claim refund from Solidity contract
+claim_refund() {
+  local user_pk=$1
+  local token_address=${2:-$NATIVE_FLOW}
+  cast_send "$user_pk" "claimRefund(address)" "$token_address"
+}
+
 # Get request message (error message or status message)
 get_request_message() {
   local request_id=$1
@@ -355,6 +362,16 @@ count_yieldvaults() {
   fi
 }
 
+# Extract the latest YieldVault ID from the Cadence script output
+get_latest_yieldvault_id() {
+  local vaults_output="$1"
+  if [ -z "$vaults_output" ] || [ "$vaults_output" = "[]" ]; then
+    echo ""
+  else
+    echo "$vaults_output" | grep -Eo '[0-9]+' | tail -1
+  fi
+}
+
 # Wait for user to have more YieldVaults than before
 # Usage: wait_for_user_vault "$USER_EOA" "$VAULTS_BEFORE" [timeout]
 # Returns 0 if new vault detected, 1 if timeout
@@ -456,6 +473,21 @@ assert_eq() {
     return 0
   else
     log_fail "$message (expected: $expected, got: $actual)"
+    return 1
+  fi
+}
+
+# Assert exact wei equality
+assert_wei_eq() {
+  local expected=$(clean_wei "$1")
+  local actual=$(clean_wei "$2")
+  local message=$3
+
+  if compare_wei "$expected" -eq "$actual"; then
+    log_success "$message"
+    return 0
+  else
+    log_fail "$message (expected: $expected wei, got: $actual wei)"
     return 1
   fi
 }
@@ -758,10 +790,139 @@ else
 fi
 
 # ============================================
-# SCENARIO 4: PANIC RECOVERY - INVALID STRATEGY
+# SCENARIO 4: Successful Dust Refund Claims
 # ============================================
 
-log_section "SCENARIO 4: Panic Recovery - Invalid Strategy Identifier"
+log_section "SCENARIO 4: Successful Dust Refund Claims"
+
+DUST_TIMEOUT=$((AUTO_PROCESS_TIMEOUT * 2))
+CREATE_DUST_RESIDUAL="123456789"
+CREATE_DUST_AMOUNT="1000000000123456789"
+DEPOSIT_DUST_RESIDUAL="987654321"
+DEPOSIT_DUST_AMOUNT="1000000000987654321"
+
+log_test "Successful CREATE with dust credits exact claimable refund"
+
+USER_B_CREATE_DUST_VAULTS_BEFORE=$(get_user_yieldvaults "$USER_B_EOA")
+USER_B_CREATE_DUST_VAULTS_BEFORE_COUNT=$(count_yieldvaults "$USER_B_CREATE_DUST_VAULTS_BEFORE")
+USER_B_CREATE_DUST_REFUND_BEFORE=$(get_claimable_refund "$USER_B_EOA")
+USER_B_CREATE_DUST_REFUND_BEFORE=$(clean_wei "$USER_B_CREATE_DUST_REFUND_BEFORE")
+
+TX_CREATE_DUST=$(cast_send "$USER_B_PK" \
+  "createYieldVault(address,uint256,string,string)" \
+  "$NATIVE_FLOW" \
+  "$CREATE_DUST_AMOUNT" \
+  "$VAULT_IDENTIFIER" \
+  "$STRATEGY_IDENTIFIER" \
+  --value "$CREATE_DUST_AMOUNT" 2>&1)
+
+assert_evm_tx_success "$TX_CREATE_DUST" "Dusty CREATE request submitted"
+
+CREATE_DUST_REQUEST_ID=$(extract_request_id "$TX_CREATE_DUST")
+if [ -n "$CREATE_DUST_REQUEST_ID" ]; then
+  log_success "Dusty CREATE request ID extracted ($CREATE_DUST_REQUEST_ID)"
+else
+  log_fail "Could not extract request ID for dusty CREATE"
+fi
+
+if [ -n "$CREATE_DUST_REQUEST_ID" ]; then
+  if wait_for_request_status "$CREATE_DUST_REQUEST_ID" "2" "$DUST_TIMEOUT"; then
+    log_success "Dusty CREATE request completed"
+  else
+    log_fail "Dusty CREATE request did not reach COMPLETED status"
+  fi
+
+  if wait_for_user_vault "$USER_B_EOA" "$USER_B_CREATE_DUST_VAULTS_BEFORE" "$DUST_TIMEOUT"; then
+    USER_B_CREATE_DUST_VAULTS_AFTER=$(get_user_yieldvaults "$USER_B_EOA")
+    USER_B_CREATE_DUST_VAULTS_AFTER_COUNT=$(count_yieldvaults "$USER_B_CREATE_DUST_VAULTS_AFTER")
+    EXPECTED_USER_B_CREATE_DUST_VAULTS=$((USER_B_CREATE_DUST_VAULTS_BEFORE_COUNT + 1))
+
+    log_info "User B YieldVaults after dusty CREATE: $USER_B_CREATE_DUST_VAULTS_AFTER"
+    assert_eq "$EXPECTED_USER_B_CREATE_DUST_VAULTS" "$USER_B_CREATE_DUST_VAULTS_AFTER_COUNT" "Dusty CREATE created exactly one new YieldVault"
+  else
+    log_fail "Dusty CREATE did not create a new Cadence YieldVault"
+  fi
+
+  USER_B_CREATE_DUST_REFUND_AFTER=$(get_claimable_refund "$USER_B_EOA")
+  USER_B_CREATE_DUST_REFUND_AFTER=$(clean_wei "$USER_B_CREATE_DUST_REFUND_AFTER")
+  USER_B_CREATE_DUST_REFUND_DELTA=$(subtract_wei "$USER_B_CREATE_DUST_REFUND_AFTER" "$USER_B_CREATE_DUST_REFUND_BEFORE")
+
+  log_info "User B CREATE dust refund delta: $USER_B_CREATE_DUST_REFUND_DELTA wei"
+  assert_wei_eq "$CREATE_DUST_RESIDUAL" "$USER_B_CREATE_DUST_REFUND_DELTA" "CREATE dust credited exact residual"
+
+  if compare_wei "$USER_B_CREATE_DUST_REFUND_AFTER" -gt "$USER_B_CREATE_DUST_REFUND_BEFORE"; then
+    CLAIM_CREATE_DUST_OUTPUT=$(claim_refund "$USER_B_PK" "$NATIVE_FLOW")
+    assert_evm_tx_success "$CLAIM_CREATE_DUST_OUTPUT" "CREATE dust refund claimed"
+
+    USER_B_CREATE_DUST_REFUND_FINAL=$(get_claimable_refund "$USER_B_EOA")
+    USER_B_CREATE_DUST_REFUND_FINAL=$(clean_wei "$USER_B_CREATE_DUST_REFUND_FINAL")
+    assert_eq "0" "$USER_B_CREATE_DUST_REFUND_FINAL" "CREATE dust claimable refund cleared"
+  else
+    log_fail "No CREATE dust refund was available to claim"
+  fi
+fi
+
+log_test "Successful DEPOSIT with dust credits exact claimable refund"
+
+USER_A_VAULTS_FOR_DUST_DEPOSIT=$(get_user_yieldvaults "$USER_A_EOA")
+DUST_DEPOSIT_VAULT_ID=$(get_latest_yieldvault_id "$USER_A_VAULTS_FOR_DUST_DEPOSIT")
+
+if [ -n "$DUST_DEPOSIT_VAULT_ID" ]; then
+  log_info "Using YieldVault ID $DUST_DEPOSIT_VAULT_ID for dust deposit"
+
+  USER_A_DEPOSIT_DUST_REFUND_BEFORE=$(get_claimable_refund "$USER_A_EOA")
+  USER_A_DEPOSIT_DUST_REFUND_BEFORE=$(clean_wei "$USER_A_DEPOSIT_DUST_REFUND_BEFORE")
+
+  TX_DEPOSIT_DUST=$(cast_send "$USER_A_PK" \
+    "depositToYieldVault(uint64,address,uint256)" \
+    "$DUST_DEPOSIT_VAULT_ID" \
+    "$NATIVE_FLOW" \
+    "$DEPOSIT_DUST_AMOUNT" \
+    --value "$DEPOSIT_DUST_AMOUNT" 2>&1)
+
+  assert_evm_tx_success "$TX_DEPOSIT_DUST" "Dusty DEPOSIT request submitted"
+
+  DEPOSIT_DUST_REQUEST_ID=$(extract_request_id "$TX_DEPOSIT_DUST")
+  if [ -n "$DEPOSIT_DUST_REQUEST_ID" ]; then
+    log_success "Dusty DEPOSIT request ID extracted ($DEPOSIT_DUST_REQUEST_ID)"
+  else
+    log_fail "Could not extract request ID for dusty DEPOSIT"
+  fi
+
+  if [ -n "$DEPOSIT_DUST_REQUEST_ID" ]; then
+    if wait_for_request_status "$DEPOSIT_DUST_REQUEST_ID" "2" "$DUST_TIMEOUT"; then
+      log_success "Dusty DEPOSIT request completed"
+    else
+      log_fail "Dusty DEPOSIT request did not reach COMPLETED status"
+    fi
+
+    USER_A_DEPOSIT_DUST_REFUND_AFTER=$(get_claimable_refund "$USER_A_EOA")
+    USER_A_DEPOSIT_DUST_REFUND_AFTER=$(clean_wei "$USER_A_DEPOSIT_DUST_REFUND_AFTER")
+    USER_A_DEPOSIT_DUST_REFUND_DELTA=$(subtract_wei "$USER_A_DEPOSIT_DUST_REFUND_AFTER" "$USER_A_DEPOSIT_DUST_REFUND_BEFORE")
+
+    log_info "User A DEPOSIT dust refund delta: $USER_A_DEPOSIT_DUST_REFUND_DELTA wei"
+    assert_wei_eq "$DEPOSIT_DUST_RESIDUAL" "$USER_A_DEPOSIT_DUST_REFUND_DELTA" "DEPOSIT dust credited exact residual"
+
+    if compare_wei "$USER_A_DEPOSIT_DUST_REFUND_AFTER" -gt "$USER_A_DEPOSIT_DUST_REFUND_BEFORE"; then
+      CLAIM_DEPOSIT_DUST_OUTPUT=$(claim_refund "$USER_A_PK" "$NATIVE_FLOW")
+      assert_evm_tx_success "$CLAIM_DEPOSIT_DUST_OUTPUT" "DEPOSIT dust refund claimed"
+
+      USER_A_DEPOSIT_DUST_REFUND_FINAL=$(get_claimable_refund "$USER_A_EOA")
+      USER_A_DEPOSIT_DUST_REFUND_FINAL=$(clean_wei "$USER_A_DEPOSIT_DUST_REFUND_FINAL")
+      assert_eq "0" "$USER_A_DEPOSIT_DUST_REFUND_FINAL" "DEPOSIT dust claimable refund cleared"
+    else
+      log_fail "No DEPOSIT dust refund was available to claim"
+    fi
+  fi
+else
+  log_fail "Could not determine a YieldVault ID for dusty DEPOSIT"
+fi
+
+# ============================================
+# SCENARIO 5: PANIC RECOVERY - INVALID STRATEGY
+# ============================================
+
+log_section "SCENARIO 5: Panic Recovery - Invalid Strategy Identifier"
 
 # This test verifies that requests with invalid strategy identifiers
 # are caught during preprocessing and marked as FAILED with proper error messages
@@ -878,11 +1039,26 @@ else
   log_fail "No refund credited for failed request"
 fi
 
+# Check exact refund amount and verify it can be claimed
+USER_A_REFUND_INCREASE=$(subtract_wei "$USER_A_REFUND_AFTER" "$USER_A_REFUND_BEFORE")
+assert_wei_eq "$EXPECTED_REFUND_INCREASE" "$USER_A_REFUND_INCREASE" "Failed request credited exact refund amount"
+
+if compare_wei "$USER_A_REFUND_AFTER" -gt "$USER_A_REFUND_BEFORE"; then
+  CLAIM_FAILED_REFUND_OUTPUT=$(claim_refund "$USER_A_PK" "$NATIVE_FLOW")
+  assert_evm_tx_success "$CLAIM_FAILED_REFUND_OUTPUT" "Failed request refund claimed"
+
+  USER_A_REFUND_FINAL=$(get_claimable_refund "$USER_A_EOA")
+  USER_A_REFUND_FINAL=$(clean_wei "$USER_A_REFUND_FINAL")
+  assert_eq "0" "$USER_A_REFUND_FINAL" "Failed request claimable refund cleared"
+else
+  log_fail "No failed-request refund was available to claim"
+fi
+
 # ============================================
-# SCENARIO 5: PREPROCESSING VALIDATION TESTS
+# SCENARIO 6: PREPROCESSING VALIDATION TESTS
 # ============================================
 
-log_section "SCENARIO 5: Preprocessing Validation Tests"
+log_section "SCENARIO 6: Preprocessing Validation Tests"
 
 # This test verifies that the preprocessing logic correctly rejects
 # various types of invalid requests
@@ -1016,10 +1192,10 @@ else
 fi
 
 # ============================================
-# SCENARIO 6: MAX PROCESSING CAPACITY TEST
+# SCENARIO 7: MAX PROCESSING CAPACITY TEST
 # ============================================
 
-log_section "SCENARIO 6: Max Processing Capacity Test"
+log_section "SCENARIO 7: Max Processing Capacity Test"
 
 # This test verifies that the scheduler respects the maxProcessingRequests limit (default: 3)
 # When more requests are submitted than capacity allows, some should stay PENDING

@@ -950,55 +950,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @dev This is the second phase of the two-phase commit pattern. Must be called by the
      *      authorized COA after Cadence-side operations complete.
      *
-     *      Refund handling for this compatibility overload:
-     *      - Failed CREATE/DEPOSIT: infers refundAmount = request.amount
-     *      - All other cases: infers refundAmount = 0
+     *      Refund handling:
+     *      - Failed CREATE/DEPOSIT: refund the full request amount
+     *      - Successful CREATE/DEPOSIT: refund only the precision residual, if any
+     *      - WITHDRAW/CLOSE: refundAmount must be 0
      *
      *      YieldVault registration:
      *      - Successful CREATE: Registers new YieldVault ownership
      *      - Successful CLOSE: Unregisters YieldVault ownership
      *
-     *      This overload cannot return success-path precision residuals; the 5-argument
-     *      overload is used by the Cadence worker for that purpose.
-     * @param requestId The unique identifier of the request to complete.
-     * @param success True if the Cadence operation succeeded, false otherwise.
-     * @param yieldVaultId The YieldVault Id from Cadence (for CREATE: newly assigned; for others: existing).
-     * @param message Human-readable status message or error description.
-     */
-    function completeProcessing(
-        uint256 requestId,
-        bool success,
-        uint64 yieldVaultId,
-        string calldata message
-    ) external payable onlyAuthorizedCOA nonReentrant {
-        Request storage request = requests[requestId];
-        uint256 refundAmount = 0;
-
-        if (
-            !success &&
-            request.id == requestId &&
-            (
-                request.requestType == RequestType.CREATE_YIELDVAULT ||
-                    request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT
-            )
-        ) {
-            refundAmount = request.amount;
-        }
-
-        _completeProcessing(
-            request,
-            requestId,
-            success,
-            yieldVaultId,
-            message,
-            refundAmount
-        );
-    }
-
-    /**
-     * @notice Completes request processing with an explicit refund amount.
-     * @dev Used by the Cadence worker to return either the full failed amount or any
-     *      success-path precision residual that could not be bridged into Cadence.
+     *      The Cadence worker passes the explicit refund amount so Solidity can validate
+     *      lifecycle accounting before finalizing the request.
      * @param requestId The unique identifier of the request to complete.
      * @param success True if the Cadence operation succeeded, false otherwise.
      * @param yieldVaultId The YieldVault Id from Cadence (for CREATE: newly assigned; for others: existing).
