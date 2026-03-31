@@ -71,6 +71,8 @@ NATIVE_FLOW="0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF"
 VAULT_IDENTIFIER="A.0ae53cb6e3f42a79.FlowToken.Vault"
 STRATEGY_IDENTIFIER="${STRATEGY_IDENTIFIER:-A.045a1763c93006ca.MockStrategies.TracerStrategy}"
 CADENCE_CONTRACT_ADDR="045a1763c93006ca"
+MOET_VAULT_IDENTIFIER="A.${CADENCE_CONTRACT_ADDR}.MOET.Vault"
+FLOWYIELDVAULTS_DIR="./lib/FlowYieldVaults"
 
 # Scheduler configuration
 SCHEDULER_WAKEUP_INTERVAL=1  # Default scheduler wakeup interval in seconds
@@ -124,12 +126,39 @@ cast_send() {
     --legacy 2>&1
 }
 
+# Execute EVM transaction against an arbitrary contract
+cast_send_to_contract() {
+  local user_pk=$1
+  local contract_address=$2
+  local function_sig=$3
+  shift 3
+
+  cast send "$contract_address" \
+    "$function_sig" \
+    "$@" \
+    --rpc-url "$RPC_URL" \
+    --private-key "$user_pk" \
+    --legacy 2>&1
+}
+
 # Execute EVM call via cast
 cast_call() {
   local function_sig=$1
   shift
 
   cast call "$FLOW_VAULTS_REQUESTS_CONTRACT" \
+    "$function_sig" \
+    "$@" \
+    --rpc-url "$RPC_URL" 2>&1
+}
+
+# Execute EVM call against an arbitrary contract
+cast_call_contract() {
+  local contract_address=$1
+  local function_sig=$2
+  shift 2
+
+  cast call "$contract_address" \
     "$function_sig" \
     "$@" \
     --rpc-url "$RPC_URL" 2>&1
@@ -198,11 +227,91 @@ get_claimable_refund() {
     sed 's/ \[.*\]$//' | tr -d ' '
 }
 
+# Get ERC20 balance for a user
+get_token_balance() {
+  local token_address=$1
+  local user_address=$2
+  cast_call_contract "$token_address" "balanceOf(address)(uint256)" "$user_address" | \
+    sed 's/ \[.*\]$//' | tr -d ' '
+}
+
 # Claim refund from Solidity contract
 claim_refund() {
   local user_pk=$1
   local token_address=${2:-$NATIVE_FLOW}
   cast_send "$user_pk" "claimRefund(address)" "$token_address"
+}
+
+# Approve ERC20 spend
+approve_token() {
+  local user_pk=$1
+  local token_address=$2
+  local spender_address=$3
+  local amount=$4
+  cast_send_to_contract "$user_pk" "$token_address" "approve(address,uint256)" "$spender_address" "$amount"
+}
+
+# Transfer ERC20 tokens
+transfer_token() {
+  local user_pk=$1
+  local token_address=$2
+  local recipient_address=$3
+  local amount=$4
+  cast_send_to_contract "$user_pk" "$token_address" "transfer(address,uint256)" "$recipient_address" "$amount"
+}
+
+# Resolve the bridged MOET ERC20 address from Cadence bridge config
+get_moet_evm_address() {
+  (
+    cd "$FLOWYIELDVAULTS_DIR" || exit 1
+    flow -f ./flow.json scripts execute ./cadence/tests/scripts/get_moet_evm_address.cdc 2>/dev/null
+  ) | \
+    grep "Result:" | cut -d'"' -f2 | tr -d '[:space:]'
+}
+
+# Bridge a Cadence token vault directly to an EVM address
+bridge_token_to_evm_address() {
+  local vault_identifier=$1
+  local amount=$2
+  local recipient_address=$3
+  (
+    cd "$FLOWYIELDVAULTS_DIR" || exit 1
+    flow -f ./flow.json transactions send \
+      ./lib/flow-evm-bridge/cadence/transactions/bridge/tokens/bridge_tokens_to_any_evm_address.cdc \
+      "$vault_identifier" \
+      "$amount" \
+      "$recipient_address" \
+      --signer emulator-flow-yield-vaults \
+      --compute-limit 9999 2>&1
+  )
+}
+
+# Configure a supported token on FlowYieldVaultsRequests via the worker's COA
+set_token_config() {
+  local token_address=$1
+  local is_supported=$2
+  local minimum_balance=$3
+  local is_native=$4
+  flow transactions send ./cadence/transactions/admin/set_token_config.cdc \
+    "$token_address" \
+    "$is_supported" \
+    "$minimum_balance" \
+    "$is_native" \
+    --signer emulator-flow-yield-vaults \
+    --compute-limit 9999 2>&1
+}
+
+# Approve ERC20 spend from the worker's COA for refund pulls
+approve_erc20_from_coa() {
+  local token_address=$1
+  local spender_address=$2
+  local amount=$3
+  flow transactions send ./cadence/transactions/approve_erc20_from_coa.cdc \
+    "$token_address" \
+    "$spender_address" \
+    "$amount" \
+    --signer emulator-flow-yield-vaults \
+    --compute-limit 9999 2>&1
 }
 
 # Get request message (error message or status message)
@@ -597,6 +706,24 @@ else
   exit 1
 fi
 
+log_test "Resolve bridged MOET address"
+MOET_EVM_ADDRESS=$(get_moet_evm_address)
+if [ -n "$MOET_EVM_ADDRESS" ]; then
+  log_info "MOET EVM address: $MOET_EVM_ADDRESS"
+  log_success "Resolved bridged MOET token address"
+else
+  log_fail "Could not resolve bridged MOET token address"
+  exit 1
+fi
+
+log_test "Configure MOET token support for worker tests"
+MOET_CONFIG_OUTPUT=$(set_token_config "$MOET_EVM_ADDRESS" true "1000000000000000000" false)
+assert_tx_success "$MOET_CONFIG_OUTPUT" "MOET token config applied"
+
+log_test "Approve MOET residual refunds from COA"
+MOET_COA_APPROVAL_OUTPUT=$(approve_erc20_from_coa "$MOET_EVM_ADDRESS" "$FLOW_VAULTS_REQUESTS_CONTRACT" "123456789")
+assert_tx_success "$MOET_COA_APPROVAL_OUTPUT" "COA approved MOET residual refunds"
+
 # ============================================
 # INITIAL BALANCES
 # ============================================
@@ -945,10 +1072,102 @@ else
 fi
 
 # ============================================
-# SCENARIO 5: PANIC RECOVERY - INVALID STRATEGY
+# SCENARIO 5: Successful ERC20 Dust Refund Claims
 # ============================================
 
-log_section "SCENARIO 5: Panic Recovery - Invalid Strategy Identifier"
+log_section "SCENARIO 5: Successful ERC20 Dust Refund Claims"
+
+MOET_BRIDGE_FUNDING_AMOUNT="10.0"
+MOET_BRIDGE_FUNDING_WEI="10000000000000000000"
+MOET_CREATE_DUST_RESIDUAL="123456789"
+MOET_CREATE_DUST_AMOUNT="1000000000123456789"
+
+log_test "Successful MOET CREATE with dust credits exact claimable refund"
+
+USER_C_MOET_BALANCE_BEFORE=$(get_token_balance "$MOET_EVM_ADDRESS" "$USER_C_EOA")
+USER_C_MOET_BALANCE_BEFORE=$(clean_wei "$USER_C_MOET_BALANCE_BEFORE")
+USER_C_MOET_REFUND_BEFORE=$(get_claimable_refund "$USER_C_EOA" "$MOET_EVM_ADDRESS")
+USER_C_MOET_REFUND_BEFORE=$(clean_wei "$USER_C_MOET_REFUND_BEFORE")
+USER_C_MOET_VAULTS_BEFORE=$(get_user_yieldvaults "$USER_C_EOA")
+USER_C_MOET_VAULTS_BEFORE_COUNT=$(count_yieldvaults "$USER_C_MOET_VAULTS_BEFORE")
+
+BRIDGE_MOET_TO_USER_OUTPUT=$(bridge_token_to_evm_address "$MOET_VAULT_IDENTIFIER" "$MOET_BRIDGE_FUNDING_AMOUNT" "$USER_C_EOA")
+assert_tx_success "$BRIDGE_MOET_TO_USER_OUTPUT" "Bridged MOET funding amount to User C"
+
+USER_C_MOET_BALANCE_AFTER_FUNDING=$(get_token_balance "$MOET_EVM_ADDRESS" "$USER_C_EOA")
+USER_C_MOET_BALANCE_AFTER_FUNDING=$(clean_wei "$USER_C_MOET_BALANCE_AFTER_FUNDING")
+USER_C_MOET_FUNDING_DELTA=$(subtract_wei "$USER_C_MOET_BALANCE_AFTER_FUNDING" "$USER_C_MOET_BALANCE_BEFORE")
+assert_wei_eq "$MOET_BRIDGE_FUNDING_WEI" "$USER_C_MOET_FUNDING_DELTA" "User C received exact bridged MOET funding amount"
+
+APPROVE_MOET_OUTPUT=$(approve_token "$USER_C_PK" "$MOET_EVM_ADDRESS" "$FLOW_VAULTS_REQUESTS_CONTRACT" "$MOET_CREATE_DUST_AMOUNT")
+assert_evm_tx_success "$APPROVE_MOET_OUTPUT" "User C approved MOET dust amount"
+
+TX_MOET_CREATE_DUST=$(cast_send "$USER_C_PK" \
+  "createYieldVault(address,uint256,string,string)" \
+  "$MOET_EVM_ADDRESS" \
+  "$MOET_CREATE_DUST_AMOUNT" \
+  "$MOET_VAULT_IDENTIFIER" \
+  "$STRATEGY_IDENTIFIER" 2>&1)
+
+assert_evm_tx_success "$TX_MOET_CREATE_DUST" "MOET dusty CREATE request submitted"
+
+MOET_CREATE_DUST_REQUEST_ID=$(extract_request_id "$TX_MOET_CREATE_DUST")
+if [ -n "$MOET_CREATE_DUST_REQUEST_ID" ]; then
+  log_success "MOET dusty CREATE request ID extracted ($MOET_CREATE_DUST_REQUEST_ID)"
+else
+  log_fail "Could not extract request ID for MOET dusty CREATE"
+fi
+
+if [ -n "$MOET_CREATE_DUST_REQUEST_ID" ]; then
+  if wait_for_request_status "$MOET_CREATE_DUST_REQUEST_ID" "2" "$DUST_TIMEOUT"; then
+    log_success "MOET dusty CREATE request completed"
+  else
+    log_fail "MOET dusty CREATE request did not reach COMPLETED status"
+  fi
+
+  if wait_for_user_vault "$USER_C_EOA" "$USER_C_MOET_VAULTS_BEFORE" "$DUST_TIMEOUT"; then
+    USER_C_MOET_VAULTS_AFTER=$(get_user_yieldvaults "$USER_C_EOA")
+    USER_C_MOET_VAULTS_AFTER_COUNT=$(count_yieldvaults "$USER_C_MOET_VAULTS_AFTER")
+    EXPECTED_USER_C_MOET_VAULTS=$((USER_C_MOET_VAULTS_BEFORE_COUNT + 1))
+
+    log_info "User C YieldVaults after MOET dusty CREATE: $USER_C_MOET_VAULTS_AFTER"
+    assert_eq "$EXPECTED_USER_C_MOET_VAULTS" "$USER_C_MOET_VAULTS_AFTER_COUNT" "MOET dusty CREATE created exactly one new YieldVault"
+  else
+    log_fail "MOET dusty CREATE did not create a new Cadence YieldVault"
+  fi
+
+  USER_C_MOET_REFUND_AFTER=$(get_claimable_refund "$USER_C_EOA" "$MOET_EVM_ADDRESS")
+  USER_C_MOET_REFUND_AFTER=$(clean_wei "$USER_C_MOET_REFUND_AFTER")
+  USER_C_MOET_REFUND_DELTA=$(subtract_wei "$USER_C_MOET_REFUND_AFTER" "$USER_C_MOET_REFUND_BEFORE")
+
+  log_info "User C MOET dust refund delta: $USER_C_MOET_REFUND_DELTA wei"
+  assert_wei_eq "$MOET_CREATE_DUST_RESIDUAL" "$USER_C_MOET_REFUND_DELTA" "MOET dusty CREATE credited exact residual"
+
+  if compare_wei "$USER_C_MOET_REFUND_AFTER" -gt "$USER_C_MOET_REFUND_BEFORE"; then
+    USER_C_MOET_BALANCE_BEFORE_CLAIM=$(get_token_balance "$MOET_EVM_ADDRESS" "$USER_C_EOA")
+    USER_C_MOET_BALANCE_BEFORE_CLAIM=$(clean_wei "$USER_C_MOET_BALANCE_BEFORE_CLAIM")
+
+    CLAIM_MOET_DUST_OUTPUT=$(claim_refund "$USER_C_PK" "$MOET_EVM_ADDRESS")
+    assert_evm_tx_success "$CLAIM_MOET_DUST_OUTPUT" "MOET dust refund claimed"
+
+    USER_C_MOET_REFUND_FINAL=$(get_claimable_refund "$USER_C_EOA" "$MOET_EVM_ADDRESS")
+    USER_C_MOET_REFUND_FINAL=$(clean_wei "$USER_C_MOET_REFUND_FINAL")
+    assert_eq "0" "$USER_C_MOET_REFUND_FINAL" "MOET dust claimable refund cleared"
+
+    USER_C_MOET_BALANCE_AFTER_CLAIM=$(get_token_balance "$MOET_EVM_ADDRESS" "$USER_C_EOA")
+    USER_C_MOET_BALANCE_AFTER_CLAIM=$(clean_wei "$USER_C_MOET_BALANCE_AFTER_CLAIM")
+    USER_C_MOET_CLAIM_DELTA=$(subtract_wei "$USER_C_MOET_BALANCE_AFTER_CLAIM" "$USER_C_MOET_BALANCE_BEFORE_CLAIM")
+    assert_wei_eq "$MOET_CREATE_DUST_RESIDUAL" "$USER_C_MOET_CLAIM_DELTA" "MOET dust claim transferred exact residual to user"
+  else
+    log_fail "No MOET dust refund was available to claim"
+  fi
+fi
+
+# ============================================
+# SCENARIO 6: PANIC RECOVERY - INVALID STRATEGY
+# ============================================
+
+log_section "SCENARIO 6: Panic Recovery - Invalid Strategy Identifier"
 
 # This test verifies that requests with invalid strategy identifiers
 # are caught during preprocessing and marked as FAILED with proper error messages
@@ -1081,10 +1300,10 @@ else
 fi
 
 # ============================================
-# SCENARIO 6: FAILED WITHDRAW RECOVERY VIA STOPALL
+# SCENARIO 7: FAILED WITHDRAW RECOVERY VIA STOPALL
 # ============================================
 
-log_section "SCENARIO 6: Failed Withdraw Recovery Via stopAll()"
+log_section "SCENARIO 7: Failed Withdraw Recovery Via stopAll()"
 
 log_test "Pause scheduler before creating withdraw recovery requests"
 
@@ -1181,10 +1400,10 @@ else
 fi
 
 # ============================================
-# SCENARIO 7: PREPROCESSING VALIDATION TESTS
+# SCENARIO 8: PREPROCESSING VALIDATION TESTS
 # ============================================
 
-log_section "SCENARIO 7: Preprocessing Validation Tests"
+log_section "SCENARIO 8: Preprocessing Validation Tests"
 
 # This test verifies that the preprocessing logic correctly rejects
 # various types of invalid requests
@@ -1318,10 +1537,10 @@ else
 fi
 
 # ============================================
-# SCENARIO 8: MAX PROCESSING CAPACITY TEST
+# SCENARIO 9: MAX PROCESSING CAPACITY TEST
 # ============================================
 
-log_section "SCENARIO 8: Max Processing Capacity Test"
+log_section "SCENARIO 9: Max Processing Capacity Test"
 
 # This test verifies that the scheduler respects the maxProcessingRequests limit (default: 3)
 # When more requests are submitted than capacity allows, some should stay PENDING
