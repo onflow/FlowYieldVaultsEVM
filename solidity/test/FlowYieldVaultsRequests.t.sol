@@ -380,6 +380,21 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
     }
 
+    function test_CompleteProcessing_FailureRefundsExactCreateAmountWithDust() public {
+        uint256 amount = 1 ether + 123456789;
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: amount}(NATIVE_FLOW, amount, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        c.completeProcessing{value: amount}(reqId, false, c.NO_YIELDVAULT_ID(), "Cadence error");
+        vm.stopPrank();
+
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), amount);
+    }
+
     function test_CompleteProcessing_FailureRefundsBalance_DepositToYieldVault() public {
         vm.prank(user);
         uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
@@ -402,6 +417,21 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
         assertEq(req.yieldVaultId, 42);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
+    }
+
+    function test_CompleteProcessing_FailureRefundsExactDepositAmountWithDust() public {
+        uint256 amount = 1 ether + 987654321;
+
+        vm.prank(user);
+        uint256 reqId = c.depositToYieldVault{value: amount}(42, NATIVE_FLOW, amount);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        c.completeProcessing{value: amount}(reqId, false, 42, "Cadence error");
+        vm.stopPrank();
+
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), amount);
     }
 
     function test_CompleteProcessing_CloseYieldVaultRemovesOwnership() public {

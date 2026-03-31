@@ -1054,10 +1054,9 @@ access(all) contract FlowYieldVaultsEVM {
                 let isNativeFlow = tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString()
 
                 if isNativeFlow {
-                    // Native FLOW: send with the call
-                    // Convert UInt256 to UFix64 then to EVM.Balance
-                    let refundUFix64 = FlowYieldVaultsEVM.ufix64FromUInt256(refundAmount, tokenAddress: tokenAddress)
-                    refundValue = FlowYieldVaultsEVM.balanceFromUFix64(refundUFix64, tokenAddress: tokenAddress)
+                    // Native FLOW: send the original attoflow amount back to EVM without
+                    // round-tripping through UFix64, which would truncate sub-8-decimal precision.
+                    refundValue = EVM.Balance(attoflow: UInt(refundAmount))
                 } else {
                     // ERC20: approve contract to pull funds
                     let approveCalldata = EVM.encodeABIWithSignature(
