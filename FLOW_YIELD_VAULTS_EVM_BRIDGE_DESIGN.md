@@ -99,7 +99,7 @@ mapping(address => uint256[]) public pendingRequestIdsByUser;
 
 // Balance tracking
 mapping(address => mapping(address => uint256)) public pendingUserBalances;  // Escrowed for active requests
-mapping(address => mapping(address => uint256)) public claimableRefunds;     // Claimable from cancelled/failed
+mapping(address => mapping(address => uint256)) public claimableRefunds;     // Claimable from cancelled, dropped, failed, or success-path residual refunds
 
 // Token configuration
 mapping(address => TokenConfig) public allowedTokens;
@@ -226,7 +226,7 @@ enum RequestStatus {
     PENDING,     // 0 - Awaiting processing
     PROCESSING,  // 1 - Being processed (balance deducted)
     COMPLETED,   // 2 - Successfully processed
-    FAILED       // 3 - Failed (refund credited; user must claim)
+    FAILED       // 3 - Failed (escrowed CREATE/DEPOSIT may credit a claimable refund)
 }
 
 struct TokenConfig {
@@ -385,6 +385,7 @@ All refund scenarios use a pull pattern - funds are credited to `claimableRefund
 | Scenario | What Happens |
 |----------|--------------|
 | After `startProcessingBatch()` (failed CREATE/DEPOSIT) | Funds credited to `claimableRefunds` |
+| Successful CREATE/DEPOSIT with precision loss | Precision residual credited to `claimableRefunds` |
 | User cancels request | Funds moved from `pendingUserBalances` to `claimableRefunds` |
 | Admin drops request | Funds moved from `pendingUserBalances` to `claimableRefunds` |
 | WITHDRAW/CLOSE | No escrowed funds on EVM side, so refunds are not applicable |
@@ -418,19 +419,21 @@ function completeProcessing(
     uint256 requestId,
     bool success,
     uint64 yieldVaultId,
-    string calldata message
+    string calldata message,
+    uint256 refundAmount
 ) external onlyAuthorizedCOA {
     // 1. Validate request is PROCESSING
-    // 2. Mark as COMPLETED or FAILED
-    // 3. On failure (CREATE/DEPOSIT): Credit claimableRefunds (user must call claimRefund)
-    // 4. On CREATE_YIELDVAULT success: Register YieldVault ownership
-    // 5. On CLOSE_YIELDVAULT success: Unregister YieldVault ownership
-    // 6. Remove from pending queue
-    // 7. Emit RequestProcessed event
+    // 2. Validate refundAmount against the request lifecycle
+    // 3. Mark as COMPLETED or FAILED
+    // 4. Credit claimableRefunds when a failed CREATE/DEPOSIT or success-path precision residual must stay on EVM
+    // 5. On CREATE_YIELDVAULT success: Register YieldVault ownership
+    // 6. On CLOSE_YIELDVAULT success: Unregister YieldVault ownership
+    // 7. Remove from pending queue
+    // 8. Emit RequestProcessed event
 }
 ```
 
-**Purpose:** Finalizes the operation with proper cleanup. On failure, refunds are credited for later claim; cross-VM flow is not atomic.
+**Purpose:** Finalizes the operation with proper cleanup. Refunds are credited for later claim when a failed CREATE/DEPOSIT must be returned on EVM or when a successful CREATE/DEPOSIT leaves a precision residual on EVM; cross-VM flow is not atomic.
 
 ---
 
@@ -619,8 +622,8 @@ Ownership is verified for WITHDRAW/CLOSE on both EVM and Cadence. Deposits are p
 
 ### Fund Safety
 
-1. **Escrow Model:** Funds held in contract until processing begins; refunds are claimable on failure
-2. **Two-Phase Commit:** Balance deducted before operation, credited back on failure
+1. **Escrow Model:** Funds held in contract until processing begins; failed CREATE/DEPOSIT and success-path precision residuals become claimable refunds
+2. **Two-Phase Commit:** Balance deducted before operation, then reconciled on completion via success/failure finalization plus any explicit refund amount
 3. **Cross-VM Non-Atomicity:** Funds can be in transit between EVM and Cadence; stuck PROCESSING is possible without admin recovery
 4. **ReentrancyGuard:** Solidity contract protected against reentrancy
 
@@ -741,7 +744,7 @@ pre {
 
 ### Cadence Error Handling
 
-Failed operations return `ProcessResult` with `success: false` and descriptive message. The Worker emits `RequestFailed` and calls `completeProcessing(success: false)` to credit refunds for later `claimRefund`.
+Failed operations return `ProcessResult` with `success: false` and descriptive message. The Worker emits `RequestFailed` and calls `completeProcessing(..., refundAmount)` to credit any failed escrowed amount for later `claimRefund`. Successful CREATE/DEPOSIT requests may also credit a smaller precision-residual refund during completion.
 
 ---
 

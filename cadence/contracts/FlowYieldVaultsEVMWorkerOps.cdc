@@ -171,7 +171,8 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
     )
 
     /// @notice Emitted when stopAll() cannot mark a cancelled request as FAILED
-    /// @dev The request remains tracked in scheduledRequests so a later recovery attempt can retry finalization.
+    /// @dev The request remains tracked in scheduledRequests so later scheduler runs can retry finalization.
+    ///      Retries are currently unbounded until the underlying EVM-side issue is resolved.
     /// @param requestId EVM request ID that could not be marked as FAILED
     /// @param workerTransactionId Cancelled WorkerHandler transaction ID
     access(all) event StopAllMarkFailedSkipped(
@@ -673,6 +674,7 @@ access(all) contract FlowYieldVaultsEVMWorkerOps {
                     )
 
                     // Keep the request tracked if EVM finalization fails so crash recovery can retry later.
+                    // Retries are currently unbounded until the underlying issue is resolved.
                     if success {
                         FlowYieldVaultsEVMWorkerOps.scheduledRequests.remove(key: requestId)
                     }

@@ -48,7 +48,7 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 1. **EVM User** calls `FlowYieldVaultsRequests.sol` (creates request, escrows funds)
 2. **FlowYieldVaultsEVMWorkerOps.cdc** SchedulerHandler schedules WorkerHandlers to process requests
 3. **FlowYieldVaultsEVM.cdc** Worker fetches pending requests via `getPendingRequestsUnpacked()`
-4. **Two-phase commit**: `startProcessingBatch()` marks PROCESSING and deducts balance, `completeProcessing()` marks COMPLETED/FAILED (refunds credited to `claimableRefunds` on failure)
+4. **Two-phase commit**: `startProcessingBatch()` marks PROCESSING and deducts balance, `completeProcessing()` marks COMPLETED/FAILED and credits any EVM-side refund due to `claimableRefunds` (failed CREATE/DEPOSIT or successful CREATE/DEPOSIT precision residuals)
 
 ### Contract Components
 
@@ -116,6 +116,8 @@ flow deps install --skip-alias --skip-deployments  # Install dependencies
 | FlowYieldVaultsRequests (EVM)     | `0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d` |
 | FlowYieldVaultsEVM (Cadence)      | `df111ffc5064198a`                           |
 | FlowYieldVaultsEVMWorkerOps       | `df111ffc5064198a`                           |
+
+The current worker code expects the 5-argument `completeProcessing(uint256,bool,uint64,string,uint256)` ABI. Keep Cadence and EVM deployments in sync when reviewing or updating testnet addresses.
 
 ## Blockchain Execution Model (Critical for Code Review)
 
