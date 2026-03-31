@@ -293,21 +293,20 @@ wait_for_request_status() {
 # Usage: extract_request_id "$TX_OUTPUT"
 extract_request_id() {
   local tx_output="$1"
+  local request_created_topic0="0x13e89e7f5f11ae17347a4657936695ef7097ee21e38f9250bd21466ccacccd5c"
   # Extract the transactionHash from cast send output
   local tx_hash=$(echo "$tx_output" | grep "transactionHash" | awk '{print $2}')
   if [ -z "$tx_hash" ]; then
     echo ""
     return 1
   fi
-  # Get transaction receipt and find RequestCreated event topic
-  # RequestCreated event: topic0 = keccak256("RequestCreated(uint256,address,uint8,address,uint256,uint64,uint256,string,string)")
-  # The requestId is indexed, so it's in topic1
-  local receipt=$(cast receipt "$tx_hash" --rpc-url "$RPC_URL" 2>/dev/null)
-  # Extract the first topic after topic0 from the RequestCreated event log
-  local request_id=$(echo "$receipt" | grep -A 10 "logs" | grep -oE "0x[0-9a-fA-F]{64}" | head -2 | tail -1)
-  if [ -n "$request_id" ]; then
-    # Convert hex to decimal
-    echo $((request_id))
+  # Read the JSON receipt and find the RequestCreated event deterministically.
+  # The requestId is indexed, so it is stored in topics[1].
+  local request_id_hex=$(cast receipt "$tx_hash" --json --rpc-url "$RPC_URL" 2>/dev/null | \
+    jq -r --arg topic0 "$request_created_topic0" \
+      'first(.logs[]? | select((.topics[0] // "" | ascii_downcase) == ($topic0 | ascii_downcase)) | .topics[1]) // empty')
+  if [ -n "$request_id_hex" ]; then
+    cast to-dec "$request_id_hex"
   else
     echo ""
   fi
