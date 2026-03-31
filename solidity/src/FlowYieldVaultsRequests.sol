@@ -1469,7 +1469,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             isNative: isNative
         });
 
-        if (!_isTrackedToken[tokenAddress]) {
+        if (isSupported && !_isTrackedToken[tokenAddress]) {
             _isTrackedToken[tokenAddress] = true;
             _trackedTokens.push(tokenAddress);
         }

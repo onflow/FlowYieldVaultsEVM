@@ -84,16 +84,16 @@ contract PendingRequestsByUserQueryMock {
             );
         }
 
-        ids = new uint256[](3);
-        requestTypes = new uint8[](3);
-        statuses = new uint8[](3);
-        tokenAddresses = new address[](3);
-        amounts = new uint256[](3);
-        yieldVaultIds = new uint64[](3);
-        timestamps = new uint256[](3);
-        messages = new string[](3);
-        vaultIdentifiers = new string[](3);
-        strategyIdentifiers = new string[](3);
+        ids = new uint256[](2);
+        requestTypes = new uint8[](2);
+        statuses = new uint8[](2);
+        tokenAddresses = new address[](2);
+        amounts = new uint256[](2);
+        yieldVaultIds = new uint64[](2);
+        timestamps = new uint256[](2);
+        messages = new string[](2);
+        vaultIdentifiers = new string[](2);
+        strategyIdentifiers = new string[](2);
 
         ids[0] = 11;
         requestTypes[0] = 0;
@@ -116,20 +116,8 @@ contract PendingRequestsByUserQueryMock {
         vaultIdentifiers[1] = "";
         strategyIdentifiers[1] = "";
 
-        ids[2] = 13;
-        requestTypes[2] = 1;
-        statuses[2] = 0;
-        tokenAddresses[2] = tokenC;
-        amounts[2] = 765_432_100;
-        yieldVaultIds[2] = 43;
-        timestamps[2] = 102;
-        messages[2] = "";
-        vaultIdentifiers[2] = "";
-        strategyIdentifiers[2] = "";
-
         pendingBalances[0] = 3 ether;
         pendingBalances[1] = 1_234_567;
-        pendingBalances[2] = 765_432_100;
         claimableRefundsArray[1] = 500_000;
     }
 }

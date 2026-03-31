@@ -1717,14 +1717,20 @@ access(all) contract FlowYieldVaultsEVM {
         var j = 0
         while j < balanceTokens.length {
             let tokenAddr = balanceTokens[j].toString()
-            pendingBalances[tokenAddr] = FlowYieldVaultsEVM.ufix64FromUInt256(
-                pendingBalancesRaw[j],
-                tokenAddress: balanceTokens[j]
-            )
-            claimableRefundsMap[tokenAddr] = FlowYieldVaultsEVM.ufix64FromUInt256(
-                claimableRefundsRaw[j],
-                tokenAddress: balanceTokens[j]
-            )
+            let rawPending = pendingBalancesRaw[j]
+            let rawRefund = claimableRefundsRaw[j]
+            pendingBalances[tokenAddr] = rawPending == 0
+                ? 0.0
+                : FlowYieldVaultsEVM.ufix64FromUInt256(
+                    rawPending,
+                    tokenAddress: balanceTokens[j]
+                )
+            claimableRefundsMap[tokenAddr] = rawRefund == 0
+                ? 0.0
+                : FlowYieldVaultsEVM.ufix64FromUInt256(
+                    rawRefund,
+                    tokenAddress: balanceTokens[j]
+                )
             j = j + 1
         }
 
@@ -1951,7 +1957,10 @@ access(all) contract FlowYieldVaultsEVM {
 
     /// @notice Converts a UInt256 amount from EVM to UFix64 for Cadence
     /// @dev For native FLOW: Uses 18 decimals (attoflow to FLOW conversion)
-    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals
+    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals.
+    ///      Cadence UFix64 preserves 8 decimal places, so tokens with more than 8
+    ///      decimals are truncated toward zero when entering Cadence. Any remainder
+    ///      smaller than 0.00000001 token is lost and cannot be recovered later.
     /// @param value The amount in wei/smallest unit (UInt256)
     /// @param tokenAddress The token address to determine decimal conversion
     /// @return The converted amount in UFix64 format
@@ -1964,7 +1973,9 @@ access(all) contract FlowYieldVaultsEVM {
 
     /// @notice Converts a UFix64 amount from Cadence to UInt256 for EVM
     /// @dev For native FLOW: Uses 18 decimals (FLOW to attoflow conversion)
-    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals
+    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals.
+    ///      This reconstructs an EVM amount from the already-quantized UFix64 value,
+    ///      so previously truncated sub-1e-8 dust does not reappear on the return path.
     /// @param value The amount in UFix64 format
     /// @param tokenAddress The token address to determine decimal conversion
     /// @return The converted amount in wei/smallest unit (UInt256)

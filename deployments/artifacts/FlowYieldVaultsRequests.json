@@ -21,6 +21,19 @@
   },
   {
     "type": "function",
+    "name": "DEFAULT_MINIMUM_BALANCE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "NATIVE_FLOW",
     "inputs": [],
     "outputs": [
@@ -1954,6 +1967,11 @@
   },
   {
     "type": "error",
+    "name": "CannotBlocklistZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "CannotRegisterSentinelYieldVaultId",
     "inputs": []
   },
@@ -2001,6 +2019,11 @@
   {
     "type": "error",
     "name": "InvalidCOAAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMinimumBalance",
     "inputs": []
   },
   {

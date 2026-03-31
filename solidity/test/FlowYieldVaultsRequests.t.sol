@@ -1175,6 +1175,36 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getClaimableRefund(user, TOKEN_B), 2 ether, "Direct TokenB refund getter should match unpacked view");
     }
 
+    function test_GetPendingRequestsByUserUnpacked_DoesNotTrackNeverSupportedToken() public {
+        vm.prank(c.owner());
+        c.setTokenConfig(TOKEN_B, false, 0, false);
+
+        (
+            uint256[] memory ids,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            address[] memory balanceTokens,
+            uint256[] memory pendingBalances,
+            uint256[] memory claimableRefundsArr
+        ) = c.getPendingRequestsByUserUnpacked(user);
+
+        assertEq(ids.length, 0, "User should have no pending requests");
+        assertEq(balanceTokens.length, 2, "Never-supported token should not be tracked");
+        assertEq(balanceTokens[0], NATIVE_FLOW, "First balance token should be NATIVE_FLOW");
+        assertEq(balanceTokens[1], WFLOW, "Second balance token should be WFLOW");
+        assertEq(pendingBalances[0], 0, "NATIVE_FLOW pending balance should remain 0");
+        assertEq(pendingBalances[1], 0, "WFLOW pending balance should remain 0");
+        assertEq(claimableRefundsArr[0], 0, "NATIVE_FLOW refund balance should remain 0");
+        assertEq(claimableRefundsArr[1], 0, "WFLOW refund balance should remain 0");
+    }
+
     function test_GetPendingRequestsByUserUnpacked_MultipleUsers() public {
         vm.prank(user);
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);

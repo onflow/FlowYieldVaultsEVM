@@ -258,7 +258,7 @@ fun testProcessResultStructure() {
 access(all)
 fun testGetPendingRequestsForEVMAddressDecodesBalances() {
     let tokenBAddress = deployERC20DecimalsOnlyMock(admin, decimals: 6)
-    let tokenCAddress = deployERC20DecimalsOnlyMock(admin, decimals: 8)
+    let tokenCAddress = "0x00000000000000000000000000000000000000cc"
     let mockAddress = deployPendingRequestsByUserQueryMock(admin, tokenBAddress: tokenBAddress, tokenCAddress: tokenCAddress)
     let tokenBKey = EVM.addressFromString(tokenBAddress).toString()
     let tokenCKey = EVM.addressFromString(tokenCAddress).toString()
@@ -287,25 +287,21 @@ fun testGetPendingRequestsForEVMAddressDecodesBalances() {
         ?? panic("Missing tokenC refund balance entry")
 
     Test.assertEqual(userEVMAddr1.toString(), pendingInfo.evmAddress)
-    Test.assertEqual(3, pendingInfo.pendingCount)
+    Test.assertEqual(2, pendingInfo.pendingCount)
     Test.assertEqual(3.0, pendingNative)
     Test.assertEqual(0.0, refundNative)
     Test.assertEqual(1.234567, pendingTokenB)
     Test.assertEqual(0.5, refundTokenB)
-    Test.assertEqual(7.654321, pendingTokenC)
+    Test.assertEqual(0.0, pendingTokenC)
     Test.assertEqual(0.0, refundTokenC)
-    Test.assertEqual(3, pendingInfo.requests.length)
+    Test.assertEqual(2, pendingInfo.requests.length)
 
     Test.assertEqual(11 as UInt256, pendingInfo.requests[0].id)
     Test.assertEqual(12 as UInt256, pendingInfo.requests[1].id)
-    Test.assertEqual(13 as UInt256, pendingInfo.requests[2].id)
     Test.assertEqual(1000000000000000000 as UInt256, pendingInfo.requests[0].amount)
     Test.assertEqual(1234567 as UInt256, pendingInfo.requests[1].amount)
-    Test.assertEqual(765432100 as UInt256, pendingInfo.requests[2].amount)
     Test.assertEqual(42 as UInt64?, pendingInfo.requests[1].yieldVaultId)
-    Test.assertEqual(43 as UInt64?, pendingInfo.requests[2].yieldVaultId)
     Test.assertEqual(tokenBKey, pendingInfo.requests[1].tokenAddress.toString())
-    Test.assertEqual(tokenCKey, pendingInfo.requests[2].tokenAddress.toString())
     Test.assertEqual(
         FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
         pendingInfo.requests[0].requestType
@@ -313,10 +309,6 @@ fun testGetPendingRequestsForEVMAddressDecodesBalances() {
     Test.assertEqual(
         FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue,
         pendingInfo.requests[1].requestType
-    )
-    Test.assertEqual(
-        FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue,
-        pendingInfo.requests[2].requestType
     )
 }
 
