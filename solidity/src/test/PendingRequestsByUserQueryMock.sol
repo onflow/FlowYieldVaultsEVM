@@ -100,6 +100,7 @@ contract PendingRequestsByUserQueryMock {
         statuses[0] = 0;
         tokenAddresses[0] = NATIVE_FLOW;
         amounts[0] = 1 ether;
+        yieldVaultIds[0] = type(uint64).max;
         timestamps[0] = 100;
         messages[0] = "";
         vaultIdentifiers[0] = "A.0ae53cb6e3f42a79.FlowToken.Vault";

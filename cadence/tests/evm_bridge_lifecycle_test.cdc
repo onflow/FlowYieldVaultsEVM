@@ -300,6 +300,7 @@ fun testGetPendingRequestsForEVMAddressDecodesBalances() {
     Test.assertEqual(12 as UInt256, pendingInfo.requests[1].id)
     Test.assertEqual(1000000000000000000 as UInt256, pendingInfo.requests[0].amount)
     Test.assertEqual(1234567 as UInt256, pendingInfo.requests[1].amount)
+    Test.assertEqual(nil, pendingInfo.requests[0].yieldVaultId)
     Test.assertEqual(42 as UInt64?, pendingInfo.requests[1].yieldVaultId)
     Test.assertEqual(tokenBKey, pendingInfo.requests[1].tokenAddress.toString())
     Test.assertEqual(
