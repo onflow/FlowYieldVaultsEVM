@@ -3,7 +3,16 @@ pragma solidity 0.8.20;
 
 import "forge-std/Test.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "../src/FlowYieldVaultsRequests.sol";
+
+contract MockDAI is ERC20 {
+    constructor() ERC20("Mock DAI", "DAI") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
 
 contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
     constructor(address coaAddress, address wflowAddress) FlowYieldVaultsRequests(coaAddress, wflowAddress) {}
@@ -37,6 +46,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     // Events for testing (from FlowYieldVaultsRequests)
     event BalanceUpdated(address indexed user, address indexed tokenAddress, uint256 newBalance);
     event RefundClaimed(address indexed user, address indexed tokenAddress, uint256 amount);
+    event TokensRecovered(address indexed to, address indexed tokenAddress, uint256 amount);
 
     // Errors from OpenZeppelin Ownable
     error OwnableUnauthorizedAccount(address account);
@@ -44,6 +54,8 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     string constant VAULT_ID = "A.0ae53cb6e3f42a79.FlowToken.Vault";
     string constant STRATEGY_ID = "A.045a1763c93006ca.MockStrategies.TracerStrategy";
+
+    MockDAI dai;
 
     function setUp() public {
         vm.deal(user, 100 ether);
@@ -58,6 +70,9 @@ contract FlowYieldVaultsRequestsTest is Test {
         tokenB.mint(user2, 100 ether);
         c = new FlowYieldVaultsRequestsTestHelper(coa, WFLOW);
         c.testRegisterYieldVaultId(42, user, NATIVE_FLOW);
+
+        dai = new MockDAI();
+        dai.mint(user2, 1 ether);
     }
 
     function _startProcessingBatch(uint256 requestId) internal {
@@ -1632,5 +1647,386 @@ contract FlowYieldVaultsRequestsTest is Test {
             user2
         ));
         uint256 closeReq = c.closeYieldVault(100);
+    }
+
+    function test_CreateYieldVault_MsgValueValidation() public {
+        vm.startPrank(user);
+
+        vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustEqualAmount.selector);
+        c.createYieldVault{value: 5 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustBeZero.selector);
+        c.createYieldVault{value: 5 ether}(WFLOW, 5 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.stopPrank();
+    }
+
+    function test_CreateYieldVault_RevertTokenNotSupported() public {
+        deal(address(dai), user2, 20 ether);
+        assertEq(dai.balanceOf(user2), 20 ether);
+
+        vm.prank(user2);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.TokenNotSupported.selector,
+            address(dai)
+        ));
+        c.createYieldVault(address(dai), 5 ether, VAULT_ID, STRATEGY_ID);
+    }
+
+    function test_DepositToYieldVault_MsgValueValidation() public {
+        vm.prank(user);
+        vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustEqualAmount.selector);
+        c.depositToYieldVault{value: 5 ether}(42, NATIVE_FLOW, 1 ether);
+
+        c.testRegisterYieldVaultId(101, user, WFLOW);
+        vm.prank(user);
+        vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustBeZero.selector);
+        c.depositToYieldVault{value: 5 ether}(101, WFLOW, 5 ether);
+    }
+
+    function test_DepositToYieldVault_RevertTokenNotSupported() public {
+        deal(address(dai), user2, 20 ether);
+        assertEq(dai.balanceOf(user2), 20 ether);
+
+        c.testRegisterYieldVaultId(101, user2, address(dai));
+
+        vm.prank(user2);
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.TokenNotSupported.selector,
+            address(dai)
+        ));
+        c.depositToYieldVault{value: 5 ether}(101, address(dai), 1 ether);
+    }
+
+    function test_CompleteProcessing_MsgValueValidation() public {
+        vm.prank(user);
+        uint256 req1 = c.createYieldVault{value: 5 ether}(NATIVE_FLOW, 5 ether, VAULT_ID, STRATEGY_ID);
+
+        vm.prank(coa);
+        _startProcessingBatch(req1);
+
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
+        vm.prank(coa);
+        vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustEqualAmount.selector);
+        c.completeProcessing{value: 3 ether}(req1, false, sentinelYieldVaultId, "Failed");
+
+        c.testRegisterYieldVaultId(101, user2, address(dai));
+        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+
+        vm.startPrank(user2);
+        deal(address(dai), user2, 20 ether);
+        dai.approve(address(c), 5 ether);
+        uint256 req2 = c.depositToYieldVault(101, address(dai), 5 ether);
+        vm.stopPrank();
+
+        vm.prank(coa);
+        _startProcessingBatch(req2);
+
+        vm.prank(coa);
+        vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustBeZero.selector);
+        c.completeProcessing{value: 5 ether}(req2, false, 101, "Failed");
+
+        // Success case must also reject non-zero msg.value (the `else` branch)
+        vm.prank(coa);
+        vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustBeZero.selector);
+        c.completeProcessing{value: 1 ether}(req2, true, 101, "Success");
+    }
+
+    function test_CompleteProcessing_RefundNativeFunds() public {
+        assertEq(user.balance, 100 ether);
+        assertEq(address(c).balance, 0 ether);
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 5 ether}(NATIVE_FLOW, 5 ether, VAULT_ID, STRATEGY_ID);
+        assertEq(user.balance, 95 ether);
+        assertEq(address(c).balance, 5 ether);
+
+        vm.prank(coa);
+        _startProcessingBatch(reqId);
+        assertEq(coa.balance, 5 ether);
+        assertEq(address(c).balance, 0 ether);
+
+        uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
+        vm.prank(coa);
+        c.completeProcessing{value: 5 ether}(reqId, false, sentinelYieldVaultId, "Failed");
+        assertEq(coa.balance, 0 ether);
+        assertEq(address(c).balance, 5 ether);
+
+        vm.prank(user);
+        c.claimRefund(NATIVE_FLOW);
+        assertEq(coa.balance, 0 ether);
+        assertEq(address(c).balance, 0 ether);
+        assertEq(user.balance, 100 ether);
+    }
+
+    function test_CompleteProcessing_RefundERC20Tokens() public {
+        vm.prank(c.owner());
+        c.testRegisterYieldVaultId(101, user, address(dai));
+        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+
+        deal(address(dai), user, 20 ether);
+        assertEq(dai.balanceOf(user), 20 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+
+        vm.startPrank(user);
+        dai.approve(address(c), 5 ether);
+        uint256 reqId = c.createYieldVault(address(dai), 5 ether, VAULT_ID, STRATEGY_ID);
+        assertEq(dai.balanceOf(user), 15 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+        vm.stopPrank();
+
+        vm.prank(coa);
+        _startProcessingBatch(reqId);
+        assertEq(dai.balanceOf(coa), 5 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+
+        vm.startPrank(coa);
+        dai.approve(address(c), 5 ether);
+        c.completeProcessing(reqId, false, c.NO_YIELDVAULT_ID(), "Failed");
+        assertEq(dai.balanceOf(coa), 0 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+        vm.stopPrank();
+
+        vm.prank(user);
+        c.claimRefund(address(dai));
+        assertEq(dai.balanceOf(coa), 0 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+        assertEq(dai.balanceOf(user), 20 ether);
+    }
+
+    function test_RecoverTokens() public {
+        deal(address(dai), user2, 20 ether);
+        assertEq(dai.balanceOf(user2), 20 ether);
+
+        vm.startPrank(user2);
+        dai.transfer(address(c), 5 ether);
+        assertEq(dai.balanceOf(user2), 15 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+        vm.stopPrank();
+
+        vm.startPrank(c.owner());
+        vm.expectEmit(true, true, true, true);
+        emit TokensRecovered(user2, address(dai), 5 ether);
+        c.recoverTokens(user2, address(dai), 5 ether);
+        assertEq(dai.balanceOf(user2), 20 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+        vm.stopPrank();
+    }
+
+    function test_RecoverTokens_RevertInsufficientRecoveryAmount() public {
+        deal(address(dai), user2, 20 ether);
+        assertEq(dai.balanceOf(user2), 20 ether);
+
+        vm.startPrank(user2);
+        dai.transfer(address(c), 5 ether);
+        assertEq(dai.balanceOf(user2), 15 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+        vm.stopPrank();
+
+        vm.prank(c.owner());
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.InsufficientRecoveryAmount.selector,
+            5 ether,
+            25 ether
+        ));
+        c.recoverTokens(user2, address(dai), 25 ether);
+    }
+
+    function test_RecoverTokens_RevertInvalidRecoveryUserAddress() public {
+        vm.prank(c.owner());
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidRecoveryUserAddress.selector);
+        c.recoverTokens(address(0), address(dai), 25 ether);
+    }
+
+    function test_RecoverTokens_RevertInvalidRecoveryTokenAddress() public {
+        vm.prank(c.owner());
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidRecoveryTokenAddress.selector);
+        c.recoverTokens(user2, NATIVE_FLOW, 25 ether);
+    }
+
+    function test_RecoverTokens_WithPendingUserBalanceAndNoExcessAmount() public {
+        vm.prank(c.owner());
+        c.testRegisterYieldVaultId(101, user, address(dai));
+        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+
+        deal(address(dai), user, 20 ether);
+        assertEq(dai.balanceOf(user), 20 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+
+        vm.startPrank(user);
+        dai.approve(address(c), 5 ether);
+        uint256 reqId = c.createYieldVault(address(dai), 5 ether, VAULT_ID, STRATEGY_ID);
+        assertEq(dai.balanceOf(user), 15 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+        vm.stopPrank();
+
+        vm.prank(c.owner());
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.InsufficientRecoveryAmount.selector,
+            0 ether,
+            5 ether
+        ));
+        c.recoverTokens(user, address(dai), 5 ether);
+    }
+
+    function test_RecoverTokens_WithCancelledRequestAndNoExcessAmount() public {
+        vm.prank(c.owner());
+        c.testRegisterYieldVaultId(101, user, address(dai));
+        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+
+        deal(address(dai), user, 20 ether);
+        assertEq(dai.balanceOf(user), 20 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+
+        vm.startPrank(user);
+        dai.approve(address(c), 5 ether);
+        uint256 reqId = c.createYieldVault(address(dai), 5 ether, VAULT_ID, STRATEGY_ID);
+        assertEq(dai.balanceOf(user), 15 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+
+        c.cancelRequest(reqId);
+        vm.stopPrank();
+
+        vm.prank(c.owner());
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.InsufficientRecoveryAmount.selector,
+            0 ether,
+            5 ether
+        ));
+        c.recoverTokens(user, address(dai), 5 ether);
+    }
+
+    function test_RecoverTokens_WithClaimableRefundAndNoExcessAmount() public {
+        vm.prank(c.owner());
+        c.testRegisterYieldVaultId(101, user, address(dai));
+        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+
+        deal(address(dai), user, 20 ether);
+        assertEq(dai.balanceOf(user), 20 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+
+        vm.startPrank(user);
+        dai.approve(address(c), 5 ether);
+        uint256 reqId = c.createYieldVault(address(dai), 5 ether, VAULT_ID, STRATEGY_ID);
+        assertEq(dai.balanceOf(user), 15 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+        vm.stopPrank();
+
+        vm.prank(coa);
+        _startProcessingBatch(reqId);
+        assertEq(dai.balanceOf(coa), 5 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+
+        vm.startPrank(coa);
+        dai.approve(address(c), 5 ether);
+        c.completeProcessing(reqId, false, c.NO_YIELDVAULT_ID(), "Failed");
+        assertEq(dai.balanceOf(coa), 0 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+        vm.stopPrank();
+
+        vm.prank(c.owner());
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.InsufficientRecoveryAmount.selector,
+            0 ether,
+            5 ether
+        ));
+        c.recoverTokens(user, address(dai), 5 ether);
+    }
+
+    function test_RecoverTokens_WithProcessingRequestAndExcessAmount() public {
+        vm.prank(c.owner());
+        c.testRegisterYieldVaultId(101, user, address(dai));
+        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+
+        deal(address(dai), user, 20 ether);
+        assertEq(dai.balanceOf(user), 20 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+
+        vm.startPrank(user);
+        dai.approve(address(c), 5 ether);
+        uint256 reqId = c.createYieldVault(address(dai), 5 ether, VAULT_ID, STRATEGY_ID);
+        assertEq(dai.balanceOf(user), 15 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+        vm.stopPrank();
+
+        vm.prank(coa);
+        _startProcessingBatch(reqId);
+        assertEq(dai.balanceOf(coa), 5 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+
+        vm.prank(user);
+        dai.transfer(address(c), 3 ether);
+
+        vm.prank(c.owner());
+        c.recoverTokens(user, address(dai), 3 ether);
+        assertEq(dai.balanceOf(address(c)), 0 ether);
+        assertEq(dai.balanceOf(user), 15 ether);
+    }
+
+    function test_RecoverTokens_RevertWhenAccountedExceedsAmount() public {
+        c.testRegisterYieldVaultId(101, user, address(dai));
+        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        deal(address(dai), user, 20 ether);
+        vm.startPrank(user);
+        dai.approve(address(c), 5 ether);
+        c.createYieldVault(address(dai), 5 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        // contract has a balance of 5 DAI via the above createYieldVault,
+        // but there is no excess balance for the given token.
+        vm.prank(c.owner());
+        vm.expectRevert(abi.encodeWithSelector(
+            FlowYieldVaultsRequests.InsufficientRecoveryAmount.selector,
+            0,
+            3 ether
+        ));
+        c.recoverTokens(user, address(dai), 3 ether);
+    }
+
+    function test_RecoverTokens_WithAccountedLessThanAmount() public {
+        c.testRegisterYieldVaultId(101, user, address(dai));
+        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        deal(address(dai), user, 20 ether);
+        vm.startPrank(user);
+        dai.approve(address(c), 5 ether);
+        c.createYieldVault(address(dai), 5 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        vm.prank(user);
+        dai.transfer(address(c), 8 ether);
+        assertEq(dai.balanceOf(address(c)), 13 ether);
+
+        // contract has 5 ether in pendingUserBalances via createYieldVault
+        vm.prank(c.owner());
+        c.recoverTokens(user, address(dai), 8 ether);
+        // user still has 5 ether in pendingUserBalances via createYieldVault,
+        // even after the stray token recovery
+        assertEq(c.getUserPendingBalance(user, address(dai)), 5 ether);
+        assertEq(dai.balanceOf(address(c)), 5 ether);
+    }
+
+    function test_RecoverTokens_RevertWhenNotOwner() public {
+        deal(address(dai), user2, 5 ether);
+        vm.prank(user2);
+        dai.transfer(address(c), 5 ether);
+
+        vm.prank(user2); // non-owner
+        vm.expectRevert(abi.encodeWithSelector(
+            OwnableUnauthorizedAccount.selector,
+            user2
+        ));
+        c.recoverTokens(user2, address(dai), 5 ether);
+    }
+
+    function test_RecoverTokens_RevertInvalidRecoveryUserAddress_ContractSelf() public {
+        vm.prank(c.owner());
+        vm.expectRevert(FlowYieldVaultsRequests.InvalidRecoveryUserAddress.selector);
+        c.recoverTokens(address(c), address(dai), 1 ether);
+    }
+
+    function test_RecoverTokens_RevertAmountIsZero() public {
+        vm.prank(c.owner());
+        vm.expectRevert(FlowYieldVaultsRequests.AmountMustBeGreaterThanZero.selector);
+        c.recoverTokens(user2, address(dai), 0);
     }
 }

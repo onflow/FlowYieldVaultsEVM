@@ -173,6 +173,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Claimable refunds from cancelled/dropped/failed requests: user => token => amount
     mapping(address => mapping(address => uint256)) public claimableRefunds;
 
+    /// @notice Total balance of each token accounted for in contract (escrowed/claimable)
+    mapping(address => uint256) public totalAccountedBalance;
+
     /// @notice All requests indexed by request ID
     mapping(uint256 => Request) public requests;
 
@@ -287,6 +290,15 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice No refund available for the specified token
     error NoRefundAvailable(address token);
+
+    /// @notice Recovery user address cannot be zero
+    error InvalidRecoveryUserAddress();
+
+    /// @notice ERC20 token address cannot be the native $FLOW token
+    error InvalidRecoveryTokenAddress();
+
+    /// @notice The requested recovery amount exceeds the available excess amount
+    error InsufficientRecoveryAmount(uint256 available, uint256 requested);
 
     // ============================================
     // Events
@@ -464,6 +476,16 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256 amount
     );
 
+    /// @notice Emitted when the contract owner recovers user tokens
+    /// @param to User who received the tokens
+    /// @param tokenAddress ERC20 token claimed
+    /// @param amount Amount recovered
+    event TokensRecovered(
+        address indexed to,
+        address indexed tokenAddress,
+        uint256 amount
+    );
+
     // ============================================
     // Modifiers
     // ============================================
@@ -520,15 +542,37 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     // ============================================
-    // Receive Function
-    // ============================================
-
-    /// @notice Allows contract to receive native $FLOW
-    receive() external payable {}
-
-    // ============================================
     // External Functions - Admin
     // ============================================
+
+    /// @notice Recovery mechanism for accidental user transfers of ERC20 tokens
+    /// @dev Tokens sent directly to the contract outside the intended request
+    ///      flows (including accidental transfers, airdrops etc) are only
+    ///      recoverable through this function here.
+    /// @param to The recipient address to transfer funds to.
+    /// @param tokenAddress The token to transfer.
+    /// @param amount The amount of tokens to transfer (in wei).
+    function recoverTokens(
+        address to,
+        address tokenAddress,
+        uint256 amount
+    ) external onlyOwner nonReentrant {
+        if (to == address(0) || to == address(this))
+            revert InvalidRecoveryUserAddress();
+        if (isNativeFlow(tokenAddress)) revert InvalidRecoveryTokenAddress();
+        if (amount == 0) revert AmountMustBeGreaterThanZero();
+
+        uint256 contractBalance = IERC20(tokenAddress).balanceOf(address(this));
+        uint256 excess = contractBalance > totalAccountedBalance[tokenAddress]
+            ? contractBalance - totalAccountedBalance[tokenAddress]
+            : 0;
+        if (amount > excess) {
+            revert InsufficientRecoveryAmount(excess, amount);
+        }
+
+        IERC20(tokenAddress).safeTransfer(to, amount);
+        emit TokensRecovered(to, tokenAddress, amount);
+    }
 
     /// @notice Updates the authorized COA address
     /// @param _coa New COA address
@@ -1007,6 +1051,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                     address(this),
                     request.amount
                 );
+                totalAccountedBalance[request.tokenAddress] += request.amount;
             }
             // Credit refunded funds to claimable refunds for later claim
             claimableRefunds[request.user][request.tokenAddress] += request
@@ -1531,6 +1576,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                     authorizedCOA,
                     request.amount
                 );
+                totalAccountedBalance[request.tokenAddress] -= request.amount;
             }
             emit FundsWithdrawn(
                 authorizedCOA,
@@ -1592,6 +1638,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 address(this),
                 amount
             );
+            totalAccountedBalance[tokenAddress] += amount;
         }
     }
 
@@ -1651,6 +1698,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         } else {
             // ERC20: use SafeERC20 for safe token transfer
             IERC20(tokenAddress).safeTransfer(to, amount);
+            totalAccountedBalance[tokenAddress] -= amount;
         }
     }
 
