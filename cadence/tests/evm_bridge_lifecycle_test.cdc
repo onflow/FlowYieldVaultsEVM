@@ -256,6 +256,71 @@ fun testProcessResultStructure() {
 }
 
 access(all)
+fun testGetPendingRequestsForEVMAddressDecodesBalances() {
+    let tokenBAddress = deployERC20DecimalsOnlyMock(admin, decimals: 6)
+    let tokenCAddress = deployERC20DecimalsOnlyMock(admin, decimals: 8)
+    let mockAddress = deployPendingRequestsByUserQueryMock(admin, tokenBAddress: tokenBAddress, tokenCAddress: tokenCAddress)
+    let tokenBKey = EVM.addressFromString(tokenBAddress).toString()
+    let tokenCKey = EVM.addressFromString(tokenCAddress).toString()
+    let setAddrResult = updateRequestsAddress(admin, mockAddress)
+    Test.expect(setAddrResult, Test.beSucceeded())
+
+    let result = _executeScript(
+        "../scripts/get_pending_requests_for_evm_address.cdc",
+        [userEVMAddr1.toString()]
+    )
+    Test.assertEqual(Test.ResultStatus.succeeded, result.status)
+
+    let pendingInfo = result.returnValue as! FlowYieldVaultsEVM.PendingRequestsInfo
+    let nativeFlowKey = nativeFlowAddr.toString()
+    let pendingNative = pendingInfo.pendingBalances[nativeFlowKey]
+        ?? panic("Missing NATIVE_FLOW pending balance entry")
+    let refundNative = pendingInfo.claimableRefunds[nativeFlowKey]
+        ?? panic("Missing NATIVE_FLOW refund balance entry")
+    let pendingTokenB = pendingInfo.pendingBalances[tokenBKey]
+        ?? panic("Missing tokenB pending balance entry")
+    let refundTokenB = pendingInfo.claimableRefunds[tokenBKey]
+        ?? panic("Missing tokenB refund balance entry")
+    let pendingTokenC = pendingInfo.pendingBalances[tokenCKey]
+        ?? panic("Missing tokenC pending balance entry")
+    let refundTokenC = pendingInfo.claimableRefunds[tokenCKey]
+        ?? panic("Missing tokenC refund balance entry")
+
+    Test.assertEqual(userEVMAddr1.toString(), pendingInfo.evmAddress)
+    Test.assertEqual(3, pendingInfo.pendingCount)
+    Test.assertEqual(3.0, pendingNative)
+    Test.assertEqual(0.0, refundNative)
+    Test.assertEqual(1.234567, pendingTokenB)
+    Test.assertEqual(0.5, refundTokenB)
+    Test.assertEqual(7.654321, pendingTokenC)
+    Test.assertEqual(0.0, refundTokenC)
+    Test.assertEqual(3, pendingInfo.requests.length)
+
+    Test.assertEqual(11 as UInt256, pendingInfo.requests[0].id)
+    Test.assertEqual(12 as UInt256, pendingInfo.requests[1].id)
+    Test.assertEqual(13 as UInt256, pendingInfo.requests[2].id)
+    Test.assertEqual(1000000000000000000 as UInt256, pendingInfo.requests[0].amount)
+    Test.assertEqual(1234567 as UInt256, pendingInfo.requests[1].amount)
+    Test.assertEqual(765432100 as UInt256, pendingInfo.requests[2].amount)
+    Test.assertEqual(42 as UInt64?, pendingInfo.requests[1].yieldVaultId)
+    Test.assertEqual(43 as UInt64?, pendingInfo.requests[2].yieldVaultId)
+    Test.assertEqual(tokenBKey, pendingInfo.requests[1].tokenAddress.toString())
+    Test.assertEqual(tokenCKey, pendingInfo.requests[2].tokenAddress.toString())
+    Test.assertEqual(
+        FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue,
+        pendingInfo.requests[0].requestType
+    )
+    Test.assertEqual(
+        FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue,
+        pendingInfo.requests[1].requestType
+    )
+    Test.assertEqual(
+        FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue,
+        pendingInfo.requests[2].requestType
+    )
+}
+
+access(all)
 fun testVaultAndStrategyIdentifiers() {
     // Test that vault and strategy identifiers are preserved correctly
     let customVaultId = "A.1234567890abcdef.CustomToken.Vault"
