@@ -2,7 +2,24 @@
 pragma solidity 0.8.20;
 
 import "forge-std/Test.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "../src/FlowYieldVaultsRequests.sol";
+
+contract TestERC20 is ERC20 {
+    uint8 private immutable _tokenDecimals;
+
+    constructor(string memory name, string memory symbol, uint8 tokenDecimals_) ERC20(name, symbol) {
+        _tokenDecimals = tokenDecimals_;
+    }
+
+    function mint(address account, uint256 amount) external {
+        _mint(account, amount);
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _tokenDecimals;
+    }
+}
 
 contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
     constructor(address coaAddress, address wflowAddress) FlowYieldVaultsRequests(coaAddress, wflowAddress) {}
@@ -395,6 +412,53 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), amount);
     }
 
+    function test_CompleteProcessing_SuccessCreditsCreateResidualRefund() public {
+        // Cadence can only consume the 8-decimal portion. The sub-8-decimal wei stays on
+        // the EVM side and must be credited back as a refund even though the request succeeds.
+        uint256 residual = 123456789;
+        uint256 amount = 1 ether + residual;
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: amount}(NATIVE_FLOW, amount, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        c.completeProcessing{value: residual}(reqId, true, 100, "YieldVault created", residual);
+        vm.stopPrank();
+
+        // The YieldVault is created with the Cadence-representable amount and the leftover
+        // wei is made claimable instead of remaining stranded in the COA.
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), residual);
+
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
+        assertEq(req.yieldVaultId, 100);
+        assertEq(c.doesUserOwnYieldVault(user, 100), true);
+    }
+
+    function test_CompleteProcessing_RevertWrongCreateResidualRefund() public {
+        // A successful completion must return the exact precision residual; omitting it would
+        // strand funds in the COA, so the contract rejects the completion.
+        uint256 residual = 123456789;
+        uint256 amount = 1 ether + residual;
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: amount}(NATIVE_FLOW, amount, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                residual,
+                uint256(0)
+            )
+        );
+        c.completeProcessing(reqId, true, 100, "YieldVault created", 0);
+        vm.stopPrank();
+    }
+
     function test_CompleteProcessing_FailureRefundsBalance_DepositToYieldVault() public {
         vm.prank(user);
         uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
@@ -432,6 +496,87 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), amount);
+    }
+
+    function test_CompleteProcessing_SuccessCreditsDepositResidualRefund() public {
+        // Deposits follow the same rule as vault creation: only the 8-decimal Cadence amount
+        // is bridged, and the remaining wei is refunded on successful completion.
+        uint256 residual = 987654321;
+        uint256 amount = 1 ether + residual;
+
+        vm.prank(user);
+        uint256 reqId = c.depositToYieldVault{value: amount}(42, NATIVE_FLOW, amount);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        c.completeProcessing{value: residual}(reqId, true, 42, "Deposited", residual);
+        vm.stopPrank();
+
+        // Success should not consume the dust on the EVM side; it must become claimable.
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), residual);
+
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
+        assertEq(req.yieldVaultId, 42);
+    }
+
+    function test_CompleteProcessing_SuccessCreditsERC20ResidualRefund() public {
+        // ERC20 tokens with more than 8 decimals also leave a remainder after Cadence
+        // truncation, and that remainder must be refunded on success.
+        TestERC20 token = new TestERC20("Mock Token", "MOCK", 18);
+        uint256 residual = 123456789;
+        uint256 amount = 1 ether + residual;
+
+        vm.prank(c.owner());
+        c.setTokenConfig(address(token), true, 1 ether, false);
+
+        token.mint(user, amount);
+
+        vm.startPrank(user);
+        token.approve(address(c), amount);
+        uint256 reqId = c.createYieldVault(address(token), amount, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        token.approve(address(c), residual);
+        c.completeProcessing(reqId, true, 101, "YieldVault created", residual);
+        vm.stopPrank();
+
+        // The ERC20 residual is tracked in claimableRefunds exactly like native FLOW dust.
+        assertEq(c.getUserPendingBalance(user, address(token)), 0);
+        assertEq(c.getClaimableRefund(user, address(token)), residual);
+        assertEq(c.doesUserOwnYieldVault(user, 101), true);
+
+        uint256 balanceBefore = token.balanceOf(user);
+        vm.prank(user);
+        c.claimRefund(address(token));
+        assertEq(token.balanceOf(user), balanceBefore + residual);
+    }
+
+    function test_CompleteProcessing_RevertUnexpectedRefundForExactAmount() public {
+        // When the amount is already exactly representable in Cadence, a successful completion
+        // must not send any refund amount.
+        uint256 amount = 1 ether;
+        uint256 refundAmount = 1;
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: amount}(NATIVE_FLOW, amount, VAULT_ID, STRATEGY_ID);
+
+        vm.deal(coa, refundAmount);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                uint256(0),
+                refundAmount
+            )
+        );
+        c.completeProcessing{value: refundAmount}(reqId, true, 100, "YieldVault created", refundAmount);
+        vm.stopPrank();
     }
 
     function test_CompleteProcessing_CloseYieldVaultRemovesOwnership() public {
