@@ -55,32 +55,6 @@ jobs:
       - name: Deploy Full Stack
         run: ./local/deploy_full_stack.sh
 
-      - name: Detect Strategy Identifier
-        run: |
-          echo "Detecting supported strategy identifier..."
-          YIELDVAULT_CHECK=$(flow scripts execute ./cadence/scripts/check_yieldvault_details.cdc 0x045a1763c93006ca)
-          echo "$YIELDVAULT_CHECK"
-
-          SUPPORTED_STRATEGIES=$(echo "$YIELDVAULT_CHECK" | grep -oE '"supportedStrategies": \[[^]]*\]' || true)
-          if [ -z "$SUPPORTED_STRATEGIES" ]; then
-            echo "❌ Could not parse supported strategy list"
-            exit 1
-          fi
-
-          STRATEGY_LIST=$(echo "$SUPPORTED_STRATEGIES" | sed -E 's/^"supportedStrategies": \[(.*)\]$/\1/' | tr -d '"' | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed '/^$/d')
-          STRATEGY_IDENTIFIER=$(echo "$STRATEGY_LIST" | grep 'TracerStrategy' | head -n 1 || true)
-          if [ -z "$STRATEGY_IDENTIFIER" ]; then
-            STRATEGY_IDENTIFIER=$(echo "$STRATEGY_LIST" | head -n 1)
-          fi
-
-          if [ -z "$STRATEGY_IDENTIFIER" ]; then
-            echo "❌ No supported strategy identifier found"
-            exit 1
-          fi
-
-          echo "Using strategy identifier: $STRATEGY_IDENTIFIER"
-          echo "STRATEGY_IDENTIFIER=$STRATEGY_IDENTIFIER" >> $GITHUB_ENV
-
       # === RUN WORKER TESTS ===
       - name: Run Worker Tests
         run: ./local/run_worker_tests.sh

@@ -72,9 +72,9 @@
 #   - Contract balance: 0 (funds bridged to Cadence)
 #   - YieldVault:       +amount (minus small bridging fee ~0.0002 FLOW)
 #
-# SCENARIO 2: INVALID PARAMETERS (Error Handling)
-# ------------------------------------------------
-# When vaultIdentifier or strategyIdentifier are invalid:
+# SCENARIO 2: UNREGISTERED PARAMETERS (Admission Rejection)
+# ---------------------------------------------------------
+# When vaultIdentifier or strategyIdentifier do not match a registered pair:
 #
 #   # Invalid vault, correct strategy
 #   ./local/testnet-e2e.sh create-flow 1.5 "InvalidVault" "A.d2580caf2ef07c2f.FlowYieldVaultsStrategies.mUSDCStrategy"
@@ -83,30 +83,21 @@
 #   ./local/testnet-e2e.sh create-flow 1.7 "A.7e60df042a9c0868.FlowToken.Vault" "InvalidStrategy"
 #
 # Expected behavior:
-#   1. Request created with status PENDING (EVM contract doesn't validate identifiers)
-#   2. SchedulerHandler picks up request
-#   4. Preprocessing: preprocessRequests() attempts to parse identifiers on Cadence side
-#   5. Validation fails: "Invalid vaultIdentifier/strategyIdentifier: X is not a valid Cadence type"
-#   6. PENDING -> FAILED
-#   7. No YieldVault created, yieldVaultId set to NO_YIELDVAULT_ID (max uint64)
+#   1. EVM admission rejects the transaction immediately
+#   2. No request is created, no escrow is taken, and no scheduler/worker processing happens
+#   3. User only pays the reverted transaction gas cost
 #
 # Balance changes:
-#   - User wallet:      -amount (+ gas fees) - funds left wallet
-#   - Pending balance:  0 (escrow was deducted at startProcessingBatch)
-#   - Contract balance: +amount (funds returned by COA during completeProcessing)
-#   - COA balance:      unchanged (funds returned to contract)
+#   - User wallet:      gas only
+#   - Pending balance:  unchanged
+#   - Contract balance: unchanged
+#   - COA balance:      unchanged
 #   - YieldVault:       none created
 #
 # REFUND MECHANISM:
 # -----------------
-# When a CREATE/DEPOSIT request fails/panics after PROCESSING state:
-#   1. PROCESSING state transfers funds: Contract -> COA
-#   2. SchedulerHandler detects validation failure in case of panic
-#   3. completeProcessing(FAILED) is called with refund:
-#      - Native FLOW: COA sends funds back via msg.value
-#      - ERC20 (WFLOW): COA approves contract, then contract pulls via transferFrom
-#   4. Contract receives funds and credits claimableRefunds
-#   5. User can claim the refund via claimRefund()
+# Refunds only exist for requests that were accepted, escrowed, and later failed during processing.
+# Unregistered CREATE_YIELDVAULT pairs are rejected before escrow, so there is no refund to claim.
 #
 # =============================================================================
 # TYPICAL TEST FLOW
@@ -151,9 +142,10 @@ DEFAULT_CADENCE_CONTRACT="0x764bdff06a0ee77e"
 REFUND_CHECK_MAX_ATTEMPTS="${REFUND_CHECK_MAX_ATTEMPTS:-60}"
 REFUND_CHECK_DELAY_SECONDS="${REFUND_CHECK_DELAY_SECONDS:-5}"
 
-# Default correct parameters
-DEFAULT_VAULT="A.7e60df042a9c0868.FlowToken.Vault"
-DEFAULT_STRATEGY="A.d2580caf2ef07c2f.FlowYieldVaultsStrategies.mUSDCStrategy"
+# Default registered parameters
+DEFAULT_CREATE_CONFIG_ID="${INITIAL_CREATE_VAULT_CONFIG_ID:-1}"
+DEFAULT_VAULT="${INITIAL_CREATE_VAULT_IDENTIFIER:-A.7e60df042a9c0868.FlowToken.Vault}"
+DEFAULT_STRATEGY="${INITIAL_CREATE_STRATEGY_IDENTIFIER:-A.d2580caf2ef07c2f.FlowYieldVaultsStrategies.mUSDCStrategy}"
 DEFAULT_PYUSD0_VAULT="A.dfc20aee650fcbdf.EVMVMBridgedToken_d7d43ab7b365f0d0789ae83f4385fa710ffdc98f.Vault"
 DEFAULT_PYUSD0_STRATEGY="A.d2580caf2ef07c2f.PMStrategiesV1.FUSDEVStrategy"
 PYUSD0_DECIMALS=6
@@ -241,7 +233,7 @@ extract_tx_hash() {
 
 get_request_status() {
     local request_id=$1
-    local result=$(cast call "$CONTRACT" "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,string,string))" "$request_id" --rpc-url "$RPC_URL")
+    local result=$(cast call "$CONTRACT" "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,uint64,string,string))" "$request_id" --rpc-url "$RPC_URL")
     echo "$result" | sed 's/[()]//g' | cut -d',' -f4 | tr -d ' '
 }
 
@@ -661,6 +653,11 @@ refund_check() {
     local amount=$1
     local vault="${2:-InvalidVault}"
     local strategy="${3:-InvalidStrategy}"
+    local amount_wei
+    local refund_before
+    local refund_after
+    local tx_out
+    local tx_status
 
     if [ -z "$PRIVATE_KEY" ]; then
         print_error "PRIVATE_KEY is required"
@@ -678,15 +675,20 @@ refund_check() {
     fi
 
     validate_amount "$amount"
-    local amount_wei=$(ether_to_wei "$amount")
+    amount_wei=$(ether_to_wei "$amount")
 
-    print_header "Refund Check (forced failure)"
+    refund_before=$(cast call "$CONTRACT" "getClaimableRefund(address,address)(uint256)" \
+        "$USER" \
+        "$NATIVE_FLOW" \
+        --rpc-url "$RPC_URL" | tr -d '[:space:]')
+
+    print_header "Admission Rejection Check"
     echo "Amount:   $amount FLOW"
     echo "Vault:    $vault"
     echo "Strategy: $strategy"
     echo ""
 
-    local tx_out
+    set +e
     tx_out=$(cast send "$CONTRACT" "createYieldVault(address,uint256,string,string)" \
         "$NATIVE_FLOW" \
         "$amount_wei" \
@@ -694,30 +696,32 @@ refund_check() {
         "$strategy" \
         --value "$amount_wei" \
         --private-key "$PRIVATE_KEY" \
-        --rpc-url "$RPC_URL")
+        --rpc-url "$RPC_URL" 2>&1)
+    tx_status=$?
+    set -e
 
-    local tx_hash
-    tx_hash=$(extract_tx_hash "$tx_out")
-    if [ -z "$tx_hash" ]; then
-        print_error "Could not parse transaction hash from send output."
+    if [ "$tx_status" -eq 0 ]; then
+        print_error "Transaction unexpectedly succeeded. The pair appears to be registered."
         echo "$tx_out"
         exit 1
     fi
-    print_success "Transaction sent: $tx_hash"
 
-    local request_id
-    request_id=$(extract_request_id "$tx_hash")
-    if [ -z "$request_id" ]; then
-        print_error "Could not extract requestId from receipt."
+    print_success "Unregistered pair rejected before escrow"
+    echo "$tx_out"
+
+    refund_after=$(cast call "$CONTRACT" "getClaimableRefund(address,address)(uint256)" \
+        "$USER" \
+        "$NATIVE_FLOW" \
+        --rpc-url "$RPC_URL" | tr -d '[:space:]')
+
+    if [ "$refund_before" != "$refund_after" ]; then
+        print_error "Claimable refund changed unexpectedly after admission rejection"
+        echo "Before: $refund_before"
+        echo "After:  $refund_after"
         exit 1
     fi
-    print_success "Request ID: $request_id"
 
-    wait_for_request_status "$request_id" 3 "$REFUND_CHECK_MAX_ATTEMPTS" "$REFUND_CHECK_DELAY_SECONDS"
-
-    get_user_claimable_refund "$USER" "$NATIVE_FLOW"
-    claim_refund "$NATIVE_FLOW"
-    check_evm_state
+    print_success "No refund was created, as expected"
 }
 
 # =============================================================================
@@ -728,12 +732,12 @@ get_request() {
     local request_id=$1
     print_header "Request $request_id Details"
 
-    local result=$(cast call "$CONTRACT" "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,string,string))" "$request_id" --rpc-url "$RPC_URL")
+    local result=$(cast call "$CONTRACT" "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,uint64,string,string))" "$request_id" --rpc-url "$RPC_URL")
 
     echo "$result"
 
     # Parse status (4th field in the tuple: id, user, requestType, status, ...)
-    # Format: (id, address, type, status, token, amount, vaultId, timestamp, msg, vault, strategy)
+    # Format: (id, address, type, status, token, amount, vaultId, timestamp, msg, configId, vault, strategy)
     local status=$(echo "$result" | sed 's/[()]//g' | cut -d',' -f4 | tr -d ' ')
     case $status in
         0) echo -e "\nStatus: ${YELLOW}PENDING${NC}" ;;
@@ -1016,7 +1020,7 @@ show_help() {
     echo "                                     Create YieldVault with PYUSD0 (6 decimals)"
     echo "                                     Uses PMStrategiesV1.FUSDEVStrategy by default"
     echo "  refund-check <amount> [vault] [strategy]"
-    echo "                                     Force failure, then claim refund (defaults: InvalidVault/InvalidStrategy)"
+    echo "                                     Verify an unregistered pair is rejected before escrow"
     echo "  claim-refund [token]"
     echo "                                     Claim refund for token (default: NATIVE_FLOW)"
     echo "  request <id>                       Get request details"
@@ -1049,6 +1053,7 @@ show_help() {
     echo "DEFAULT PARAMETERS:"
     echo "  Vault:       $DEFAULT_VAULT"
     echo "  Strategy:    $DEFAULT_STRATEGY"
+    echo "  Config ID:   $DEFAULT_CREATE_CONFIG_ID"
     echo "  NATIVE_FLOW: $NATIVE_FLOW"
     echo "  WFLOW:       $WFLOW"
     echo "  PYUSD0:      $PYUSD0"
@@ -1059,10 +1064,10 @@ show_help() {
     echo "  $0 state"
     echo "  $0 create-flow 1.2"
     echo "  $0 create-flow 1.2 x100                    # Create 100 requests"
-    echo "  $0 create-flow 1.5 InvalidVault InvalidStrategy"
+    echo "  $0 create-flow 1.5 $DEFAULT_VAULT $DEFAULT_STRATEGY"
     echo "  $0 create-wflow 1.0 x50                    # Create 50 WFLOW requests"
     echo "  $0 create-pyusd0 1.0                       # Create 1 PYUSD0-backed request"
-    echo "  $0 refund-check 0.1"
+    echo "  $0 refund-check 0.1 InvalidVault InvalidStrategy"
     echo "  $0 request 10"
     echo ""
     echo "  # Admin queries"

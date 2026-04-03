@@ -145,7 +145,7 @@ get_request_status() {
   local request_id=$1
   # Use getRequestUnpacked which returns fields separately - status is the 4th return value (index 3)
   local result=$(cast call "$FLOW_VAULTS_REQUESTS_CONTRACT" \
-    "getRequestUnpacked(uint256)(uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,string,string)" \
+    "getRequestUnpacked(uint256)(uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,uint64)" \
     "$request_id" \
     --rpc-url "$RPC_URL" 2>/dev/null)
   # The output has each field on a separate line, status (uint8) is the 4th line
@@ -202,7 +202,7 @@ get_claimable_refund() {
 get_request_message() {
   local request_id=$1
   # Get the full request and extract the message field (9th field in the tuple)
-  local result=$(cast_call "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,string,string))" "$request_id" 2>&1)
+  local result=$(cast_call "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,uint64,string,string))" "$request_id" 2>&1)
   # Extract the first quoted string which is the message field
   echo "$result" | grep -oE '"[^"]*"' | head -1 | tr -d '"'
 }
@@ -758,23 +758,26 @@ else
 fi
 
 # ============================================
-# SCENARIO 4: PANIC RECOVERY - INVALID STRATEGY
-# ============================================
+# SCENARIO 4: ADMISSION REJECTION - UNREGISTERED STRATEGY
+# =======================================================
 
-log_section "SCENARIO 4: Panic Recovery - Invalid Strategy Identifier"
+log_section "SCENARIO 4: Admission Rejection - Unregistered Strategy Pair"
 
-# This test verifies that requests with invalid strategy identifiers
-# are caught during preprocessing and marked as FAILED with proper error messages
+# Under the config-registry model, invalid CREATE_YIELDVAULT pairs should never
+# reach the scheduler. The request must be rejected on EVM admission.
 
 # Record initial state
 USER_A_REFUND_BEFORE=$(get_claimable_refund "$USER_A_EOA")
 USER_A_REFUND_BEFORE=$(clean_wei "$USER_A_REFUND_BEFORE")
 
-log_test "Create YieldVault request with invalid strategy identifier"
+log_test "Create YieldVault request with unregistered strategy identifier"
 
-# Use an invalid strategy identifier (not a valid Cadence type)
+# Use an unregistered strategy identifier
 INVALID_STRATEGY="InvalidStrategy.NotReal"
+PENDING_BEFORE_INVALID=$(get_pending_count)
+PENDING_BEFORE_INVALID=$(clean_wei "$PENDING_BEFORE_INVALID")
 
+set +e
 TX_OUTPUT=$(cast_send "$USER_A_PK" \
   "createYieldVault(address,uint256,string,string)" \
   "$NATIVE_FLOW" \
@@ -782,110 +785,38 @@ TX_OUTPUT=$(cast_send "$USER_A_PK" \
   "$VAULT_IDENTIFIER" \
   "$INVALID_STRATEGY" \
   --value "1ether" 2>&1)
+TX_STATUS=$?
+set -e
 
-INVALID_REQUEST_ID=""
-
-if echo "$TX_OUTPUT" | grep -q "status.*1"; then
-  log_success "Invalid strategy request submitted"
-
-  # Extract request ID from the logs in TX_OUTPUT
-  # The RequestCreated event has requestId as the second topic (topics[1])
-  # Event signature: RequestCreated(uint256 indexed requestId, address indexed user, ...)
-  # Look for the RequestCreated event log (has 4 topics) and get topics[1]
-  # The pattern 0x000...000X where X is a small hex number is the requestId
-  INVALID_REQUEST_ID=$(echo "$TX_OUTPUT" | grep -oE '"0x0{60,62}[0-9a-fA-F]{1,4}"' | head -1 | tr -d '"' || true)
-
-  if [ -n "$INVALID_REQUEST_ID" ]; then
-    # Convert hex to decimal
-    INVALID_REQUEST_ID=$(printf "%d" "$INVALID_REQUEST_ID" 2>/dev/null || echo "")
-  fi
-
-  log_info "New request ID: $INVALID_REQUEST_ID"
-
-  if [ -z "$INVALID_REQUEST_ID" ]; then
-    log_fail "Could not determine request ID from transaction logs"
-  fi
+if [ "$TX_STATUS" -ne 0 ]; then
+  log_success "Unregistered strategy pair rejected at admission"
 else
-  log_fail "Failed to submit invalid strategy request"
+  log_fail "Unregistered strategy pair should have been rejected"
   echo "$TX_OUTPUT"
 fi
 
-log_test "Wait for request to be marked as FAILED"
+log_test "Verify no request was enqueued"
+PENDING_AFTER_INVALID=$(get_pending_count)
+PENDING_AFTER_INVALID=$(clean_wei "$PENDING_AFTER_INVALID")
+assert_eq "$PENDING_BEFORE_INVALID" "$PENDING_AFTER_INVALID" "Pending request count unchanged after admission rejection"
 
-if [ -z "$INVALID_REQUEST_ID" ]; then
-  log_fail "Cannot check status - no request ID available"
-else
-  # Wait for the scheduler to preprocess and fail the request
-  # Status 3 = FAILED
-  REQUEST_STATUS=""
-  WAIT_COUNTER=0
-  MAX_WAIT=$((AUTO_PROCESS_TIMEOUT + 5))
+log_test "Verify no refund was created"
 
-  while [ $WAIT_COUNTER -lt $MAX_WAIT ]; do
-    tick_emulator
-
-    REQUEST_STATUS=$(get_request_status "$INVALID_REQUEST_ID")
-    # Status 3 = FAILED, Status 2 = COMPLETED
-    if [ "$REQUEST_STATUS" = "3" ]; then
-      log_info "Request $INVALID_REQUEST_ID reached FAILED status after ${WAIT_COUNTER}s"
-      break
-    elif [ "$REQUEST_STATUS" = "2" ]; then
-      log_warn "Request unexpectedly completed successfully"
-      break
-    fi
-
-    sleep 1
-    WAIT_COUNTER=$((WAIT_COUNTER + 1))
-
-    if [ $((WAIT_COUNTER % 5)) -eq 0 ]; then
-      log_info "Still waiting... (${WAIT_COUNTER}s, status: $REQUEST_STATUS)"
-    fi
-  done
-
-  if [ "$REQUEST_STATUS" = "3" ]; then
-    log_success "Request correctly marked as FAILED (status: 3)"
-
-    # Optionally check the error message
-    ERROR_MSG=$(get_request_message "$INVALID_REQUEST_ID")
-    if [ -n "$ERROR_MSG" ]; then
-      log_info "Error message: $ERROR_MSG"
-    fi
-  else
-    log_fail "Request not marked as FAILED (status: $REQUEST_STATUS)"
-  fi
-fi
-
-log_test "Verify refund was credited for failed request"
-
-# Check that the user's claimable refund increased
 USER_A_REFUND_AFTER=$(get_claimable_refund "$USER_A_EOA")
 USER_A_REFUND_AFTER=$(clean_wei "$USER_A_REFUND_AFTER")
 
 log_info "User A claimable refund: $USER_A_REFUND_BEFORE -> $USER_A_REFUND_AFTER wei"
 
-# Expected refund is 1 ether = 1000000000000000000 wei
-EXPECTED_REFUND_INCREASE="1000000000000000000"
-
-if compare_wei "$USER_A_REFUND_AFTER" -gt "$USER_A_REFUND_BEFORE"; then
-  REFUND_INCREASE=$(subtract_wei "$USER_A_REFUND_AFTER" "$USER_A_REFUND_BEFORE")
-  if compare_wei "$REFUND_INCREASE" -ge "$EXPECTED_REFUND_INCREASE"; then
-    log_success "Refund credited correctly ($(wei_to_ether $REFUND_INCREASE) FLOW)"
-  else
-    log_warn "Refund credited but amount differs: expected $EXPECTED_REFUND_INCREASE, got $REFUND_INCREASE"
-    log_success "Refund was credited"
-  fi
-else
-  log_fail "No refund credited for failed request"
-fi
+assert_eq "$USER_A_REFUND_BEFORE" "$USER_A_REFUND_AFTER" "Claimable refund unchanged after admission rejection"
 
 # ============================================
-# SCENARIO 5: PREPROCESSING VALIDATION TESTS
+# SCENARIO 5: ADMISSION REJECTION TESTS
 # ============================================
 
-log_section "SCENARIO 5: Preprocessing Validation Tests"
+log_section "SCENARIO 5: Admission Rejection Tests"
 
-# This test verifies that the preprocessing logic correctly rejects
-# various types of invalid requests
+# This test verifies that invalid or unsupported CREATE_YIELDVAULT pairs
+# are rejected before a request is created.
 
 # --- Test Case A: Invalid vaultIdentifier ---
 
@@ -894,9 +825,12 @@ log_test "Test Case A: Create request with invalid vaultIdentifier"
 USER_B_REFUND_BEFORE=$(get_claimable_refund "$USER_B_EOA")
 USER_B_REFUND_BEFORE=$(clean_wei "$USER_B_REFUND_BEFORE")
 
-# Use an invalid vault identifier (not a valid Cadence type)
+# Use an invalid vault identifier
 INVALID_VAULT="InvalidVault.NotReal"
+PENDING_BEFORE_PREPROCESS=$(get_pending_count)
+PENDING_BEFORE_PREPROCESS=$(clean_wei "$PENDING_BEFORE_PREPROCESS")
 
+set +e
 TX_OUTPUT_A=$(cast_send "$USER_B_PK" \
   "createYieldVault(address,uint256,string,string)" \
   "$NATIVE_FLOW" \
@@ -904,11 +838,13 @@ TX_OUTPUT_A=$(cast_send "$USER_B_PK" \
   "$INVALID_VAULT" \
   "$STRATEGY_IDENTIFIER" \
   --value "1ether" 2>&1)
+TX_STATUS_A=$?
+set -e
 
-if echo "$TX_OUTPUT_A" | grep -q "status.*1"; then
-  log_success "Invalid vault identifier request submitted"
+if [ "$TX_STATUS_A" -ne 0 ]; then
+  log_success "Invalid vault identifier pair rejected at admission"
 else
-  log_fail "Failed to submit invalid vault identifier request"
+  log_fail "Invalid vault identifier pair should have been rejected"
   echo "$TX_OUTPUT_A"
 fi
 
@@ -919,10 +855,10 @@ log_test "Test Case B: Create request with unsupported strategy type"
 USER_C_REFUND_BEFORE=$(get_claimable_refund "$USER_C_EOA")
 USER_C_REFUND_BEFORE=$(clean_wei "$USER_C_REFUND_BEFORE")
 
-# Use a valid Cadence type that is not a supported strategy
-# FlowToken.Vault is a valid type but not a strategy
+# Use an unregistered strategy type
 UNSUPPORTED_STRATEGY="A.${CADENCE_CONTRACT_ADDR}.FlowToken.Vault"
 
+set +e
 TX_OUTPUT_B=$(cast_send "$USER_C_PK" \
   "createYieldVault(address,uint256,string,string)" \
   "$NATIVE_FLOW" \
@@ -930,90 +866,40 @@ TX_OUTPUT_B=$(cast_send "$USER_C_PK" \
   "$VAULT_IDENTIFIER" \
   "$UNSUPPORTED_STRATEGY" \
   --value "1ether" 2>&1)
+TX_STATUS_B=$?
+set -e
 
-if echo "$TX_OUTPUT_B" | grep -q "status.*1"; then
-  log_success "Unsupported strategy request submitted"
+if [ "$TX_STATUS_B" -ne 0 ]; then
+  log_success "Unsupported strategy pair rejected at admission"
 else
-  log_fail "Failed to submit unsupported strategy request"
+  log_fail "Unsupported strategy pair should have been rejected"
   echo "$TX_OUTPUT_B"
 fi
 
-log_test "Wait for preprocessing to fail both invalid requests"
-
-# Get pending count before waiting
-PENDING_BEFORE_PREPROCESS=$(get_pending_count)
-PENDING_BEFORE_PREPROCESS=$(clean_wei "$PENDING_BEFORE_PREPROCESS")
-
-# Wait for scheduler to preprocess and fail both requests
-log_info "Waiting for scheduler to process invalid requests (pending: $PENDING_BEFORE_PREPROCESS)..."
-sleep $((SCHEDULER_WAKEUP_INTERVAL * 2))
-
-# Trigger emulator processing multiple times
-for i in $(seq 1 12); do
-  tick_emulator
-  sleep 1
-  if [ $((i % 4)) -eq 0 ]; then
-    CURRENT_PENDING=$(get_pending_count)
-    CURRENT_PENDING=$(clean_wei "$CURRENT_PENDING")
-    log_info "Processing... (${i}s elapsed, pending: $CURRENT_PENDING)"
-  fi
-done
-
-# Verify both requests were processed (removed from pending)
+log_test "Verify no invalid requests were enqueued"
 PENDING_AFTER_PREPROCESS=$(get_pending_count)
 PENDING_AFTER_PREPROCESS=$(clean_wei "$PENDING_AFTER_PREPROCESS")
-REQUESTS_PROCESSED=$((PENDING_BEFORE_PREPROCESS - PENDING_AFTER_PREPROCESS))
 
 log_info "Pending: $PENDING_BEFORE_PREPROCESS -> $PENDING_AFTER_PREPROCESS"
+assert_eq "$PENDING_BEFORE_PREPROCESS" "$PENDING_AFTER_PREPROCESS" "Pending request count unchanged for invalid pairs"
 
-if [ "$PENDING_AFTER_PREPROCESS" -eq 0 ]; then
-  log_success "Both invalid requests were processed by scheduler"
-else
-  log_fail "Expected all requests to be processed (pending: $PENDING_AFTER_PREPROCESS)"
-fi
-
-log_test "Verify refund was credited for invalid vault identifier request"
+log_test "Verify no refund was created for invalid vault identifier"
 
 USER_B_REFUND_AFTER=$(get_claimable_refund "$USER_B_EOA")
 USER_B_REFUND_AFTER=$(clean_wei "$USER_B_REFUND_AFTER")
 
 log_info "User B claimable refund: $USER_B_REFUND_BEFORE -> $USER_B_REFUND_AFTER wei"
 
-# Expected refund is 1 ether
-EXPECTED_REFUND="1000000000000000000"
+assert_eq "$USER_B_REFUND_BEFORE" "$USER_B_REFUND_AFTER" "Claimable refund unchanged for invalid vault identifier"
 
-if compare_wei "$USER_B_REFUND_AFTER" -gt "$USER_B_REFUND_BEFORE"; then
-  REFUND_INCREASE=$(subtract_wei "$USER_B_REFUND_AFTER" "$USER_B_REFUND_BEFORE")
-  log_info "User B refund increase: $(wei_to_ether $REFUND_INCREASE) FLOW"
-  if compare_wei "$REFUND_INCREASE" -ge "$EXPECTED_REFUND"; then
-    log_success "Invalid vaultIdentifier request failed and refund credited"
-  else
-    log_warn "Refund credited but amount differs from expected"
-    log_success "Refund was credited"
-  fi
-else
-  log_fail "No refund credited for invalid vaultIdentifier request"
-fi
-
-log_test "Verify refund was credited for unsupported strategy request"
+log_test "Verify no refund was created for unsupported strategy"
 
 USER_C_REFUND_AFTER=$(get_claimable_refund "$USER_C_EOA")
 USER_C_REFUND_AFTER=$(clean_wei "$USER_C_REFUND_AFTER")
 
 log_info "User C claimable refund: $USER_C_REFUND_BEFORE -> $USER_C_REFUND_AFTER wei"
 
-if compare_wei "$USER_C_REFUND_AFTER" -gt "$USER_C_REFUND_BEFORE"; then
-  REFUND_INCREASE=$(subtract_wei "$USER_C_REFUND_AFTER" "$USER_C_REFUND_BEFORE")
-  log_info "User C refund increase: $(wei_to_ether $REFUND_INCREASE) FLOW"
-  if compare_wei "$REFUND_INCREASE" -ge "$EXPECTED_REFUND"; then
-    log_success "Unsupported strategy request failed and refund credited"
-  else
-    log_warn "Refund credited but amount differs from expected"
-    log_success "Refund was credited"
-  fi
-else
-  log_fail "No refund credited for unsupported strategy request"
-fi
+assert_eq "$USER_C_REFUND_BEFORE" "$USER_C_REFUND_AFTER" "Claimable refund unchanged for unsupported strategy"
 
 # ============================================
 # SCENARIO 6: MAX PROCESSING CAPACITY TEST

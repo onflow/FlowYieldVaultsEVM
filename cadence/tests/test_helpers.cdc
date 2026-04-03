@@ -17,6 +17,7 @@ access(all) let nativeFlowAddr = EVM.addressFromString("0xFFfFfFffFFfffFFfFFfFFF
 
 /* --- Mock Vault and Strategy Identifiers --- */
 
+access(all) let mockCreateVaultConfigId: UInt64 = 1
 access(all) let mockVaultIdentifier = "A.0ae53cb6e3f42a79.FlowToken.Vault"
 access(all) let mockStrategyIdentifier = "A.045a1763c93006ca.MockStrategies.TracerStrategy"
 
@@ -246,6 +247,48 @@ fun updateRequestsAddress(_ signer: Test.TestAccount, _ address: String): Test.T
 }
 
 access(all)
+fun registerCreateYieldVaultConfigEverywhere(
+    _ signer: Test.TestAccount,
+    _ configId: UInt64,
+    _ vaultIdentifier: String,
+    _ strategyIdentifier: String
+): Test.TransactionResult {
+    return _executeTransaction(
+        "../transactions/register_create_yieldvault_config_everywhere.cdc",
+        [configId, vaultIdentifier, strategyIdentifier],
+        signer
+    )
+}
+
+access(all)
+fun registerCreateYieldVaultConfigDirectAdminForTest(
+    _ signer: Test.TestAccount,
+    _ configId: UInt64,
+    _ vaultIdentifier: String,
+    _ strategyIdentifier: String
+): Test.TransactionResult {
+    return _executeTransaction(
+        "transactions/register_create_yieldvault_config_direct_admin_forbidden.cdc",
+        [configId, vaultIdentifier, strategyIdentifier],
+        signer
+    )
+}
+
+access(all)
+fun registerCreateYieldVaultConfigDirectWorkerForTest(
+    _ signer: Test.TestAccount,
+    _ configId: UInt64,
+    _ vaultIdentifier: String,
+    _ strategyIdentifier: String
+): Test.TransactionResult {
+    return _executeTransaction(
+        "transactions/register_create_yieldvault_config_direct_worker_forbidden.cdc",
+        [configId, vaultIdentifier, strategyIdentifier],
+        signer
+    )
+}
+
+access(all)
 fun setupWorkerWithBadge(_ admin: Test.TestAccount): Test.TransactionResult {
     return _executeTransaction(
         "transactions/setup_worker_for_test.cdc",
@@ -327,6 +370,7 @@ fun createEVMRequest(
     yieldVaultId: UInt64,
     timestamp: UInt256,
     message: String,
+    createVaultConfigId: UInt64?,
     vaultIdentifier: String,
     strategyIdentifier: String
 ): FlowYieldVaultsEVM.EVMRequest {
@@ -340,6 +384,7 @@ fun createEVMRequest(
         yieldVaultId: yieldVaultId,
         timestamp: timestamp,
         message: message,
+        createVaultConfigId: createVaultConfigId,
         vaultIdentifier: vaultIdentifier,
         strategyIdentifier: strategyIdentifier
     )

@@ -84,6 +84,7 @@ Request queue and fund escrow contract.
 
 **Responsibilities:**
 - Accept and queue user requests (CREATE_YIELDVAULT, DEPOSIT_TO_YIELDVAULT, WITHDRAW_FROM_YIELDVAULT, CLOSE_YIELDVAULT)
+- Maintain the immutable CREATE_YIELDVAULT config registry keyed by `createVaultConfigId`
 - Escrow deposited funds until processing
 - Track user balances and pending request counts
 - Enforce access control (allowlist/blocklist)
@@ -126,6 +127,7 @@ Worker contract that processes EVM requests and manages YieldVault positions.
 
 **Responsibilities:**
 - Fetch pending requests from EVM via `getPendingRequestsUnpacked()`
+- Resolve `createVaultConfigId` values against the local Cadence config registry before processing `CREATE_YIELDVAULT`
 - Execute two-phase commit (startProcessingBatch → operation → completeProcessing)
 - Create, deposit to, withdraw from, and close YieldVaults
 - Bridge funds between EVM and Cadence via COA
@@ -136,7 +138,10 @@ Worker contract that processes EVM requests and manages YieldVault positions.
 // YieldVault ownership tracking
 access(all) let yieldVaultRegistry: {String: {UInt64: Bool}}
 
-// Configuration (stored as contract-only vars; exposed via getters)
+// Registered immutable CREATE_YIELDVAULT configs
+access(all) let createYieldVaultConfigs: {UInt64: CreateYieldVaultConfig}
+
+// Configuration
 var flowYieldVaultsRequestsAddress: EVM.EVMAddress?
 
 // Constants
@@ -211,8 +216,29 @@ struct Request {
     uint64 yieldVaultId;          // Target YieldVault Id (NO_YIELDVAULT_ID for CREATE_YIELDVAULT until completed; for others set at request creation)
     uint256 timestamp;           // Block timestamp when created
     string message;              // Status message or error reason
+    uint64 createVaultConfigId;  // Immutable CREATE_YIELDVAULT config ID (0 for non-create requests)
+}
+
+struct RequestView {
+    uint256 id;
+    address user;
+    RequestType requestType;
+    RequestStatus status;
+    address tokenAddress;
+    uint256 amount;
+    uint64 yieldVaultId;
+    uint256 timestamp;
+    string message;
+    uint64 createVaultConfigId;
     string vaultIdentifier;      // Cadence vault type (e.g., "A.xxx.FlowToken.Vault")
     string strategyIdentifier;   // Cadence strategy type (e.g., "A.xxx.Strategy.Type")
+}
+
+struct CreateYieldVaultConfig {
+    bool exists;
+    bool enabled;
+    string vaultIdentifier;
+    string strategyIdentifier;
 }
 
 enum RequestType {
@@ -236,6 +262,8 @@ struct TokenConfig {
 }
 ```
 
+`Request` is the canonical stored payload on EVM. `RequestView` is the resolved read model returned by `getRequest()`.
+
 ### EVMRequest (Cadence)
 
 ```cadence
@@ -246,13 +274,16 @@ access(all) struct EVMRequest {
     access(all) let status: UInt8
     access(all) let tokenAddress: EVM.EVMAddress
     access(all) let amount: UInt256
-    access(all) let yieldVaultId: UInt64
+    access(all) let yieldVaultId: UInt64?
     access(all) let timestamp: UInt256
     access(all) let message: String
+    access(all) let createVaultConfigId: UInt64?
     access(all) let vaultIdentifier: String
     access(all) let strategyIdentifier: String
 }
 ```
+
+`getPendingRequestsUnpacked()` returns `createVaultConfigId` values only. The worker resolves `vaultIdentifier` and `strategyIdentifier` from the Cadence config registry before constructing `EVMRequest`.
 
 ### ProcessResult (Cadence)
 
@@ -280,7 +311,7 @@ access(all) struct ProcessResult {
        │                     │                        │                     │
        │ createYieldVault(   │                        │                     │
        │ token, amount,      │                        │                     │
-       │ vault, strategy)    │                        │                     │
+       │ createVaultConfigId)│                        │                     │
        │────────────────────▶│                        │                     │
        │                     │ Escrow funds           │                     │
        │                     │ Create PENDING request │                     │
@@ -289,7 +320,8 @@ access(all) struct ProcessResult {
        │                     │                        │                     │
        │                     │   getPendingRequestsUnpacked │               │
        │                     │◀───────────────────────│                     │
-       │                     │     [EVMRequest]       │                     │
+       │                     │ [request arrays +      │                     │
+       │                     │  createVaultConfigIds] │                     │
        │                     │───────────────────────▶│                     │
        │                     │                        │                     │
        │                     │   startProcessingBatch([id], [])  │                     │
@@ -319,6 +351,18 @@ access(all) struct ProcessResult {
        │                     │ Mark COMPLETED         │                     │
        │                     │ Register YieldVault    │                     │
        │                     │───────────────────────▶│                     │
+```
+
+Canonical CREATE requests carry `createVaultConfigId` on EVM. The legacy `(vaultIdentifier, strategyIdentifier)` overload resolves the pair to a registered config ID before the request is stored.
+
+### CREATE_YIELDVAULT Config Registration
+
+```
+1. Admin submits register_create_yieldvault_config_everywhere.cdc
+2. Transaction borrows FlowYieldVaultsEVM.Admin and FlowYieldVaultsEVM.Worker from the same signer account
+3. Admin validates the identifiers locally and writes the Cadence config registry entry
+4. Worker calls Solidity registerCreateYieldVaultConfig(uint64,string,string) through the COA
+5. If the EVM call fails, the entire Cadence transaction reverts and the Cadence write is rolled back
 ```
 
 ### DEPOSIT_TO_YIELDVAULT
@@ -544,14 +588,43 @@ function doesUserOwnYieldVault(address user, uint64 yieldVaultId) returns (bool)
 // Get pending request IDs array
 function getPendingRequestIds() returns (uint256[] memory);
 
+// Get immutable CREATE_YIELDVAULT config by ID
+function getCreateYieldVaultConfig(uint64 configId)
+    returns (bool exists, bool enabled, string memory vaultIdentifier, string memory strategyIdentifier);
+
 // Get pending requests in unpacked arrays (pagination)
-function getPendingRequestsUnpacked(uint256 startIndex, uint256 count) returns (...);
+function getPendingRequestsUnpacked(uint256 startIndex, uint256 count)
+    returns (
+        uint256[] memory ids,
+        address[] memory users,
+        uint8[] memory requestTypes,
+        uint8[] memory statuses,
+        address[] memory tokenAddresses,
+        uint256[] memory amounts,
+        uint64[] memory yieldVaultIds,
+        uint256[] memory timestamps,
+        string[] memory messages,
+        uint64[] memory createVaultConfigIds
+    );
 
 // Get pending requests for a user in unpacked arrays (includes native FLOW balances)
-function getPendingRequestsByUserUnpacked(address user) returns (...);
+function getPendingRequestsByUserUnpacked(address user)
+    returns (
+        uint256[] memory ids,
+        uint8[] memory requestTypes,
+        uint8[] memory statuses,
+        address[] memory tokenAddresses,
+        uint256[] memory amounts,
+        uint64[] memory yieldVaultIds,
+        uint256[] memory timestamps,
+        string[] memory messages,
+        uint64[] memory createVaultConfigIds,
+        uint256 pendingBalance,
+        uint256 claimableRefund
+    );
 
-// Get single request by ID
-function getRequest(uint256 requestId) returns (Request memory);
+// Get single request by ID (resolved read model)
+function getRequest(uint256 requestId) returns (RequestView memory);
 
 // Check if YieldVault Id is valid
 function isYieldVaultIdValid(uint64 yieldVaultId) returns (bool);

@@ -138,14 +138,14 @@ get_pending_count() {
 # Get request status (0=PENDING, 1=PROCESSING, 2=COMPLETED, 3=FAILED)
 get_request_status() {
   local request_id=$1
-  cast_call "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,string,string))" "$request_id" | \
+  cast_call "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,uint64,string,string))" "$request_id" | \
     sed -n 's/.*(\([0-9]*\), [^,]*, [0-9]*, \([0-9]*\),.*/\2/p'
 }
 
 # Get YieldVault ID from completed request
 get_yieldvault_id_from_request() {
   local request_id=$1
-  cast_call "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,string,string))" "$request_id" | \
+  cast_call "getRequest(uint256)((uint256,address,uint8,uint8,address,uint256,uint64,uint256,string,uint64,string,string))" "$request_id" | \
     grep -Eo '[0-9]+' | sed -n '7p'  # 7th number is the yieldVaultId
 }
 

@@ -356,6 +356,54 @@
   },
   {
     "type": "function",
+    "name": "createYieldVault",
+    "inputs": [
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "createVaultConfigId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "createYieldVaultConfigIdByPairHash",
+    "inputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "depositToYieldVault",
     "inputs": [
       {
@@ -446,6 +494,64 @@
   },
   {
     "type": "function",
+    "name": "getCreateYieldVaultConfig",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "exists",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "enabled",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "vaultIdentifier",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "strategyIdentifier",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getCreateYieldVaultConfigId",
+    "inputs": [
+      {
+        "name": "vaultIdentifier",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "strategyIdentifier",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "getPendingRequestCount",
     "inputs": [],
     "outputs": [
@@ -522,14 +628,9 @@
         "internalType": "string[]"
       },
       {
-        "name": "vaultIdentifiers",
-        "type": "string[]",
-        "internalType": "string[]"
-      },
-      {
-        "name": "strategyIdentifiers",
-        "type": "string[]",
-        "internalType": "string[]"
+        "name": "createVaultConfigIds",
+        "type": "uint64[]",
+        "internalType": "uint64[]"
       },
       {
         "name": "pendingBalance",
@@ -606,14 +707,9 @@
         "internalType": "string[]"
       },
       {
-        "name": "vaultIdentifiers",
-        "type": "string[]",
-        "internalType": "string[]"
-      },
-      {
-        "name": "strategyIdentifiers",
-        "type": "string[]",
-        "internalType": "string[]"
+        "name": "createVaultConfigIds",
+        "type": "uint64[]",
+        "internalType": "uint64[]"
       }
     ],
     "stateMutability": "view"
@@ -632,7 +728,7 @@
       {
         "name": "",
         "type": "tuple",
-        "internalType": "struct FlowYieldVaultsRequests.Request",
+        "internalType": "struct FlowYieldVaultsRequests.RequestView",
         "components": [
           {
             "name": "id",
@@ -678,6 +774,11 @@
             "name": "message",
             "type": "string",
             "internalType": "string"
+          },
+          {
+            "name": "createVaultConfigId",
+            "type": "uint64",
+            "internalType": "uint64"
           },
           {
             "name": "vaultIdentifier",
@@ -751,14 +852,9 @@
         "internalType": "string"
       },
       {
-        "name": "vaultIdentifier",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "strategyIdentifier",
-        "type": "string",
-        "internalType": "string"
+        "name": "createVaultConfigId",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -991,6 +1087,29 @@
   },
   {
     "type": "function",
+    "name": "registerCreateYieldVaultConfig",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "vaultIdentifier",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "strategyIdentifier",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "renounceOwnership",
     "inputs": [],
     "outputs": [],
@@ -1053,14 +1172,9 @@
         "internalType": "string"
       },
       {
-        "name": "vaultIdentifier",
-        "type": "string",
-        "internalType": "string"
-      },
-      {
-        "name": "strategyIdentifier",
-        "type": "string",
-        "internalType": "string"
+        "name": "createVaultConfigId",
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -1097,6 +1211,24 @@
     "inputs": [
       {
         "name": "_enabled",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setCreateYieldVaultConfigEnabled",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "enabled",
         "type": "bool",
         "internalType": "bool"
       }
@@ -1482,6 +1614,62 @@
       },
       {
         "name": "changedBy",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CreateYieldVaultConfigEnabled",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "enabled",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      },
+      {
+        "name": "updatedBy",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "CreateYieldVaultConfigRegistered",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "indexed": true,
+        "internalType": "uint64"
+      },
+      {
+        "name": "vaultIdentifier",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "strategyIdentifier",
+        "type": "string",
+        "indexed": false,
+        "internalType": "string"
+      },
+      {
+        "name": "configuredBy",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -1959,6 +2147,61 @@
   },
   {
     "type": "error",
+    "name": "CreateYieldVaultConfigAlreadyExists",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CreateYieldVaultConfigDisabled",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CreateYieldVaultConfigNotFound",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CreateYieldVaultConfigPairAlreadyRegistered",
+    "inputs": [
+      {
+        "name": "configId",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "CreateYieldVaultConfigPairNotRegistered",
+    "inputs": [
+      {
+        "name": "pairHash",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "EmptyAddressArray",
     "inputs": []
   },
@@ -1996,6 +2239,11 @@
   {
     "type": "error",
     "name": "InvalidCOAAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidCreateYieldVaultConfigId",
     "inputs": []
   },
   {

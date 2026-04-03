@@ -49,8 +49,12 @@ fun testInvalidRequestType() {
 
     for requestType in validTypes {
         var amount = 1000000000000000000 as UInt256
+        var createVaultConfigId: UInt64? = nil
         if requestType == FlowYieldVaultsEVM.RequestType.CLOSE_YIELDVAULT.rawValue {
             amount = 0
+        }
+        if requestType == FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue {
+            createVaultConfigId = mockCreateVaultConfigId
         }
 
         let validRequest = FlowYieldVaultsEVM.EVMRequest(
@@ -63,6 +67,7 @@ fun testInvalidRequestType() {
             yieldVaultId: UInt64.max,
             timestamp: 0,
             message: "",
+            createVaultConfigId: createVaultConfigId,
             vaultIdentifier: mockVaultIdentifier,
             strategyIdentifier: mockStrategyIdentifier
         )
@@ -86,6 +91,7 @@ fun testInvalidRequestType() {
             yieldVaultId: 1,
             timestamp: 0,
             message: "",
+            createVaultConfigId: nil,
             vaultIdentifier: "",
             strategyIdentifier: ""
         )
@@ -106,6 +112,7 @@ fun testZeroAmountWithdrawal() {
         yieldVaultId: 1,
         timestamp: 0,
         message: "",
+        createVaultConfigId: nil,
         vaultIdentifier: "",
         strategyIdentifier: ""
     )
@@ -125,6 +132,7 @@ fun testZeroAmountWithdrawal() {
             yieldVaultId: 1,
             timestamp: 0,
             message: "",
+            createVaultConfigId: nil,
             vaultIdentifier: "",
             strategyIdentifier: ""
         )
@@ -148,6 +156,7 @@ fun testZeroAmountWithdrawal() {
                 yieldVaultId: 1,
                 timestamp: 0,
                 message: "",
+                createVaultConfigId: nil,
                 vaultIdentifier: "",
                 strategyIdentifier: ""
             )
@@ -172,6 +181,7 @@ fun testRequestStatusCompletedStructure() {
         yieldVaultId: 1,
         timestamp: 0,
         message: "Successfully created",
+        createVaultConfigId: mockCreateVaultConfigId,
         vaultIdentifier: mockVaultIdentifier,
         strategyIdentifier: mockStrategyIdentifier
     )
@@ -193,6 +203,7 @@ fun testRequestStatusFailedStructure() {
         yieldVaultId: 1,
         timestamp: 0,
         message: "Insufficient balance",
+        createVaultConfigId: nil,
         vaultIdentifier: "",
         strategyIdentifier: ""
     )

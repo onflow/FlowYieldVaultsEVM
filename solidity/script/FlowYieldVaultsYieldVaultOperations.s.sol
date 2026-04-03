@@ -34,8 +34,7 @@ import {FlowYieldVaultsRequests} from "../src/FlowYieldVaultsRequests.sol";
  * Environment Variables:
  *   - USER_PRIVATE_KEY: Private key for signing transactions (defaults to 0x3 for testing)
  *   - AMOUNT: Amount in wei for create/deposit operations (defaults to 10 ether)
- *   - VAULT_IDENTIFIER: Cadence vault type identifier (defaults to emulator address)
- *   - STRATEGY_IDENTIFIER: Cadence strategy type identifier (defaults to emulator address)
+ *   - CREATE_VAULT_CONFIG_ID: Registered CREATE_YIELDVAULT config ID (defaults to 1)
  */
 contract FlowYieldVaultsYieldVaultOperations is Script {
     /// @dev Sentinel address for native $FLOW (must match FlowYieldVaultsRequests.NATIVE_FLOW)
@@ -44,26 +43,19 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
     /// @dev Default amount for create/deposit operations
     uint256 constant DEFAULT_AMOUNT = 10 ether;
 
-    /// @dev Default vault identifier (emulator)
-    string constant DEFAULT_VAULT_IDENTIFIER =
-        "A.0ae53cb6e3f42a79.FlowToken.Vault";
-
-    /// @dev Default strategy identifier (emulator)
-    string constant DEFAULT_STRATEGY_IDENTIFIER =
-        "A.045a1763c93006ca.MockStrategies.TracerStrategy";
+    /// @dev Default CREATE_YIELDVAULT config ID registered by local deploy scripts
+    uint64 constant DEFAULT_CREATE_VAULT_CONFIG_ID = 1;
 
     /// @notice Creates a new YieldVault by depositing native $FLOW
     /// @param contractAddress The FlowYieldVaultsRequests contract address
     function createYieldVault(address contractAddress) public {
         (uint256 privateKey, address user) = _getUser();
         uint256 amount = vm.envOr("AMOUNT", DEFAULT_AMOUNT);
-        string memory vaultId = vm.envOr(
-            "VAULT_IDENTIFIER",
-            DEFAULT_VAULT_IDENTIFIER
-        );
-        string memory strategyId = vm.envOr(
-            "STRATEGY_IDENTIFIER",
-            DEFAULT_STRATEGY_IDENTIFIER
+        uint64 createVaultConfigId = uint64(
+            vm.envOr(
+                "CREATE_VAULT_CONFIG_ID",
+                uint256(DEFAULT_CREATE_VAULT_CONFIG_ID)
+            )
         );
 
         FlowYieldVaultsRequests requests = FlowYieldVaultsRequests(
@@ -76,12 +68,12 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
         uint256 requestId = requests.createYieldVault{value: amount}(
             NATIVE_FLOW,
             amount,
-            vaultId,
-            strategyId
+            createVaultConfigId
         );
         vm.stopBroadcast();
 
         _logRequestCreated("CREATE_YIELDVAULT", requestId, user, amount);
+        console.log("Create config ID:", uint256(createVaultConfigId));
         _logRequestDetails(requests, requestId);
     }
 
@@ -180,7 +172,7 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
         FlowYieldVaultsRequests requests = FlowYieldVaultsRequests(
             payable(contractAddress)
         );
-        FlowYieldVaultsRequests.Request memory req = requests.getRequest(
+        FlowYieldVaultsRequests.RequestView memory req = requests.getRequest(
             requestId
         );
 
@@ -274,7 +266,7 @@ contract FlowYieldVaultsYieldVaultOperations is Script {
         FlowYieldVaultsRequests requests,
         uint256 requestId
     ) internal view {
-        FlowYieldVaultsRequests.Request memory req = requests.getRequest(
+        FlowYieldVaultsRequests.RequestView memory req = requests.getRequest(
             requestId
         );
 

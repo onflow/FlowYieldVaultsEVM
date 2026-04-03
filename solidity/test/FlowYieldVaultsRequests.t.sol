@@ -49,6 +49,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     error OwnableUnauthorizedAccount(address account);
     error OwnableInvalidOwner(address owner);
 
+    uint64 constant CREATE_CONFIG_ID = 1;
     string constant VAULT_ID = "A.0ae53cb6e3f42a79.FlowToken.Vault";
     string constant STRATEGY_ID = "A.045a1763c93006ca.MockStrategies.TracerStrategy";
 
@@ -58,6 +59,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.deal(user, 100 ether);
         vm.deal(user2, 100 ether);
         c = new FlowYieldVaultsRequestsTestHelper(coa, WFLOW);
+        c.registerCreateYieldVaultConfig(CREATE_CONFIG_ID, VAULT_ID, STRATEGY_ID);
         c.testRegisterYieldVaultId(42, user, NATIVE_FLOW);
 
         dai = new MockDAI();
@@ -82,10 +84,41 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 1 ether);
         assertEq(c.getPendingRequestCount(), 1);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.CREATE_YIELDVAULT));
         assertEq(req.user, user);
         assertEq(req.amount, 1 ether);
+        assertEq(req.createVaultConfigId, CREATE_CONFIG_ID);
+        assertEq(req.vaultIdentifier, VAULT_ID);
+        assertEq(req.strategyIdentifier, STRATEGY_ID);
+    }
+
+    function test_CreateYieldVault_WithConfigId() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            CREATE_CONFIG_ID
+        );
+
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
+        assertEq(req.createVaultConfigId, CREATE_CONFIG_ID);
+        assertEq(req.vaultIdentifier, VAULT_ID);
+        assertEq(req.strategyIdentifier, STRATEGY_ID);
+    }
+
+    function test_GetCreateYieldVaultConfig() public view {
+        (
+            bool exists,
+            bool enabled,
+            string memory vaultIdentifier,
+            string memory strategyIdentifier
+        ) = c.getCreateYieldVaultConfig(CREATE_CONFIG_ID);
+
+        assertTrue(exists);
+        assertTrue(enabled);
+        assertEq(vaultIdentifier, VAULT_ID);
+        assertEq(strategyIdentifier, STRATEGY_ID);
     }
 
     function test_CreateYieldVault_UsesSentinelYieldVaultIdPlaceholder() public {
@@ -93,7 +126,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(
             req.yieldVaultId,
             sentinelYieldVaultId,
@@ -131,7 +164,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(user);
         uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
         assertEq(req.yieldVaultId, 42);
         assertEq(req.tokenAddress, NATIVE_FLOW);
@@ -154,7 +187,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(user);
         uint256 reqId = c.withdrawFromYieldVault(42, 0.5 ether);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.WITHDRAW_FROM_YIELDVAULT));
         assertEq(req.amount, 0.5 ether);
         assertEq(req.tokenAddress, NATIVE_FLOW);
@@ -166,7 +199,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(user);
         uint256 reqId = c.withdrawFromYieldVault(43, 0.5 ether);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(req.tokenAddress, WFLOW);
     }
 
@@ -174,7 +207,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(user);
         uint256 reqId = c.closeYieldVault(42);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.CLOSE_YIELDVAULT));
         assertEq(req.yieldVaultId, 42);
         assertEq(req.tokenAddress, NATIVE_FLOW);
@@ -186,7 +219,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(user);
         uint256 reqId = c.closeYieldVault(44);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(req.tokenAddress, WFLOW);
     }
 
@@ -203,7 +236,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 1 ether); // Funds claimable
         assertEq(c.getPendingRequestCount(), 0);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
 
         // User claims refund
@@ -330,7 +363,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Balance deducted atomically
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PROCESSING));
     }
 
@@ -364,7 +397,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(reqId, true, 100, "YieldVault created");
         vm.stopPrank();
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
         assertEq(req.yieldVaultId, 100);
         assertEq(c.getPendingRequestCount(), 0);
@@ -392,7 +425,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 1 ether);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
     }
 
@@ -414,7 +447,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 1 ether);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
         assertEq(req.yieldVaultId, 42);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
@@ -523,7 +556,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 1 ether); // Funds claimable
         assertEq(c.getPendingRequestCount(), 0);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
 
         // User claims refund
@@ -712,12 +745,60 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, "", "");
     }
 
+    function test_CreateYieldVault_RevertUnknownConfigId() public {
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.CreateYieldVaultConfigNotFound.selector,
+                uint64(999)
+            )
+        );
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, uint64(999));
+    }
+
+    function test_CreateYieldVault_RevertDisabledConfigId() public {
+        vm.prank(c.owner());
+        c.setCreateYieldVaultConfigEnabled(CREATE_CONFIG_ID, false);
+
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.CreateYieldVaultConfigDisabled.selector,
+                CREATE_CONFIG_ID
+            )
+        );
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, CREATE_CONFIG_ID);
+    }
+
+    function test_CreateYieldVault_RevertUnregisteredPair() public {
+        bytes32 pairHash = keccak256(
+            abi.encode(
+                "A.0ae53cb6e3f42a79.FlowToken.Vault",
+                "A.9999999999999999.Unknown.Strategy"
+            )
+        );
+
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.CreateYieldVaultConfigPairNotRegistered.selector,
+                pairHash
+            )
+        );
+        c.createYieldVault{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            "A.0ae53cb6e3f42a79.FlowToken.Vault",
+            "A.9999999999999999.Unknown.Strategy"
+        );
+    }
+
     function test_DepositToYieldVault_AnyoneCanDeposit() public {
         // YieldVault 42 is owned by user, but user2 can deposit to it
         vm.prank(user2);
         uint256 reqId = c.depositToYieldVault{value: 1 ether}(42, NATIVE_FLOW, 1 ether);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.requestType), uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
         assertEq(req.yieldVaultId, 42);
         assertEq(req.user, user2);
@@ -760,7 +841,6 @@ contract FlowYieldVaultsRequestsTest is Test {
             ,
             ,
             ,
-            ,
 
         ) = c.getPendingRequestsUnpacked(0, 0);
 
@@ -774,6 +854,61 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(requestTypes[1], uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
     }
 
+    function test_GetPendingRequestsUnpacked_UsesConfigIds() public {
+        vm.startPrank(user);
+        c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, CREATE_CONFIG_ID);
+        c.depositToYieldVault{value: 2 ether}(42, NATIVE_FLOW, 2 ether);
+        vm.stopPrank();
+
+        (
+            uint256[] memory ids,
+            ,
+            uint8[] memory requestTypes,
+            ,
+            ,
+            ,
+            ,
+            ,
+            ,
+            uint64[] memory createVaultConfigIds
+        ) = c.getPendingRequestsUnpacked(0, 0);
+
+        assertEq(ids.length, 2);
+        assertEq(requestTypes[0], uint8(FlowYieldVaultsRequests.RequestType.CREATE_YIELDVAULT));
+        assertEq(requestTypes[1], uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
+        assertEq(createVaultConfigIds[0], CREATE_CONFIG_ID);
+        assertEq(createVaultConfigIds[1], 0);
+    }
+
+    function test_GetRequestUnpacked_IncludesConfigId() public {
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(
+            NATIVE_FLOW,
+            1 ether,
+            CREATE_CONFIG_ID
+        );
+
+        (
+            uint256 id,
+            address reqUser,
+            uint8 requestType,
+            ,
+            ,
+            uint256 amount,
+            uint64 yieldVaultId,
+            ,
+            ,
+            uint64 createVaultConfigId
+        ) = c.getRequestUnpacked(reqId);
+
+        assertEq(id, reqId);
+        assertEq(reqUser, user);
+        assertEq(requestType, uint8(FlowYieldVaultsRequests.RequestType.CREATE_YIELDVAULT));
+        assertEq(amount, 1 ether);
+        assertEq(yieldVaultId, c.NO_YIELDVAULT_ID());
+        assertEq(createVaultConfigId, CREATE_CONFIG_ID);
+    }
+
     function test_GetPendingRequestsUnpacked_Pagination() public {
         vm.startPrank(user);
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
@@ -782,13 +917,13 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // Get first 2
-        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 2);
+        (uint256[] memory ids, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 2);
         assertEq(ids.length, 2);
         assertEq(ids[0], 1);
         assertEq(ids[1], 2);
 
         // Get starting from index 1
-        (uint256[] memory ids2, , , , , , , , , , ) = c.getPendingRequestsUnpacked(1, 2);
+        (uint256[] memory ids2, , , , , , , , , ) = c.getPendingRequestsUnpacked(1, 2);
         assertEq(ids2.length, 2);
         assertEq(ids2[0], 2);
         assertEq(ids2[1], 3);
@@ -817,7 +952,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getPendingRequestCount(), 0);
         assertEq(c.doesUserOwnYieldVault(user, 100), true);
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
         assertEq(req.yieldVaultId, 100);
     }
@@ -833,7 +968,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(reqId, true, 42, "Withdrawn");
         vm.stopPrank();
 
-        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        FlowYieldVaultsRequests.RequestView memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
     }
 
@@ -895,7 +1030,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // Verify FIFO order is maintained: [req1, req2, req4, req5]
-        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        (uint256[] memory ids, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(ids.length, 4, "Should have 4 pending requests");
         assertEq(ids[0], req1, "First should be req1");
         assertEq(ids[1], req2, "Second should be req2");
@@ -916,7 +1051,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(req1, true, 100, "Created");
         vm.stopPrank();
 
-        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        (uint256[] memory ids, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(ids.length, 2);
         assertEq(ids[0], req2, "First should now be req2");
         assertEq(ids[1], req3, "Second should be req3");
@@ -935,7 +1070,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(req3, true, 100, "Created");
         vm.stopPrank();
 
-        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        (uint256[] memory ids, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(ids.length, 2);
         assertEq(ids[0], req1);
         assertEq(ids[1], req2);
@@ -977,7 +1112,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(req2, true, 100, "Created");
 
         // After removing req2: [req1, req3, req4]
-        (uint256[] memory ids1, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        (uint256[] memory ids1, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(ids1[0], req1);
         assertEq(ids1[1], req3);
         assertEq(ids1[2], req4);
@@ -986,7 +1121,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(req4, true, 101, "Created");
 
         // After removing req4: [req1, req3]
-        (uint256[] memory ids2, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        (uint256[] memory ids2, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(ids2[0], req1);
         assertEq(ids2[1], req3);
 
@@ -994,7 +1129,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(req1, true, 102, "Created");
 
         // After removing req1: [req3]
-        (uint256[] memory ids3, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        (uint256[] memory ids3, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(ids3.length, 1);
         assertEq(ids3[0], req3);
 
@@ -1024,9 +1159,9 @@ contract FlowYieldVaultsRequestsTest is Test {
             uint64[] memory yieldVaultIds,
             uint256[] memory timestamps,
             string[] memory messages,
-            string[] memory vaultIdentifiers,
-            string[] memory strategyIdentifiers,
+            uint64[] memory createVaultConfigIds,
             uint256 pendingBalance,
+
         ) = c.getPendingRequestsByUserUnpacked(user);
 
         assertEq(ids.length, 2, "User should have 2 pending requests");
@@ -1036,6 +1171,8 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(requestTypes[1], uint8(FlowYieldVaultsRequests.RequestType.DEPOSIT_TO_YIELDVAULT));
         assertEq(amounts[0], 1 ether);
         assertEq(amounts[1], 2 ether);
+        assertEq(createVaultConfigIds[0], CREATE_CONFIG_ID);
+        assertEq(createVaultConfigIds[1], 0);
         assertEq(pendingBalance, 3 ether, "Pending balance should be sum of amounts");
     }
 
@@ -1050,12 +1187,12 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
 
         // Check user's requests
-        (uint256[] memory userIds, , , , , , , , , , uint256 userBalance, ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory userIds, , , , , , , , , uint256 userBalance, ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(userIds.length, 2, "User should have 2 requests");
         assertEq(userBalance, 4 ether, "User pending balance should be 4 ether");
 
         // Check user2's requests
-        (uint256[] memory user2Ids, , , , , , , , , , uint256 user2Balance, ) = c.getPendingRequestsByUserUnpacked(user2);
+        (uint256[] memory user2Ids, , , , , , , , , uint256 user2Balance, ) = c.getPendingRequestsByUserUnpacked(user2);
         assertEq(user2Ids.length, 1, "User2 should have 1 request");
         assertEq(user2Balance, 2 ether, "User2 pending balance should be 2 ether");
     }
@@ -1063,7 +1200,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     function test_GetPendingRequestsByUserUnpacked_EmptyForNewUser() public {
         address newUser = makeAddr("newUser");
 
-        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(newUser);
+        (uint256[] memory ids, , , , , , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(newUser);
 
         assertEq(ids.length, 0, "New user should have no pending requests");
         assertEq(pendingBalance, 0, "New user should have 0 pending balance");
@@ -1083,7 +1220,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // User should now have req1 and req3
-        (uint256[] memory ids, , , , uint256[] memory amounts, , , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , uint256[] memory amounts, , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 2, "User should have 2 remaining requests");
         // Note: Order in user array may change due to swap-and-pop optimization
         assertTrue(ids[0] == req1 || ids[0] == req3, "Should contain req1 or req3");
@@ -1101,7 +1238,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.cancelRequest(req1);
         vm.stopPrank();
 
-        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance, uint256 claimableRefund) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , , , , , , uint256 pendingBalance, uint256 claimableRefund) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 1, "User should have 1 remaining request");
         assertEq(ids[0], req2, "Remaining request should be req2");
         // pendingBalance = 2 ether (escrowed for req2 only)
@@ -1141,16 +1278,16 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // Verify user1's remaining requests
-        (uint256[] memory u1Ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory u1Ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(u1Ids.length, 2, "User1 should have 2 requests");
 
         // Verify user2's requests unchanged
-        (uint256[] memory u2Ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user2);
+        (uint256[] memory u2Ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user2);
         assertEq(u2Ids.length, 1, "User2 should have 1 request");
         assertEq(u2Ids[0], u2r1);
 
         // Verify user3's requests unchanged
-        (uint256[] memory u3Ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user3);
+        (uint256[] memory u3Ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user3);
         assertEq(u3Ids.length, 1, "User3 should have 1 request");
         assertEq(u3Ids[0], u3r1);
     }
@@ -1168,7 +1305,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing(req2, true, 101, "Created");
         vm.stopPrank();
 
-        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , , , , , , uint256 pendingBalance, ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 0, "User should have no pending requests");
         assertEq(pendingBalance, 0);
     }
@@ -1297,7 +1434,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getPendingRequestCount(), numRequests / 2);
 
         // Verify FIFO order is maintained for remaining requests
-        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        (uint256[] memory ids, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(ids.length, numRequests / 2);
 
         // Even-indexed original requests should remain in order
@@ -1332,7 +1469,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Verify all other users still have 3 requests
         for (uint256 i = 0; i < 5; i++) {
-            (uint256[] memory ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(users[i]);
+            (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(users[i]);
             if (i == 2) {
                 assertEq(ids.length, 2, "User 2 should have 2 requests");
             } else {
@@ -1356,7 +1493,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         assertEq(c.getPendingRequestCount(), 0);
 
-        (uint256[] memory ids, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 0);
     }
 
@@ -1374,7 +1511,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // req1 should still be removed from pending (it's marked FAILED)
-        (uint256[] memory ids, , , , , , , , , , uint256 pendingBalance, uint256 claimableRefund) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory ids, , , , , , , , , uint256 pendingBalance, uint256 claimableRefund) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(ids.length, 1, "Should have 1 pending request");
         assertEq(ids[0], req2);
         // Escrowed balance only includes req2
@@ -1394,13 +1531,13 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         // Verify global FIFO order
-        (uint256[] memory globalIds, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
+        (uint256[] memory globalIds, , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
         assertEq(globalIds.length, 2);
         assertEq(globalIds[0], req1, "First should be req1");
         assertEq(globalIds[1], req3, "Second should be req3");
 
         // Verify user's array
-        (uint256[] memory userIds, , , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
+        (uint256[] memory userIds, , , , , , , , , , ) = c.getPendingRequestsByUserUnpacked(user);
         assertEq(userIds.length, 2);
     }
 

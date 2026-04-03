@@ -163,7 +163,7 @@ Note: counts include both `PENDING` and `PROCESSING` requests (they remain in th
 
 ```typescript
 const request = await contract.getRequest(requestId);
-// Returns: { id, user, requestType, status, tokenAddress, amount, yieldVaultId, timestamp, message, vaultIdentifier, strategyIdentifier }
+// Returns: { id, user, requestType, status, tokenAddress, amount, yieldVaultId, timestamp, message, createVaultConfigId, vaultIdentifier, strategyIdentifier }
 ```
 
 #### Get User's Pending Requests (Unpacked)
@@ -178,14 +178,14 @@ const [
   yieldVaultIds,
   timestamps,
   messages,
-  vaultIdentifiers,
-  strategyIdentifiers,
+  createVaultConfigIds,
   pendingBalance,
   claimableRefund,
 ] = await contract.getPendingRequestsByUserUnpacked(userAddress);
 // pendingBalance = escrowed funds for active pending requests (native FLOW only)
 // claimableRefund = funds available to claim via claimRefund() (native FLOW only)
 // Use getUserPendingBalance/getClaimableRefund for a specific token
+// Use getCreateYieldVaultConfig(createVaultConfigIds[i]) to resolve vault/strategy identifiers for CREATE requests
 ```
 
 #### Get All Pending Requests (Paginated, Admin)
@@ -201,14 +201,14 @@ const [
   yieldVaultIds,
   timestamps,
   messages,
-  vaultIdentifiers,
-  strategyIdentifiers,
+  createVaultConfigIds,
 ] = await contract.getPendingRequestsUnpacked(startIndex, count);
 
 // Filter for specific user client-side
 const userRequests = ids.filter(
   (_, i) => users[i].toLowerCase() === userAddress.toLowerCase()
 );
+// Use getCreateYieldVaultConfig(createVaultConfigIds[i]) to resolve vault/strategy identifiers for CREATE requests
 ```
 
 ---
