@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "../src/FlowYieldVaultsRequests.sol";
 
 contract TestERC20 is ERC20 {
@@ -31,8 +32,6 @@ contract MockDAI is ERC20 {
 }
 
 contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
-    constructor(address coaAddress, address wflowAddress) FlowYieldVaultsRequests(coaAddress, wflowAddress) {}
-
     function testRegisterYieldVaultId(uint64 yieldVaultId, address owner, address tokenAddress) external {
         validYieldVaultIds[yieldVaultId] = true;
         yieldVaultOwners[yieldVaultId] = owner;
@@ -46,6 +45,7 @@ contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
 
 contract FlowYieldVaultsRequestsTest is Test {
     FlowYieldVaultsRequestsTestHelper public c;
+    FlowYieldVaultsRequestsTestHelper public impl;
     ERC20Mock public wflow;
     ERC20Mock public tokenB;
     address user = makeAddr("user");
@@ -84,7 +84,14 @@ contract FlowYieldVaultsRequestsTest is Test {
         wflow.mint(user2, 100 ether);
         tokenB.mint(user, 100 ether);
         tokenB.mint(user2, 100 ether);
-        c = new FlowYieldVaultsRequestsTestHelper(coa, WFLOW);
+
+        impl = new FlowYieldVaultsRequestsTestHelper();
+        ERC1967Proxy fyvProxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeWithSignature("initialize(address,address)", coa, WFLOW)
+        );
+
+        c = FlowYieldVaultsRequestsTestHelper(address(fyvProxy));
         c.testRegisterYieldVaultId(42, user, NATIVE_FLOW);
 
         dai = new MockDAI();
@@ -725,8 +732,13 @@ contract FlowYieldVaultsRequestsTest is Test {
     }
 
     function test_Constructor_RevertZeroCOAAddress() public {
+        FlowYieldVaultsRequestsTestHelper fyvImpl = new FlowYieldVaultsRequestsTestHelper();
+
         vm.expectRevert(FlowYieldVaultsRequests.InvalidCOAAddress.selector);
-        new FlowYieldVaultsRequestsTestHelper(address(0), WFLOW);
+        new ERC1967Proxy(
+            address(fyvImpl),
+            abi.encodeWithSignature("initialize(address,address)", address(0), WFLOW)
+        );
     }
 
     function test_SetTokenConfig() public {
@@ -801,25 +813,16 @@ contract FlowYieldVaultsRequestsTest is Test {
     // OWNERSHIP TRANSFER
     // ============================================
 
-    function test_TransferOwnership_TwoStepProcess() public {
+    function test_TransferOwnership() public {
         address newOwner = makeAddr("newOwner");
         address originalOwner = c.owner();
 
-        // Step 1: Current owner initiates transfer
+        // Current owner initiates transfer
         vm.prank(originalOwner);
         c.transferOwnership(newOwner);
 
-        // Owner hasn't changed yet
-        assertEq(c.owner(), originalOwner);
-        assertEq(c.pendingOwner(), newOwner);
-
-        // Step 2: New owner accepts
-        vm.prank(newOwner);
-        c.acceptOwnership();
-
         // Now ownership is transferred
         assertEq(c.owner(), newOwner);
-        assertEq(c.pendingOwner(), address(0));
     }
 
     function test_TransferOwnership_RevertNotOwner() public {
@@ -828,24 +831,12 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.transferOwnership(makeAddr("newOwner"));
     }
 
-    function test_AcceptOwnership_RevertNotPendingOwner() public {
-        vm.prank(c.owner());
-        c.transferOwnership(makeAddr("newOwner"));
-
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, user));
-        c.acceptOwnership();
-    }
-
     function test_TransferOwnership_NewOwnerHasAdminRights() public {
         address newOwner = makeAddr("newOwner");
         address originalOwner = c.owner();
 
         vm.prank(originalOwner);
         c.transferOwnership(newOwner);
-
-        vm.prank(newOwner);
-        c.acceptOwnership();
 
         // New owner can perform admin actions
         vm.prank(newOwner);
@@ -856,6 +847,100 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(originalOwner);
         vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, originalOwner));
         c.setMaxPendingRequestsPerUser(50);
+    }
+
+    // ============================================
+    // CONTRACT UPGRADES
+    // ============================================
+
+    function test_UpgradeContract_RevertNotOwner() public {
+        vm.prank(user);
+        address newImplementation = makeAddr("newImplementation");
+        bytes memory data;
+
+        vm.expectRevert(abi.encodeWithSelector(
+            OwnableUnauthorizedAccount.selector,
+            user
+        ));
+        c.upgradeToAndCall(newImplementation, data);
+    }
+
+    function test_UpgradeContract() public {
+        FlowYieldVaultsRequestsTestHelper newImplementation = new FlowYieldVaultsRequestsTestHelper();
+        bytes memory data;
+
+        bytes32 slot = bytes32(0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc);
+        bytes32 value = vm.load(address(c), slot);
+        address currentImplementation = address(uint160(uint256(value)));
+        assertEq(currentImplementation, address(impl));
+
+        vm.prank(c.owner());
+        c.upgradeToAndCall(address(newImplementation), data);
+
+        value = vm.load(address(c), slot);
+        currentImplementation = address(uint160(uint256(value)));
+        assertEq(currentImplementation, address(newImplementation));
+    }
+
+    function test_UpgradeContract_RequestsPreserved() public {
+        vm.startPrank(user);
+        uint256 req1 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req2 = c.createYieldVault{value: 2 ether}(NATIVE_FLOW, 2 ether, VAULT_ID, STRATEGY_ID);
+        uint256 req3 = c.createYieldVault{value: 3 ether}(NATIVE_FLOW, 3 ether, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        // Assert that the implementation contract has no requests,
+        // since the storage is in the Proxy contract.
+        assertEq(impl.getPendingRequestCount(), 0);
+        assertEq(c.getPendingRequestCount(), 3);
+
+        FlowYieldVaultsRequestsTestHelper newImplementation = new FlowYieldVaultsRequestsTestHelper();
+        bytes memory data;
+
+        vm.prank(c.owner());
+        c.upgradeToAndCall(address(newImplementation), data);
+
+        bytes32 slot = bytes32(0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc);
+        bytes32 value = vm.load(address(c), slot);
+        address currentImplementation = address(uint160(uint256(value)));
+        assertEq(currentImplementation, address(newImplementation));
+
+        // Assert that the new implementation contract has no requests,
+        // since the storage is in the Proxy contract.
+        assertEq(newImplementation.getPendingRequestCount(), 0);
+        assertEq(c.getPendingRequestCount(), 3);
+
+        uint256[] memory successfulRequestIds = new uint256[](3);
+        successfulRequestIds[0] = req1;
+        successfulRequestIds[1] = req2;
+        successfulRequestIds[2] = req3;
+        vm.prank(coa);
+        c.startProcessingBatch(successfulRequestIds, new uint256[](0));
+
+        for (uint256 i = 0; i < successfulRequestIds.length; i++) {
+            FlowYieldVaultsRequests.Request memory req = c.getRequest(successfulRequestIds[i]);
+            assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.PROCESSING));
+        }
+        assertEq(c.getPendingRequestCount(), 0);
+    }
+
+    function test_UpgradeContract_RevertNonUUPS() public {
+        address nonUUPS = address(new MockDAI());  // any non-UUPS contract
+        vm.prank(c.owner());
+        vm.expectRevert(
+            abi.encodeWithSelector(ERC1967Utils.ERC1967InvalidImplementation.selector, nonUUPS)
+        );
+        c.upgradeToAndCall(nonUUPS, "");
+    }
+
+    function test_CannotReinitialize() public {
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        c.initialize(coa, WFLOW);
+    }
+
+    function test_ImplementationCannotBeInitialized() public {
+        vm.expectRevert(Initializable.InvalidInitialization.selector);
+        impl.initialize(coa, WFLOW);
     }
 
     // ============================================
@@ -1118,8 +1203,13 @@ contract FlowYieldVaultsRequestsTest is Test {
     }
 
     function test_DeployWithZeroWFLOWAddress() public {
+        FlowYieldVaultsRequestsTestHelper fyvImpl = new FlowYieldVaultsRequestsTestHelper();
         // Deploy with address(0) for WFLOW - should work but not configure WFLOW
-        FlowYieldVaultsRequestsTestHelper contractNoWflow = new FlowYieldVaultsRequestsTestHelper(coa, address(0));
+        ERC1967Proxy fyvProxy = new ERC1967Proxy(
+            address(fyvImpl),
+            abi.encodeWithSignature("initialize(address,address)", coa, address(0))
+        );
+        FlowYieldVaultsRequestsTestHelper contractNoWflow = FlowYieldVaultsRequestsTestHelper(address(fyvProxy));
 
         // WFLOW at address(0) should NOT be supported
         (bool isSupported, , ) = contractNoWflow.allowedTokens(address(0));
