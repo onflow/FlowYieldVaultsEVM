@@ -29,13 +29,14 @@ access(all) fun main(contractAddress: String, tokenAddress: String): TokenConfig
     let evmTokenAddress = EVM.addressFromString(tokenAddress)
 
     // Read allowedTokens(address)
-    let calldata = EVM.encodeABIWithSignature("allowedTokens(address)", [evmTokenAddress])
-    let result = EVM.dryCall(
+    let result = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: calldata,
+        signature: "allowedTokens(address)",
+        args: [evmTokenAddress],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<Bool>(), Type<UInt256>(), Type<Bool>()]
     )
 
     var isSupported = false
@@ -43,13 +44,10 @@ access(all) fun main(contractAddress: String, tokenAddress: String): TokenConfig
     var isNative = false
 
     if result.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(
-            types: [Type<Bool>(), Type<UInt256>(), Type<Bool>()],
-            data: result.data
-        )
-        isSupported = decoded[0] as! Bool
-        minimumBalance = decoded[1] as! UInt256
-        isNative = decoded[2] as! Bool
+        assert(result.results.length == 3, message: "Invalid response from allowedTokens()")
+        isSupported = result.results[0] as! Bool
+        minimumBalance = result.results[1] as! UInt256
+        isNative = result.results[2] as! Bool
     }
 
     return TokenConfig(

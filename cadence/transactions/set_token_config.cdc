@@ -28,17 +28,14 @@ transaction(
         let targetContract = EVM.addressFromString(contractAddress)
         let token = EVM.addressFromString(tokenAddress)
 
-        // Encode the function call: setTokenConfig(address,bool,uint256,bool)
-        let calldata = EVM.encodeABIWithSignature(
-            "setTokenConfig(address,bool,uint256,bool)",
-            [token, isSupported, minimumBalance, isNative]
-        )
-
-        let result = self.coa.call(
+        // Call the function: setTokenConfig(address,bool,uint256,bool)
+        let result = self.coa.callWithSigAndArgs(
             to: targetContract,
-            data: calldata,
+            signature: "setTokenConfig(address,bool,uint256,bool)",
+            args: [token, isSupported, minimumBalance, isNative],
             gasLimit: 100_000,
-            value: EVM.Balance(attoflow: 0)
+            value: 0,
+            resultTypes: nil
         )
 
         // Check if call was successful

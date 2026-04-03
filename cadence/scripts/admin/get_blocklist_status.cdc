@@ -26,37 +26,39 @@ access(all) fun main(contractAddress: String, addressToCheck: String): Blocklist
     let fromAddress = EVM.addressFromString("0x0000000000000000000000000000000000000001")
 
     // Read blocklistEnabled
-    let enabledCalldata = EVM.encodeABIWithSignature("blocklistEnabled()", [])
-    let enabledResult = EVM.dryCall(
+    let enabledResult = EVM.dryCallWithSigAndArgs(
         from: fromAddress,
         to: evmContractAddress,
-        data: enabledCalldata,
+        signature: "blocklistEnabled()",
+        args: [],
         gasLimit: 100_000,
-        value: EVM.Balance(attoflow: 0)
+        value: 0,
+        resultTypes: [Type<Bool>()]
     )
 
     var enabled = false
     if enabledResult.status == EVM.Status.successful {
-        let decoded = EVM.decodeABI(types: [Type<Bool>()], data: enabledResult.data)
-        enabled = decoded[0] as! Bool
+        assert(enabledResult.results.length == 1, message: "Invalid response from blocklistEnabled()")
+        enabled = enabledResult.results[0] as! Bool
     }
 
     // Check if address is blocklisted (if provided)
     var isBlocklisted = false
     if addressToCheck.length > 0 {
         let checkAddress = EVM.addressFromString(addressToCheck)
-        let blocklistedCalldata = EVM.encodeABIWithSignature("blocklisted(address)", [checkAddress])
-        let blocklistedResult = EVM.dryCall(
+        let blocklistedResult = EVM.dryCallWithSigAndArgs(
             from: fromAddress,
             to: evmContractAddress,
-            data: blocklistedCalldata,
+            signature: "blocklisted(address)",
+            args: [checkAddress],
             gasLimit: 100_000,
-            value: EVM.Balance(attoflow: 0)
+            value: 0,
+            resultTypes: [Type<Bool>()]
         )
 
         if blocklistedResult.status == EVM.Status.successful {
-            let decoded = EVM.decodeABI(types: [Type<Bool>()], data: blocklistedResult.data)
-            isBlocklisted = decoded[0] as! Bool
+            assert(blocklistedResult.results.length == 1, message: "Invalid response from blocklisted()")
+            isBlocklisted = blocklistedResult.results[0] as! Bool
         }
     }
 

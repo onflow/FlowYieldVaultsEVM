@@ -23,17 +23,14 @@ transaction(tokenAddressHex: String, spenderAddressHex: String, amount: UInt256)
         let tokenAddress = EVM.addressFromString(tokenAddressHex)
         let spenderAddress = EVM.addressFromString(spenderAddressHex)
 
-        // Encode approve(address,uint256) call using EVM.encodeABIWithSignature
-        let calldata = EVM.encodeABIWithSignature(
-            "approve(address,uint256)",
-            [spenderAddress, amount]
-        )
-
-        let result = self.coa.call(
+        // Call the function approve(address,uint256)
+        let result = self.coa.callWithSigAndArgs(
             to: tokenAddress,
-            data: calldata,
+            signature: "approve(address,uint256)",
+            args: [spenderAddress, amount],
             gasLimit: 100_000,
-            value: EVM.Balance(attoflow: 0)
+            value: 0,
+            resultTypes: nil
         )
 
         assert(

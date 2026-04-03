@@ -18,16 +18,13 @@ transaction(contractAddress: String) {
     execute {
         let evmAddress = EVM.addressFromString(contractAddress)
 
-        let calldata = EVM.encodeABIWithSignature(
-            "acceptOwnership()",
-            []
-        )
-
-        let result = self.coa.call(
+        let result = self.coa.callWithSigAndArgs(
             to: evmAddress,
-            data: calldata,
+            signature: "acceptOwnership()",
+            args: [],
             gasLimit: 100_000,
-            value: EVM.Balance(attoflow: 0)
+            value: 0,
+            resultTypes: nil
         )
 
         assert(result.status == EVM.Status.successful, message: "acceptOwnership failed")
