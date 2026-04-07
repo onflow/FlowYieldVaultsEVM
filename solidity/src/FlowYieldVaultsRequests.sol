@@ -140,6 +140,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Token configurations indexed by token address
     mapping(address => TokenConfig) public allowedTokens;
 
+    /// @notice Token addresses surfaced in per-user balance views
+    address[] private _trackedTokens;
+
+    /// @notice O(1) lookup for tracked-token membership
+    mapping(address => bool) private _isTrackedToken;
+
     /// @notice Maximum number of pending requests allowed per user (0 = unlimited)
     uint256 public maxPendingRequestsPerUser;
 
@@ -1372,8 +1378,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return messages Messages
     /// @return vaultIdentifiers Vault identifiers
     /// @return strategyIdentifiers Strategy identifiers
-    /// @return pendingBalance Escrowed balance for active pending requests (native FLOW only)
-    /// @return claimableRefund Claimable refund amount (native FLOW only)
+    /// @return balanceTokens Token addresses for balance arrays
+    /// @return pendingBalances Escrowed balances for active pending requests per token
+    /// @return claimableRefundsArray Claimable refund amounts per token
     function getPendingRequestsByUserUnpacked(
         address user
     )
@@ -1390,8 +1397,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             string[] memory messages,
             string[] memory vaultIdentifiers,
             string[] memory strategyIdentifiers,
-            uint256 pendingBalance,
-            uint256 claimableRefund
+            address[] memory balanceTokens,
+            uint256[] memory pendingBalances,
+            uint256[] memory claimableRefundsArray
         )
     {
         // Use the user's pending request IDs directly (O(1) lookup)
@@ -1428,30 +1436,27 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             }
         }
 
-        // Get balances for native FLOW
-        pendingBalance = pendingUserBalances[user][NATIVE_FLOW];
-        claimableRefund = claimableRefunds[user][NATIVE_FLOW];
+        // Return balances for the full tracked token set so previously configured
+        // tokens remain visible even if later disabled.
+        uint256 tokenCount = _trackedTokens.length;
+        balanceTokens = new address[](tokenCount);
+        pendingBalances = new uint256[](tokenCount);
+        claimableRefundsArray = new uint256[](tokenCount);
+
+        for (uint256 i = 0; i < tokenCount; ) {
+            address token = _trackedTokens[i];
+            balanceTokens[i] = token;
+            pendingBalances[i] = pendingUserBalances[user][token];
+            claimableRefundsArray[i] = claimableRefunds[user][token];
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     // ============================================
     // Internal Functions
     // ============================================
-
-    /// @dev Internal token configuration helper with minimum-balance validation.
-    function _setTokenConfig(
-        address tokenAddress,
-        bool isSupported,
-        uint256 minimumBalance,
-        bool isNative
-    ) internal {
-        if (isSupported && minimumBalance == 0) revert InvalidMinimumBalance();
-
-        allowedTokens[tokenAddress] = TokenConfig({
-            isSupported: isSupported,
-            minimumBalance: minimumBalance,
-            isNative: isNative
-        });
-    }
 
     /**
      * @dev Internal implementation for dropping pending requests.
@@ -1545,6 +1550,27 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 }
             }
             emit RequestsDropped(actualDroppedIds, msg.sender);
+        }
+    }
+
+    /// @dev Stores token configuration and records tokens for future balance queries.
+    function _setTokenConfig(
+        address tokenAddress,
+        bool isSupported,
+        uint256 minimumBalance,
+        bool isNative
+    ) internal {
+        if (isSupported && minimumBalance == 0) revert InvalidMinimumBalance();
+
+        allowedTokens[tokenAddress] = TokenConfig({
+            isSupported: isSupported,
+            minimumBalance: minimumBalance,
+            isNative: isNative
+        });
+
+        if (isSupported && !_isTrackedToken[tokenAddress]) {
+            _isTrackedToken[tokenAddress] = true;
+            _trackedTokens.push(tokenAddress);
         }
     }
 

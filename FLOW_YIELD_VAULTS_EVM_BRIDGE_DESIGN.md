@@ -550,7 +550,8 @@ function getPendingRequestIds() returns (uint256[] memory);
 // Get pending requests in unpacked arrays (pagination)
 function getPendingRequestsUnpacked(uint256 startIndex, uint256 count) returns (...);
 
-// Get pending requests for a user in unpacked arrays (includes native FLOW balances)
+// Get pending requests for a user in unpacked arrays (includes tracked-token escrow+refund balances)
+// Returns (..., address[] memory balanceTokens, uint256[] memory pendingBalances, uint256[] memory claimableRefundsArray)
 function getPendingRequestsByUserUnpacked(address user) returns (...);
 
 // Get single request by ID
