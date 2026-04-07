@@ -612,6 +612,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     }
 
     function test_CompleteProcessing_RevertNonZeroRefundForWithdraw() public {
+        // Non-escrowed requests must never credit refunds, even on success.
         vm.prank(user);
         uint256 reqId = c.withdrawFromYieldVault(42, 1 ether);
 
@@ -628,7 +629,26 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
     }
 
+    function test_CompleteProcessing_RevertNonZeroRefundForFailedWithdraw() public {
+        // The same zero-refund invariant applies when a WITHDRAW fails.
+        vm.prank(user);
+        uint256 reqId = c.withdrawFromYieldVault(42, 1 ether);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                uint256(0),
+                uint256(1)
+            )
+        );
+        c.completeProcessing(reqId, false, 42, "Failed", 1);
+        vm.stopPrank();
+    }
+
     function test_CompleteProcessing_RevertNonZeroRefundForClose() public {
+        // CLOSE shares the same non-escrowed accounting rule as WITHDRAW.
         vm.prank(user);
         uint256 reqId = c.closeYieldVault(42);
 
@@ -642,6 +662,24 @@ contract FlowYieldVaultsRequestsTest is Test {
             )
         );
         c.completeProcessing(reqId, true, 42, "Closed", 1);
+        vm.stopPrank();
+    }
+
+    function test_CompleteProcessing_RevertNonZeroRefundForFailedClose() public {
+        // A failed CLOSE must also reject any non-zero refundAmount.
+        vm.prank(user);
+        uint256 reqId = c.closeYieldVault(42);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                uint256(0),
+                uint256(1)
+            )
+        );
+        c.completeProcessing(reqId, false, 42, "Failed", 1);
         vm.stopPrank();
     }
 
