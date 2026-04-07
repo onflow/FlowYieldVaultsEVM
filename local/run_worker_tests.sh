@@ -301,19 +301,6 @@ set_token_config() {
     --compute-limit 9999 2>&1
 }
 
-# Approve ERC20 spend from the worker's COA for refund pulls
-approve_erc20_from_coa() {
-  local token_address=$1
-  local spender_address=$2
-  local amount=$3
-  flow transactions send ./cadence/transactions/approve_erc20_from_coa.cdc \
-    "$token_address" \
-    "$spender_address" \
-    "$amount" \
-    --signer emulator-flow-yield-vaults \
-    --compute-limit 9999 2>&1
-}
-
 # Get request message (error message or status message)
 get_request_message() {
   local request_id=$1
@@ -719,10 +706,6 @@ fi
 log_test "Configure MOET token support for worker tests"
 MOET_CONFIG_OUTPUT=$(set_token_config "$MOET_EVM_ADDRESS" true "1000000000000000000" false)
 assert_tx_success "$MOET_CONFIG_OUTPUT" "MOET token config applied"
-
-log_test "Approve MOET residual refunds from COA"
-MOET_COA_APPROVAL_OUTPUT=$(approve_erc20_from_coa "$MOET_EVM_ADDRESS" "$FLOW_VAULTS_REQUESTS_CONTRACT" "123456789")
-assert_tx_success "$MOET_COA_APPROVAL_OUTPUT" "COA approved MOET residual refunds"
 
 # ============================================
 # INITIAL BALANCES
