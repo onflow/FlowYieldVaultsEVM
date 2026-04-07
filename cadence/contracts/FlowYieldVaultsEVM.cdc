@@ -24,7 +24,13 @@ import "FlowEVMBridgeConfig"
 ///         batch-update statuses (PENDING -> PROCESSING for valid, PENDING -> FAILED for invalid)
 ///      2. Processing: For each PROCESSING request, executes Cadence-side operation
 ///         (create/deposit/withdraw/close YieldVault), then calls completeProcessing() to mark
-///         as COMPLETED or FAILED (with refund to EVM contract on CREATE/DEPOSIT failure)
+///         as COMPLETED or FAILED while reconciling any refund owed on the EVM side
+///      PRECISION NOTE:
+///      Native FLOW uses 18 decimals and ERC20 tokens use their own token decimals,
+///      while Cadence UFix64 supports 8 decimal places.
+///      CREATE/DEPOSIT requests therefore round the bridged amount down to the nearest
+///      Cadence-representable quantity and refund any remainder back to EVM claimable refunds.
+
 access(all) contract FlowYieldVaultsEVM {
 
     // ============================================
@@ -132,15 +138,17 @@ access(all) contract FlowYieldVaultsEVM {
     access(all) struct PendingRequestsInfo {
         access(all) let evmAddress: String
         access(all) let pendingCount: Int
-        access(all) let pendingBalance: UFix64
-        access(all) let claimableRefund: UFix64
+        /// @notice Pending balances per token address (maps token address string -> UFix64 balance)
+        access(all) let pendingBalances: {String: UFix64}
+        /// @notice Claimable refunds per token address (maps token address string -> UFix64 balance)
+        access(all) let claimableRefunds: {String: UFix64}
         access(all) let requests: [EVMRequest]
 
-        init(evmAddress: String, pendingCount: Int, pendingBalance: UFix64, claimableRefund: UFix64, requests: [EVMRequest]) {
+        init(evmAddress: String, pendingCount: Int, pendingBalances: {String: UFix64}, claimableRefunds: {String: UFix64}, requests: [EVMRequest]) {
             self.evmAddress = evmAddress
             self.pendingCount = pendingCount
-            self.pendingBalance = pendingBalance
-            self.claimableRefund = claimableRefund
+            self.pendingBalances = pendingBalances
+            self.claimableRefunds = claimableRefunds
             self.requests = requests
         }
     }
@@ -573,7 +581,7 @@ access(all) contract FlowYieldVaultsEVM {
         /// @dev This is the main dispatcher that:
         ///      1. Validates request status - should be PROCESSING
         ///      2. Dispatches to the appropriate process function based on request type
-        ///      3. Calls completeProcessing to update final status (with refund on failure for CREATE/DEPOSIT)
+        ///      3. Calls completeProcessing to update final status and return any refund due on EVM
         /// @param request The EVM request to process
         /// @return ProcessResult with success status, the yieldVaultId, and status message
         access(all) fun processRequest(_ request: EVMRequest): ProcessResult {
@@ -620,14 +628,17 @@ access(all) contract FlowYieldVaultsEVM {
                 )
             }
 
-            // Pass refund info - completeProcessing will determine if refund is needed
-            // based on success flag and request type
+            let refundAmount = FlowYieldVaultsEVM.refundAmountForCompletion(
+                request: request,
+                success: result!.success
+            )
+
             if !self.completeProcessing(
                 requestId: request.id,
                 success: result!.success,
                 yieldVaultId: result!.yieldVaultId,
                 message: result!.message,
-                refundAmount: request.amount,
+                refundAmount: refundAmount,
                 tokenAddress: request.tokenAddress,
                 requestType: request.requestType
             ) {
@@ -651,7 +662,9 @@ access(all) contract FlowYieldVaultsEVM {
         }
 
         /// @notice Marks a request as FAILED
-        /// @dev Calls completeProcessing to mark the request as failed with the given message
+        /// @dev Calls completeProcessing to mark the request as failed with the given message.
+        ///      Uses the same refund computation as the normal completion path to keep
+        ///      failed CREATE/DEPOSIT and failed WITHDRAW/CLOSE behavior consistent.
         /// @param request The EVM request to mark as failed
         /// @param message The error message to include in the result
         /// @return True if the request was marked as failed on EVM, false otherwise
@@ -662,12 +675,17 @@ access(all) contract FlowYieldVaultsEVM {
 
             FlowYieldVaultsEVM.emitRequestFailed(request, message: message)
 
+            let refundAmount = FlowYieldVaultsEVM.refundAmountForCompletion(
+                request: request,
+                success: false,
+            )
+
             return self.completeProcessing(
                 requestId: request.id,
                 success: false,
                 yieldVaultId: request.yieldVaultId,
                 message: message,
-                refundAmount: request.amount,
+                refundAmount: refundAmount,
                 tokenAddress: request.tokenAddress,
                 requestType: request.requestType,
             )
@@ -1005,14 +1023,17 @@ access(all) contract FlowYieldVaultsEVM {
             return nil // success
         }
 
-        /// @notice Marks a request as COMPLETED or FAILED, returning escrowed funds on failure
-        /// @dev For failed CREATE/DEPOSIT: returns funds from COA to EVM contract via msg.value (native)
-        ///      or approve+transferFrom (ERC20). For WITHDRAW/CLOSE or success: no refund sent.
+        /// @notice Marks a request as COMPLETED or FAILED, returning any refund owed on EVM
+        /// @dev Failed CREATE/DEPOSIT requests return the full escrowed amount to the EVM requests
+        ///      contract, where it is credited to claimable refunds. Successful CREATE/DEPOSIT
+        ///      requests may return only a precision residual that Cadence could not represent
+        ///      exactly. WITHDRAW/CLOSE requests never send a refund. ERC20 approve return data
+        ///      is validated when present.
         /// @param requestId The request ID to complete
         /// @param success Whether the operation succeeded
         /// @param yieldVaultId The associated YieldVault Id
         /// @param message Status message or error reason
-        /// @param refundAmount Amount to refund (0 if no refund needed)
+        /// @param refundAmount Amount to credit to claimable refunds (0 if no refund needed)
         /// @param tokenAddress Token address for refund (used to determine native vs ERC20)
         /// @param requestType The type of request (needed to determine if refund applies)
         /// @return True if the EVM call succeeded, false otherwise
@@ -1030,13 +1051,12 @@ access(all) contract FlowYieldVaultsEVM {
             let evmYieldVaultId = yieldVaultId ?? UInt64.max
 
             let calldata = EVM.encodeABIWithSignature(
-                "completeProcessing(uint256,bool,uint64,string)",
-                [requestId, success, evmYieldVaultId, message]
+                "completeProcessing(uint256,bool,uint64,string,uint256)",
+                [requestId, success, evmYieldVaultId, message, refundAmount]
             )
 
-            // Determine if refund is needed (failed CREATE or DEPOSIT)
-            let needsRefund = !success
-                && refundAmount > 0
+            // Determine if refund is needed for CREATE/DEPOSIT lifecycle accounting
+            let needsRefund = refundAmount > 0
                 && (requestType == FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue
                     || requestType == FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue)
 
@@ -1047,10 +1067,9 @@ access(all) contract FlowYieldVaultsEVM {
                 let isNativeFlow = tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString()
 
                 if isNativeFlow {
-                    // Native FLOW: send with the call
-                    // Convert UInt256 to UFix64 then to EVM.Balance
-                    let refundUFix64 = FlowYieldVaultsEVM.ufix64FromUInt256(refundAmount, tokenAddress: tokenAddress)
-                    refundValue = FlowYieldVaultsEVM.balanceFromUFix64(refundUFix64, tokenAddress: tokenAddress)
+                    // Native FLOW: send the original attoflow amount back to EVM without
+                    // round-tripping through UFix64, which would truncate sub-8-decimal precision.
+                    refundValue = EVM.Balance(attoflow: UInt(refundAmount))
                 } else {
                     // ERC20: approve contract to pull funds
                     let approveCalldata = EVM.encodeABIWithSignature(
@@ -1073,6 +1092,19 @@ access(all) contract FlowYieldVaultsEVM {
                             amount: refundAmount,
                             yieldVaultId: yieldVaultId,
                             reason: "ERC20 approve for refund failed: \(errorMsg)"
+                        )
+                        return false
+                    }
+
+                    if !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(approveResult.data) {
+                        emit RequestFailed(
+                            requestId: requestId,
+                            userAddress: "",
+                            requestType: requestType,
+                            tokenAddress: tokenAddress.toString(),
+                            amount: refundAmount,
+                            yieldVaultId: yieldVaultId,
+                            reason: "ERC20 approve for refund returned false or invalid bool data"
                         )
                         return false
                     }
@@ -1186,7 +1218,8 @@ access(all) contract FlowYieldVaultsEVM {
 
         /// @notice Bridges a Cadence vault to ERC20 tokens on EVM and transfers to recipient
         /// @dev Uses COA.depositTokens() to bridge tokens to EVM, then calls ERC20.transfer()
-        ///      to send the tokens to the recipient address.
+        ///      to send the tokens to the recipient address. ERC20 transfer return data is validated
+        ///      when present to ensure semantic success.
         /// @param vault The Cadence vault containing tokens to bridge (will be consumed)
         /// @param recipient The EVM address to receive the tokens
         /// @param tokenAddress The ERC20 token address on EVM
@@ -1221,6 +1254,10 @@ access(all) contract FlowYieldVaultsEVM {
             if transferResult.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(transferResult.data)
                 panic("ERC20 transfer to recipient failed: \(errorMsg)")
+            }
+
+            if !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(transferResult.data) {
+                panic("ERC20 transfer to recipient returned false or invalid bool data")
             }
         }
 
@@ -1682,8 +1719,9 @@ access(all) contract FlowYieldVaultsEVM {
                 Type<[String]>(),         // messages
                 Type<[String]>(),         // vaultIdentifiers
                 Type<[String]>(),         // strategyIdentifiers
-                Type<UInt256>(),          // pendingBalance
-                Type<UInt256>()           // claimableRefund
+                Type<[EVM.EVMAddress]>(), // balanceTokens
+                Type<[UInt256]>(),        // pendingBalances
+                Type<[UInt256]>()         // claimableRefundsArray
             ],
             data: callResult.data
         )
@@ -1698,12 +1736,38 @@ access(all) contract FlowYieldVaultsEVM {
         let messages = decoded[7] as! [String]
         let vaultIdentifiers = decoded[8] as! [String]
         let strategyIdentifiers = decoded[9] as! [String]
-        let pendingBalanceRaw = decoded[10] as! UInt256
-        let claimableRefundRaw = decoded[11] as! UInt256
+        let balanceTokens = decoded[10] as! [EVM.EVMAddress]
+        let pendingBalancesRaw = decoded[11] as! [UInt256]
+        let claimableRefundsRaw = decoded[12] as! [UInt256]
 
-        // Convert pending balance from wei to UFix64
-        let pendingBalance = FlowEVMBridgeUtils.uint256ToUFix64(value: pendingBalanceRaw, decimals: 18)
-        let claimableRefund = FlowEVMBridgeUtils.uint256ToUFix64(value: claimableRefundRaw, decimals: 18)
+        assert(
+            balanceTokens.length == pendingBalancesRaw.length
+                && balanceTokens.length == claimableRefundsRaw.length,
+            message: "Balance array length mismatch in ABI decode"
+        )
+
+        // Build per-token balance dictionaries
+        var pendingBalances: {String: UFix64} = {}
+        var claimableRefundsMap: {String: UFix64} = {}
+        var j = 0
+        while j < balanceTokens.length {
+            let tokenAddr = balanceTokens[j].toString()
+            let rawPending = pendingBalancesRaw[j]
+            let rawRefund = claimableRefundsRaw[j]
+            pendingBalances[tokenAddr] = rawPending == 0
+                ? 0.0
+                : FlowYieldVaultsEVM.ufix64FromUInt256(
+                    rawPending,
+                    tokenAddress: balanceTokens[j]
+                )
+            claimableRefundsMap[tokenAddr] = rawRefund == 0
+                ? 0.0
+                : FlowYieldVaultsEVM.ufix64FromUInt256(
+                    rawRefund,
+                    tokenAddress: balanceTokens[j]
+                )
+            j = j + 1
+        }
 
         // Build request array
         var requests: [EVMRequest] = []
@@ -1729,8 +1793,8 @@ access(all) contract FlowYieldVaultsEVM {
         return PendingRequestsInfo(
             evmAddress: evmAddressHex,
             pendingCount: ids.length,
-            pendingBalance: pendingBalance,
-            claimableRefund: claimableRefund,
+            pendingBalances: pendingBalances,
+            claimableRefunds: claimableRefundsMap,
             requests: requests
         )
     }
@@ -1928,10 +1992,13 @@ access(all) contract FlowYieldVaultsEVM {
 
     /// @notice Converts a UInt256 amount from EVM to UFix64 for Cadence
     /// @dev For native FLOW: Uses 18 decimals (attoflow to FLOW conversion)
-    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals
+    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals.
+    ///      Cadence UFix64 preserves 8 decimal places, so tokens with more than 8
+    ///      decimals are truncated toward zero when entering Cadence. For CREATE and
+    ///      DEPOSIT flows, any discarded remainder must be reconciled on the EVM side.
     /// @param value The amount in wei/smallest unit (UInt256)
     /// @param tokenAddress The token address to determine decimal conversion
-    /// @return The converted amount in UFix64 format
+    /// @return The converted amount in UFix64 format (truncated to 8 decimals)
     access(self) fun ufix64FromUInt256(_ value: UInt256, tokenAddress: EVM.EVMAddress): UFix64 {
         if tokenAddress.toString() == FlowYieldVaultsEVM.nativeFlowEVMAddress.toString() {
             return FlowEVMBridgeUtils.uint256ToUFix64(value: value, decimals: 18)
@@ -1939,9 +2006,52 @@ access(all) contract FlowYieldVaultsEVM {
         return FlowEVMBridgeUtils.convertERC20AmountToCadenceAmount(value, erc20Address: tokenAddress)
     }
 
+    /// @notice Computes the exact EVM-side amount that survives a round trip through Cadence precision
+    /// @dev This floors the amount to the nearest quantity representable by Cadence UFix64.
+    /// @param value The requested amount in wei/smallest unit
+    /// @param tokenAddress The token address to determine decimal conversion
+    /// @return The EVM-side amount that can be processed in Cadence without losing precision
+    access(self) fun exactCadenceRepresentableAmount(_ value: UInt256, tokenAddress: EVM.EVMAddress): UInt256 {
+        let cadenceAmount = FlowYieldVaultsEVM.ufix64FromUInt256(value, tokenAddress: tokenAddress)
+        return FlowYieldVaultsEVM.uint256FromUFix64(cadenceAmount, tokenAddress: tokenAddress)
+    }
+
+    /// @notice Computes the refund amount that must be returned on EVM completion
+    /// @dev Failed CREATE/DEPOSIT requests refund the full amount. Successful CREATE/DEPOSIT
+    ///      requests refund only the precision residual that could not be represented in Cadence.
+    /// @param request The request being completed
+    /// @param success Whether the Cadence operation succeeded
+    /// @return Amount to credit to claimable refunds on the Solidity side
+    access(self) fun refundAmountForCompletion(request: EVMRequest, success: Bool): UInt256 {
+        let isEscrowedRequest =
+            request.requestType == FlowYieldVaultsEVM.RequestType.CREATE_YIELDVAULT.rawValue
+            || request.requestType == FlowYieldVaultsEVM.RequestType.DEPOSIT_TO_YIELDVAULT.rawValue
+
+        if !isEscrowedRequest {
+            return 0
+        }
+
+        if !success {
+            return request.amount
+        }
+
+        let exactProcessableAmount = FlowYieldVaultsEVM.exactCadenceRepresentableAmount(
+            request.amount,
+            tokenAddress: request.tokenAddress
+        )
+
+        if request.amount > exactProcessableAmount {
+            return request.amount - exactProcessableAmount
+        }
+
+        return 0
+    }
+
     /// @notice Converts a UFix64 amount from Cadence to UInt256 for EVM
     /// @dev For native FLOW: Uses 18 decimals (FLOW to attoflow conversion)
-    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals
+    ///      For ERC20: Uses FlowEVMBridgeUtils to look up token decimals.
+    ///      This reconstructs an EVM amount from the already-quantized UFix64 value,
+    ///      so previously truncated sub-1e-8 dust does not reappear on the return path.
     /// @param value The amount in UFix64 format
     /// @param tokenAddress The token address to determine decimal conversion
     /// @return The converted amount in wei/smallest unit (UInt256)
@@ -1988,6 +2098,29 @@ access(all) contract FlowYieldVaultsEVM {
             }
         }
         return "EVM revert data: 0x\(String.encodeHex(data))"
+    }
+
+    /// @notice Validates ERC20 bool return data semantics
+    /// @dev ERC20 methods may return no data (accepted for compatibility) or ABI-encoded bool.
+    ///      When return data is present, it must be exactly 32 bytes with value `1` (true).
+    access(all) view fun isERC20BoolReturnSuccess(_ data: [UInt8]): Bool {
+        if data.length == 0 {
+            return true
+        }
+
+        if data.length != 32 {
+            return false
+        }
+
+        var i = 0
+        while i < 31 {
+            if data[i] != 0 {
+                return false
+            }
+            i = i + 1
+        }
+
+        return data[31] == 1
     }
 
     /// @notice Emits the RequestFailed event and returns a ProcessResult with success=false

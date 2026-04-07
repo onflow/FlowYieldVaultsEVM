@@ -21,6 +21,19 @@
   },
   {
     "type": "function",
+    "name": "DEFAULT_MINIMUM_BALANCE",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "NATIVE_FLOW",
     "inputs": [],
     "outputs": [
@@ -315,6 +328,11 @@
         "name": "message",
         "type": "string",
         "internalType": "string"
+      },
+      {
+        "name": "refundAmount",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
@@ -532,14 +550,19 @@
         "internalType": "string[]"
       },
       {
-        "name": "pendingBalance",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "balanceTokens",
+        "type": "address[]",
+        "internalType": "address[]"
       },
       {
-        "name": "claimableRefund",
-        "type": "uint256",
-        "internalType": "uint256"
+        "name": "pendingBalances",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      },
+      {
+        "name": "claimableRefundsArray",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
       }
     ],
     "stateMutability": "view"
@@ -1949,6 +1972,11 @@
   },
   {
     "type": "error",
+    "name": "CannotBlocklistZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "CannotRegisterSentinelYieldVaultId",
     "inputs": []
   },
@@ -1997,6 +2025,27 @@
     "type": "error",
     "name": "InvalidCOAAddress",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidMinimumBalance",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidRefundAmount",
+    "inputs": [
+      {
+        "name": "expectedOrMaximum",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "actual",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",

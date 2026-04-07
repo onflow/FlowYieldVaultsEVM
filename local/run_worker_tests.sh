@@ -71,6 +71,8 @@ NATIVE_FLOW="0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF"
 VAULT_IDENTIFIER="A.0ae53cb6e3f42a79.FlowToken.Vault"
 STRATEGY_IDENTIFIER="${STRATEGY_IDENTIFIER:-A.045a1763c93006ca.MockStrategies.TracerStrategy}"
 CADENCE_CONTRACT_ADDR="045a1763c93006ca"
+MOET_VAULT_IDENTIFIER="A.${CADENCE_CONTRACT_ADDR}.MOET.Vault"
+FLOWYIELDVAULTS_DIR="./lib/FlowYieldVaults"
 
 # Scheduler configuration
 SCHEDULER_WAKEUP_INTERVAL=1  # Default scheduler wakeup interval in seconds
@@ -124,12 +126,39 @@ cast_send() {
     --legacy 2>&1
 }
 
+# Execute EVM transaction against an arbitrary contract
+cast_send_to_contract() {
+  local user_pk=$1
+  local contract_address=$2
+  local function_sig=$3
+  shift 3
+
+  cast send "$contract_address" \
+    "$function_sig" \
+    "$@" \
+    --rpc-url "$RPC_URL" \
+    --private-key "$user_pk" \
+    --legacy 2>&1
+}
+
 # Execute EVM call via cast
 cast_call() {
   local function_sig=$1
   shift
 
   cast call "$FLOW_VAULTS_REQUESTS_CONTRACT" \
+    "$function_sig" \
+    "$@" \
+    --rpc-url "$RPC_URL" 2>&1
+}
+
+# Execute EVM call against an arbitrary contract
+cast_call_contract() {
+  local contract_address=$1
+  local function_sig=$2
+  shift 2
+
+  cast call "$contract_address" \
     "$function_sig" \
     "$@" \
     --rpc-url "$RPC_URL" 2>&1
@@ -196,6 +225,80 @@ get_claimable_refund() {
   local token_address=${2:-$NATIVE_FLOW}
   cast_call "getClaimableRefund(address,address)(uint256)" "$user_address" "$token_address" | \
     sed 's/ \[.*\]$//' | tr -d ' '
+}
+
+# Get ERC20 balance for a user
+get_token_balance() {
+  local token_address=$1
+  local user_address=$2
+  cast_call_contract "$token_address" "balanceOf(address)(uint256)" "$user_address" | \
+    sed 's/ \[.*\]$//' | tr -d ' '
+}
+
+# Claim refund from Solidity contract
+claim_refund() {
+  local user_pk=$1
+  local token_address=${2:-$NATIVE_FLOW}
+  cast_send "$user_pk" "claimRefund(address)" "$token_address"
+}
+
+# Approve ERC20 spend
+approve_token() {
+  local user_pk=$1
+  local token_address=$2
+  local spender_address=$3
+  local amount=$4
+  cast_send_to_contract "$user_pk" "$token_address" "approve(address,uint256)" "$spender_address" "$amount"
+}
+
+# Transfer ERC20 tokens
+transfer_token() {
+  local user_pk=$1
+  local token_address=$2
+  local recipient_address=$3
+  local amount=$4
+  cast_send_to_contract "$user_pk" "$token_address" "transfer(address,uint256)" "$recipient_address" "$amount"
+}
+
+# Resolve the bridged MOET ERC20 address from Cadence bridge config
+get_moet_evm_address() {
+  (
+    cd "$FLOWYIELDVAULTS_DIR" || exit 1
+    flow -f ./flow.json scripts execute ./cadence/tests/scripts/get_moet_evm_address.cdc 2>/dev/null
+  ) | \
+    grep "Result:" | cut -d'"' -f2 | tr -d '[:space:]'
+}
+
+# Bridge a Cadence token vault directly to an EVM address
+bridge_token_to_evm_address() {
+  local vault_identifier=$1
+  local amount=$2
+  local recipient_address=$3
+  (
+    cd "$FLOWYIELDVAULTS_DIR" || exit 1
+    flow -f ./flow.json transactions send \
+      ./lib/flow-evm-bridge/cadence/transactions/bridge/tokens/bridge_tokens_to_any_evm_address.cdc \
+      "$vault_identifier" \
+      "$amount" \
+      "$recipient_address" \
+      --signer emulator-flow-yield-vaults \
+      --compute-limit 9999 2>&1
+  )
+}
+
+# Configure a supported token on FlowYieldVaultsRequests via the worker's COA
+set_token_config() {
+  local token_address=$1
+  local is_supported=$2
+  local minimum_balance=$3
+  local is_native=$4
+  flow transactions send ./cadence/transactions/admin/set_token_config.cdc \
+    "$token_address" \
+    "$is_supported" \
+    "$minimum_balance" \
+    "$is_native" \
+    --signer emulator-flow-yield-vaults \
+    --compute-limit 9999 2>&1
 }
 
 # Get request message (error message or status message)
@@ -286,21 +389,32 @@ wait_for_request_status() {
 # Usage: extract_request_id "$TX_OUTPUT"
 extract_request_id() {
   local tx_output="$1"
-  # Extract the transactionHash from cast send output
-  local tx_hash=$(echo "$tx_output" | grep "transactionHash" | awk '{print $2}')
-  if [ -z "$tx_hash" ]; then
-    echo ""
-    return 1
+  local request_created_topic0="0x13e89e7f5f11ae17347a4657936695ef7097ee21e38f9250bd21466ccacccd5c"
+  # `cast send` already returns the logs array as JSON. Prefer parsing that directly so we
+  # do not depend on receipt formatting or accidentally match nested `transactionHash` fields.
+  local logs_json=$(printf '%s\n' "$tx_output" | awk '/^logs[[:space:]]+\[/ { sub(/^[^[]*/, ""); print; exit }')
+  local request_id_hex=""
+
+  if [ -n "$logs_json" ]; then
+    request_id_hex=$(printf '%s\n' "$logs_json" | jq -r --arg topic0 "$request_created_topic0" \
+      'first(.[]? | select((.topics[0] // "" | ascii_downcase) == ($topic0 | ascii_downcase)) | .topics[1]) // empty' 2>/dev/null)
   fi
-  # Get transaction receipt and find RequestCreated event topic
-  # RequestCreated event: topic0 = keccak256("RequestCreated(uint256,address,uint8,address,uint256,uint64,uint256,string,string)")
-  # The requestId is indexed, so it's in topic1
-  local receipt=$(cast receipt "$tx_hash" --rpc-url "$RPC_URL" 2>/dev/null)
-  # Extract the first topic after topic0 from the RequestCreated event log
-  local request_id=$(echo "$receipt" | grep -A 10 "logs" | grep -oE "0x[0-9a-fA-F]{64}" | head -2 | tail -1)
-  if [ -n "$request_id" ]; then
-    # Convert hex to decimal
-    echo $((request_id))
+
+  if [ -z "$request_id_hex" ]; then
+    local tx_hash=$(printf '%s\n' "$tx_output" | awk '/^transactionHash[[:space:]]+0x[0-9a-fA-F]{64}$/ { print $2; exit }')
+    if [ -z "$tx_hash" ]; then
+      echo ""
+      return 1
+    fi
+    # Fall back to the JSON receipt when the logs line is not present.
+    # The requestId is indexed, so it is stored in topics[1].
+    request_id_hex=$(cast receipt "$tx_hash" --json --rpc-url "$RPC_URL" 2>/dev/null | \
+      jq -r --arg topic0 "$request_created_topic0" \
+        'first(.logs[]? | select((.topics[0] // "" | ascii_downcase) == ($topic0 | ascii_downcase)) | .topics[1]) // empty')
+  fi
+
+  if [ -n "$request_id_hex" ]; then
+    cast to-dec "$request_id_hex"
   else
     echo ""
   fi
@@ -331,6 +445,21 @@ unpause_scheduler() {
     --compute-limit 9999 2>&1
 }
 
+# Run scheduler manually with explicit capacity
+run_scheduler_with_capacity() {
+  local run_capacity=$1
+  flow transactions send ./cadence/tests/transactions/scheduler/run_scheduler_with_capacity.cdc "$run_capacity" \
+    --signer emulator-flow-yield-vaults \
+    --compute-limit 9999 2>&1
+}
+
+# Stop all scheduled worker and scheduler transactions
+stop_all_scheduled_transactions() {
+  flow transactions send ./cadence/transactions/scheduler/stop_all_scheduled_transactions.cdc \
+    --signer emulator-flow-yield-vaults \
+    --compute-limit 9999 2>&1
+}
+
 # Initialize scheduler handlers
 init_scheduler() {
   flow transactions send ./cadence/transactions/scheduler/init_and_schedule.cdc \
@@ -352,6 +481,16 @@ count_yieldvaults() {
     echo "0"
   else
     echo "$vaults_output" | grep -Eo '[0-9]+' | wc -l | tr -d ' '
+  fi
+}
+
+# Extract the latest YieldVault ID from the Cadence script output
+get_latest_yieldvault_id() {
+  local vaults_output="$1"
+  if [ -z "$vaults_output" ] || [ "$vaults_output" = "[]" ]; then
+    echo ""
+  else
+    echo "$vaults_output" | grep -Eo '[0-9]+' | tail -1
   fi
 }
 
@@ -460,6 +599,21 @@ assert_eq() {
   fi
 }
 
+# Assert exact wei equality
+assert_wei_eq() {
+  local expected=$(clean_wei "$1")
+  local actual=$(clean_wei "$2")
+  local message=$3
+
+  if compare_wei "$expected" -eq "$actual"; then
+    log_success "$message"
+    return 0
+  else
+    log_fail "$message (expected: $expected wei, got: $actual wei)"
+    return 1
+  fi
+}
+
 # Assert not equals
 assert_neq() {
   local not_expected=$1
@@ -538,6 +692,20 @@ else
   log_fail "Contract not found at $FLOW_VAULTS_REQUESTS_CONTRACT"
   exit 1
 fi
+
+log_test "Resolve bridged MOET address"
+MOET_EVM_ADDRESS=$(get_moet_evm_address)
+if [ -n "$MOET_EVM_ADDRESS" ]; then
+  log_info "MOET EVM address: $MOET_EVM_ADDRESS"
+  log_success "Resolved bridged MOET token address"
+else
+  log_fail "Could not resolve bridged MOET token address"
+  exit 1
+fi
+
+log_test "Configure MOET token support for worker tests"
+MOET_CONFIG_OUTPUT=$(set_token_config "$MOET_EVM_ADDRESS" true "1000000000000000000" false)
+assert_tx_success "$MOET_CONFIG_OUTPUT" "MOET token config applied"
 
 # ============================================
 # INITIAL BALANCES
@@ -758,10 +926,231 @@ else
 fi
 
 # ============================================
-# SCENARIO 4: PANIC RECOVERY - INVALID STRATEGY
+# SCENARIO 4: Successful Dust Refund Claims
 # ============================================
 
-log_section "SCENARIO 4: Panic Recovery - Invalid Strategy Identifier"
+log_section "SCENARIO 4: Successful Dust Refund Claims"
+
+DUST_TIMEOUT=$((AUTO_PROCESS_TIMEOUT * 2))
+CREATE_DUST_RESIDUAL="123456789"
+CREATE_DUST_AMOUNT="1000000000123456789"
+DEPOSIT_DUST_RESIDUAL="987654321"
+DEPOSIT_DUST_AMOUNT="1000000000987654321"
+
+log_test "Successful CREATE with dust credits exact claimable refund"
+
+USER_B_CREATE_DUST_VAULTS_BEFORE=$(get_user_yieldvaults "$USER_B_EOA")
+USER_B_CREATE_DUST_VAULTS_BEFORE_COUNT=$(count_yieldvaults "$USER_B_CREATE_DUST_VAULTS_BEFORE")
+USER_B_CREATE_DUST_REFUND_BEFORE=$(get_claimable_refund "$USER_B_EOA")
+USER_B_CREATE_DUST_REFUND_BEFORE=$(clean_wei "$USER_B_CREATE_DUST_REFUND_BEFORE")
+
+TX_CREATE_DUST=$(cast_send "$USER_B_PK" \
+  "createYieldVault(address,uint256,string,string)" \
+  "$NATIVE_FLOW" \
+  "$CREATE_DUST_AMOUNT" \
+  "$VAULT_IDENTIFIER" \
+  "$STRATEGY_IDENTIFIER" \
+  --value "$CREATE_DUST_AMOUNT" 2>&1)
+
+assert_evm_tx_success "$TX_CREATE_DUST" "Dusty CREATE request submitted"
+
+CREATE_DUST_REQUEST_ID=$(extract_request_id "$TX_CREATE_DUST")
+if [ -n "$CREATE_DUST_REQUEST_ID" ]; then
+  log_success "Dusty CREATE request ID extracted ($CREATE_DUST_REQUEST_ID)"
+else
+  log_fail "Could not extract request ID for dusty CREATE"
+fi
+
+if [ -n "$CREATE_DUST_REQUEST_ID" ]; then
+  if wait_for_request_status "$CREATE_DUST_REQUEST_ID" "2" "$DUST_TIMEOUT"; then
+    log_success "Dusty CREATE request completed"
+  else
+    log_fail "Dusty CREATE request did not reach COMPLETED status"
+  fi
+
+  if wait_for_user_vault "$USER_B_EOA" "$USER_B_CREATE_DUST_VAULTS_BEFORE" "$DUST_TIMEOUT"; then
+    USER_B_CREATE_DUST_VAULTS_AFTER=$(get_user_yieldvaults "$USER_B_EOA")
+    USER_B_CREATE_DUST_VAULTS_AFTER_COUNT=$(count_yieldvaults "$USER_B_CREATE_DUST_VAULTS_AFTER")
+    EXPECTED_USER_B_CREATE_DUST_VAULTS=$((USER_B_CREATE_DUST_VAULTS_BEFORE_COUNT + 1))
+
+    log_info "User B YieldVaults after dusty CREATE: $USER_B_CREATE_DUST_VAULTS_AFTER"
+    assert_eq "$EXPECTED_USER_B_CREATE_DUST_VAULTS" "$USER_B_CREATE_DUST_VAULTS_AFTER_COUNT" "Dusty CREATE created exactly one new YieldVault"
+  else
+    log_fail "Dusty CREATE did not create a new Cadence YieldVault"
+  fi
+
+  USER_B_CREATE_DUST_REFUND_AFTER=$(get_claimable_refund "$USER_B_EOA")
+  USER_B_CREATE_DUST_REFUND_AFTER=$(clean_wei "$USER_B_CREATE_DUST_REFUND_AFTER")
+  USER_B_CREATE_DUST_REFUND_DELTA=$(subtract_wei "$USER_B_CREATE_DUST_REFUND_AFTER" "$USER_B_CREATE_DUST_REFUND_BEFORE")
+
+  log_info "User B CREATE dust refund delta: $USER_B_CREATE_DUST_REFUND_DELTA wei"
+  assert_wei_eq "$CREATE_DUST_RESIDUAL" "$USER_B_CREATE_DUST_REFUND_DELTA" "CREATE dust credited exact residual"
+
+  if compare_wei "$USER_B_CREATE_DUST_REFUND_AFTER" -gt "$USER_B_CREATE_DUST_REFUND_BEFORE"; then
+    CLAIM_CREATE_DUST_OUTPUT=$(claim_refund "$USER_B_PK" "$NATIVE_FLOW")
+    assert_evm_tx_success "$CLAIM_CREATE_DUST_OUTPUT" "CREATE dust refund claimed"
+
+    USER_B_CREATE_DUST_REFUND_FINAL=$(get_claimable_refund "$USER_B_EOA")
+    USER_B_CREATE_DUST_REFUND_FINAL=$(clean_wei "$USER_B_CREATE_DUST_REFUND_FINAL")
+    assert_eq "0" "$USER_B_CREATE_DUST_REFUND_FINAL" "CREATE dust claimable refund cleared"
+  else
+    log_fail "No CREATE dust refund was available to claim"
+  fi
+fi
+
+log_test "Successful DEPOSIT with dust credits exact claimable refund"
+
+USER_A_VAULTS_FOR_DUST_DEPOSIT=$(get_user_yieldvaults "$USER_A_EOA")
+DUST_DEPOSIT_VAULT_ID=$(get_latest_yieldvault_id "$USER_A_VAULTS_FOR_DUST_DEPOSIT")
+
+if [ -n "$DUST_DEPOSIT_VAULT_ID" ]; then
+  log_info "Using YieldVault ID $DUST_DEPOSIT_VAULT_ID for dust deposit"
+
+  USER_A_DEPOSIT_DUST_REFUND_BEFORE=$(get_claimable_refund "$USER_A_EOA")
+  USER_A_DEPOSIT_DUST_REFUND_BEFORE=$(clean_wei "$USER_A_DEPOSIT_DUST_REFUND_BEFORE")
+
+  TX_DEPOSIT_DUST=$(cast_send "$USER_A_PK" \
+    "depositToYieldVault(uint64,address,uint256)" \
+    "$DUST_DEPOSIT_VAULT_ID" \
+    "$NATIVE_FLOW" \
+    "$DEPOSIT_DUST_AMOUNT" \
+    --value "$DEPOSIT_DUST_AMOUNT" 2>&1)
+
+  assert_evm_tx_success "$TX_DEPOSIT_DUST" "Dusty DEPOSIT request submitted"
+
+  DEPOSIT_DUST_REQUEST_ID=$(extract_request_id "$TX_DEPOSIT_DUST")
+  if [ -n "$DEPOSIT_DUST_REQUEST_ID" ]; then
+    log_success "Dusty DEPOSIT request ID extracted ($DEPOSIT_DUST_REQUEST_ID)"
+  else
+    log_fail "Could not extract request ID for dusty DEPOSIT"
+  fi
+
+  if [ -n "$DEPOSIT_DUST_REQUEST_ID" ]; then
+    if wait_for_request_status "$DEPOSIT_DUST_REQUEST_ID" "2" "$DUST_TIMEOUT"; then
+      log_success "Dusty DEPOSIT request completed"
+    else
+      log_fail "Dusty DEPOSIT request did not reach COMPLETED status"
+    fi
+
+    USER_A_DEPOSIT_DUST_REFUND_AFTER=$(get_claimable_refund "$USER_A_EOA")
+    USER_A_DEPOSIT_DUST_REFUND_AFTER=$(clean_wei "$USER_A_DEPOSIT_DUST_REFUND_AFTER")
+    USER_A_DEPOSIT_DUST_REFUND_DELTA=$(subtract_wei "$USER_A_DEPOSIT_DUST_REFUND_AFTER" "$USER_A_DEPOSIT_DUST_REFUND_BEFORE")
+
+    log_info "User A DEPOSIT dust refund delta: $USER_A_DEPOSIT_DUST_REFUND_DELTA wei"
+    assert_wei_eq "$DEPOSIT_DUST_RESIDUAL" "$USER_A_DEPOSIT_DUST_REFUND_DELTA" "DEPOSIT dust credited exact residual"
+
+    if compare_wei "$USER_A_DEPOSIT_DUST_REFUND_AFTER" -gt "$USER_A_DEPOSIT_DUST_REFUND_BEFORE"; then
+      CLAIM_DEPOSIT_DUST_OUTPUT=$(claim_refund "$USER_A_PK" "$NATIVE_FLOW")
+      assert_evm_tx_success "$CLAIM_DEPOSIT_DUST_OUTPUT" "DEPOSIT dust refund claimed"
+
+      USER_A_DEPOSIT_DUST_REFUND_FINAL=$(get_claimable_refund "$USER_A_EOA")
+      USER_A_DEPOSIT_DUST_REFUND_FINAL=$(clean_wei "$USER_A_DEPOSIT_DUST_REFUND_FINAL")
+      assert_eq "0" "$USER_A_DEPOSIT_DUST_REFUND_FINAL" "DEPOSIT dust claimable refund cleared"
+    else
+      log_fail "No DEPOSIT dust refund was available to claim"
+    fi
+  fi
+else
+  log_fail "Could not determine a YieldVault ID for dusty DEPOSIT"
+fi
+
+# ============================================
+# SCENARIO 5: Successful ERC20 Dust Refund Claims
+# ============================================
+
+log_section "SCENARIO 5: Successful ERC20 Dust Refund Claims"
+
+MOET_BRIDGE_FUNDING_AMOUNT="10.0"
+MOET_BRIDGE_FUNDING_WEI="10000000000000000000"
+MOET_CREATE_DUST_RESIDUAL="123456789"
+MOET_CREATE_DUST_AMOUNT="1000000000123456789"
+
+log_test "Successful MOET CREATE with dust credits exact claimable refund"
+
+USER_C_MOET_BALANCE_BEFORE=$(get_token_balance "$MOET_EVM_ADDRESS" "$USER_C_EOA")
+USER_C_MOET_BALANCE_BEFORE=$(clean_wei "$USER_C_MOET_BALANCE_BEFORE")
+USER_C_MOET_REFUND_BEFORE=$(get_claimable_refund "$USER_C_EOA" "$MOET_EVM_ADDRESS")
+USER_C_MOET_REFUND_BEFORE=$(clean_wei "$USER_C_MOET_REFUND_BEFORE")
+USER_C_MOET_VAULTS_BEFORE=$(get_user_yieldvaults "$USER_C_EOA")
+USER_C_MOET_VAULTS_BEFORE_COUNT=$(count_yieldvaults "$USER_C_MOET_VAULTS_BEFORE")
+
+BRIDGE_MOET_TO_USER_OUTPUT=$(bridge_token_to_evm_address "$MOET_VAULT_IDENTIFIER" "$MOET_BRIDGE_FUNDING_AMOUNT" "$USER_C_EOA")
+assert_tx_success "$BRIDGE_MOET_TO_USER_OUTPUT" "Bridged MOET funding amount to User C"
+
+USER_C_MOET_BALANCE_AFTER_FUNDING=$(get_token_balance "$MOET_EVM_ADDRESS" "$USER_C_EOA")
+USER_C_MOET_BALANCE_AFTER_FUNDING=$(clean_wei "$USER_C_MOET_BALANCE_AFTER_FUNDING")
+USER_C_MOET_FUNDING_DELTA=$(subtract_wei "$USER_C_MOET_BALANCE_AFTER_FUNDING" "$USER_C_MOET_BALANCE_BEFORE")
+assert_wei_eq "$MOET_BRIDGE_FUNDING_WEI" "$USER_C_MOET_FUNDING_DELTA" "User C received exact bridged MOET funding amount"
+
+APPROVE_MOET_OUTPUT=$(approve_token "$USER_C_PK" "$MOET_EVM_ADDRESS" "$FLOW_VAULTS_REQUESTS_CONTRACT" "$MOET_CREATE_DUST_AMOUNT")
+assert_evm_tx_success "$APPROVE_MOET_OUTPUT" "User C approved MOET dust amount"
+
+TX_MOET_CREATE_DUST=$(cast_send "$USER_C_PK" \
+  "createYieldVault(address,uint256,string,string)" \
+  "$MOET_EVM_ADDRESS" \
+  "$MOET_CREATE_DUST_AMOUNT" \
+  "$MOET_VAULT_IDENTIFIER" \
+  "$STRATEGY_IDENTIFIER" 2>&1)
+
+assert_evm_tx_success "$TX_MOET_CREATE_DUST" "MOET dusty CREATE request submitted"
+
+MOET_CREATE_DUST_REQUEST_ID=$(extract_request_id "$TX_MOET_CREATE_DUST")
+if [ -n "$MOET_CREATE_DUST_REQUEST_ID" ]; then
+  log_success "MOET dusty CREATE request ID extracted ($MOET_CREATE_DUST_REQUEST_ID)"
+else
+  log_fail "Could not extract request ID for MOET dusty CREATE"
+fi
+
+if [ -n "$MOET_CREATE_DUST_REQUEST_ID" ]; then
+  if wait_for_request_status "$MOET_CREATE_DUST_REQUEST_ID" "2" "$DUST_TIMEOUT"; then
+    log_success "MOET dusty CREATE request completed"
+  else
+    log_fail "MOET dusty CREATE request did not reach COMPLETED status"
+  fi
+
+  if wait_for_user_vault "$USER_C_EOA" "$USER_C_MOET_VAULTS_BEFORE" "$DUST_TIMEOUT"; then
+    USER_C_MOET_VAULTS_AFTER=$(get_user_yieldvaults "$USER_C_EOA")
+    USER_C_MOET_VAULTS_AFTER_COUNT=$(count_yieldvaults "$USER_C_MOET_VAULTS_AFTER")
+    EXPECTED_USER_C_MOET_VAULTS=$((USER_C_MOET_VAULTS_BEFORE_COUNT + 1))
+
+    log_info "User C YieldVaults after MOET dusty CREATE: $USER_C_MOET_VAULTS_AFTER"
+    assert_eq "$EXPECTED_USER_C_MOET_VAULTS" "$USER_C_MOET_VAULTS_AFTER_COUNT" "MOET dusty CREATE created exactly one new YieldVault"
+  else
+    log_fail "MOET dusty CREATE did not create a new Cadence YieldVault"
+  fi
+
+  USER_C_MOET_REFUND_AFTER=$(get_claimable_refund "$USER_C_EOA" "$MOET_EVM_ADDRESS")
+  USER_C_MOET_REFUND_AFTER=$(clean_wei "$USER_C_MOET_REFUND_AFTER")
+  USER_C_MOET_REFUND_DELTA=$(subtract_wei "$USER_C_MOET_REFUND_AFTER" "$USER_C_MOET_REFUND_BEFORE")
+
+  log_info "User C MOET dust refund delta: $USER_C_MOET_REFUND_DELTA wei"
+  assert_wei_eq "$MOET_CREATE_DUST_RESIDUAL" "$USER_C_MOET_REFUND_DELTA" "MOET dusty CREATE credited exact residual"
+
+  if compare_wei "$USER_C_MOET_REFUND_AFTER" -gt "$USER_C_MOET_REFUND_BEFORE"; then
+    USER_C_MOET_BALANCE_BEFORE_CLAIM=$(get_token_balance "$MOET_EVM_ADDRESS" "$USER_C_EOA")
+    USER_C_MOET_BALANCE_BEFORE_CLAIM=$(clean_wei "$USER_C_MOET_BALANCE_BEFORE_CLAIM")
+
+    CLAIM_MOET_DUST_OUTPUT=$(claim_refund "$USER_C_PK" "$MOET_EVM_ADDRESS")
+    assert_evm_tx_success "$CLAIM_MOET_DUST_OUTPUT" "MOET dust refund claimed"
+
+    USER_C_MOET_REFUND_FINAL=$(get_claimable_refund "$USER_C_EOA" "$MOET_EVM_ADDRESS")
+    USER_C_MOET_REFUND_FINAL=$(clean_wei "$USER_C_MOET_REFUND_FINAL")
+    assert_eq "0" "$USER_C_MOET_REFUND_FINAL" "MOET dust claimable refund cleared"
+
+    USER_C_MOET_BALANCE_AFTER_CLAIM=$(get_token_balance "$MOET_EVM_ADDRESS" "$USER_C_EOA")
+    USER_C_MOET_BALANCE_AFTER_CLAIM=$(clean_wei "$USER_C_MOET_BALANCE_AFTER_CLAIM")
+    USER_C_MOET_CLAIM_DELTA=$(subtract_wei "$USER_C_MOET_BALANCE_AFTER_CLAIM" "$USER_C_MOET_BALANCE_BEFORE_CLAIM")
+    assert_wei_eq "$MOET_CREATE_DUST_RESIDUAL" "$USER_C_MOET_CLAIM_DELTA" "MOET dust claim transferred exact residual to user"
+  else
+    log_fail "No MOET dust refund was available to claim"
+  fi
+fi
+
+# ============================================
+# SCENARIO 6: PANIC RECOVERY - INVALID STRATEGY
+# ============================================
+
+log_section "SCENARIO 6: Panic Recovery - Invalid Strategy Identifier"
 
 # This test verifies that requests with invalid strategy identifiers
 # are caught during preprocessing and marked as FAILED with proper error messages
@@ -878,11 +1267,126 @@ else
   log_fail "No refund credited for failed request"
 fi
 
+# Check exact refund amount and verify it can be claimed
+USER_A_REFUND_INCREASE=$(subtract_wei "$USER_A_REFUND_AFTER" "$USER_A_REFUND_BEFORE")
+assert_wei_eq "$EXPECTED_REFUND_INCREASE" "$USER_A_REFUND_INCREASE" "Failed request credited exact refund amount"
+
+if compare_wei "$USER_A_REFUND_AFTER" -gt "$USER_A_REFUND_BEFORE"; then
+  CLAIM_FAILED_REFUND_OUTPUT=$(claim_refund "$USER_A_PK" "$NATIVE_FLOW")
+  assert_evm_tx_success "$CLAIM_FAILED_REFUND_OUTPUT" "Failed request refund claimed"
+
+  USER_A_REFUND_FINAL=$(get_claimable_refund "$USER_A_EOA")
+  USER_A_REFUND_FINAL=$(clean_wei "$USER_A_REFUND_FINAL")
+  assert_eq "0" "$USER_A_REFUND_FINAL" "Failed request claimable refund cleared"
+else
+  log_fail "No failed-request refund was available to claim"
+fi
+
 # ============================================
-# SCENARIO 5: PREPROCESSING VALIDATION TESTS
+# SCENARIO 7: FAILED WITHDRAW RECOVERY VIA STOPALL
 # ============================================
 
-log_section "SCENARIO 5: Preprocessing Validation Tests"
+log_section "SCENARIO 7: Failed Withdraw Recovery Via stopAll()"
+
+log_test "Pause scheduler before creating withdraw recovery requests"
+
+PAUSE_OUTPUT=$(pause_scheduler)
+assert_tx_success "$PAUSE_OUTPUT" "Scheduler paused for withdraw recovery scenario"
+
+WITHDRAW_RECOVERY_VAULTS=$(get_user_yieldvaults "$USER_A_EOA")
+WITHDRAW_RECOVERY_VAULT_ID=$(get_latest_yieldvault_id "$WITHDRAW_RECOVERY_VAULTS")
+WITHDRAW_RECOVERY_AMOUNT_1="50000000000000000"
+WITHDRAW_RECOVERY_AMOUNT_2="60000000000000000"
+WITHDRAW_RECOVERY_AMOUNT_3="70000000000000000"
+
+if [ -n "$WITHDRAW_RECOVERY_VAULT_ID" ]; then
+  log_info "Using YieldVault ID $WITHDRAW_RECOVERY_VAULT_ID for withdraw recovery"
+
+  USER_A_WITHDRAW_RECOVERY_REFUND_BEFORE=$(get_claimable_refund "$USER_A_EOA")
+  USER_A_WITHDRAW_RECOVERY_REFUND_BEFORE=$(clean_wei "$USER_A_WITHDRAW_RECOVERY_REFUND_BEFORE")
+
+  log_test "Create three withdraw requests while scheduler is paused"
+
+  # Same-user worker requests are scheduled with 1s offsets.
+  # We assert on the third request so stopAll() can cancel it before its delayed worker executes.
+  TX_WITHDRAW_RECOVERY_1=$(cast_send "$USER_A_PK" \
+    "withdrawFromYieldVault(uint64,uint256)" \
+    "$WITHDRAW_RECOVERY_VAULT_ID" \
+    "$WITHDRAW_RECOVERY_AMOUNT_1" 2>&1)
+  assert_evm_tx_success "$TX_WITHDRAW_RECOVERY_1" "First withdraw recovery request submitted"
+
+  sleep 1
+
+  TX_WITHDRAW_RECOVERY_2=$(cast_send "$USER_A_PK" \
+    "withdrawFromYieldVault(uint64,uint256)" \
+    "$WITHDRAW_RECOVERY_VAULT_ID" \
+    "$WITHDRAW_RECOVERY_AMOUNT_2" 2>&1)
+  assert_evm_tx_success "$TX_WITHDRAW_RECOVERY_2" "Second withdraw recovery request submitted"
+
+  sleep 1
+
+  TX_WITHDRAW_RECOVERY_3=$(cast_send "$USER_A_PK" \
+    "withdrawFromYieldVault(uint64,uint256)" \
+    "$WITHDRAW_RECOVERY_VAULT_ID" \
+    "$WITHDRAW_RECOVERY_AMOUNT_3" 2>&1)
+  assert_evm_tx_success "$TX_WITHDRAW_RECOVERY_3" "Third withdraw recovery request submitted"
+
+  WITHDRAW_RECOVERY_REQUEST_ID_1=$(extract_request_id "$TX_WITHDRAW_RECOVERY_1")
+  WITHDRAW_RECOVERY_REQUEST_ID_2=$(extract_request_id "$TX_WITHDRAW_RECOVERY_2")
+  WITHDRAW_RECOVERY_REQUEST_ID_3=$(extract_request_id "$TX_WITHDRAW_RECOVERY_3")
+
+  if [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_1" ] && [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_2" ] && [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_3" ]; then
+    log_success "Withdraw recovery request IDs extracted ($WITHDRAW_RECOVERY_REQUEST_ID_1, $WITHDRAW_RECOVERY_REQUEST_ID_2, $WITHDRAW_RECOVERY_REQUEST_ID_3)"
+  else
+    log_fail "Could not extract all withdraw recovery request IDs"
+  fi
+
+  log_test "Preprocess withdraw requests into PROCESSING without waiting for automatic scheduler runs"
+
+  UNPAUSE_OUTPUT=$(unpause_scheduler)
+  assert_tx_success "$UNPAUSE_OUTPUT" "Scheduler unpaused for manual preprocessing"
+
+  MANUAL_SCHEDULER_OUTPUT=$(run_scheduler_with_capacity 3)
+  assert_tx_success "$MANUAL_SCHEDULER_OUTPUT" "Manual scheduler run with capacity 3 submitted"
+
+  if [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_3" ]; then
+    WITHDRAW_RECOVERY_STATUS_PROCESSING=$(get_request_status "$WITHDRAW_RECOVERY_REQUEST_ID_3")
+    assert_eq "1" "$WITHDRAW_RECOVERY_STATUS_PROCESSING" "Third withdraw recovery request reached PROCESSING"
+  fi
+
+  log_test "Cancel scheduled worker transactions and verify failed withdraw finalization"
+
+  STOP_ALL_OUTPUT=$(stop_all_scheduled_transactions)
+  assert_tx_success "$STOP_ALL_OUTPUT" "stopAll() transaction submitted"
+
+  if [ -n "$WITHDRAW_RECOVERY_REQUEST_ID_3" ]; then
+    WITHDRAW_RECOVERY_STATUS_FINAL=$(get_request_status "$WITHDRAW_RECOVERY_REQUEST_ID_3")
+    assert_eq "3" "$WITHDRAW_RECOVERY_STATUS_FINAL" "Third withdraw recovery request marked FAILED after stopAll()"
+
+    WITHDRAW_RECOVERY_MESSAGE=$(get_request_message "$WITHDRAW_RECOVERY_REQUEST_ID_3")
+    if echo "$WITHDRAW_RECOVERY_MESSAGE" | grep -q "cancelled by admin stopAll"; then
+      log_success "Failed withdraw request recorded stopAll() recovery message"
+    else
+      log_fail "Failed withdraw request message did not mention stopAll() cancellation"
+    fi
+  fi
+
+  USER_A_WITHDRAW_RECOVERY_REFUND_AFTER=$(get_claimable_refund "$USER_A_EOA")
+  USER_A_WITHDRAW_RECOVERY_REFUND_AFTER=$(clean_wei "$USER_A_WITHDRAW_RECOVERY_REFUND_AFTER")
+  USER_A_WITHDRAW_RECOVERY_REFUND_DELTA=$(subtract_wei "$USER_A_WITHDRAW_RECOVERY_REFUND_AFTER" "$USER_A_WITHDRAW_RECOVERY_REFUND_BEFORE")
+  assert_wei_eq "0" "$USER_A_WITHDRAW_RECOVERY_REFUND_DELTA" "Failed withdraw recovery did not create a bogus refund"
+
+  UNPAUSE_OUTPUT=$(unpause_scheduler)
+  assert_tx_success "$UNPAUSE_OUTPUT" "Scheduler resumed after stopAll() recovery"
+else
+  log_fail "Could not determine a YieldVault ID for withdraw recovery scenario"
+fi
+
+# ============================================
+# SCENARIO 8: PREPROCESSING VALIDATION TESTS
+# ============================================
+
+log_section "SCENARIO 8: Preprocessing Validation Tests"
 
 # This test verifies that the preprocessing logic correctly rejects
 # various types of invalid requests
@@ -1016,10 +1520,10 @@ else
 fi
 
 # ============================================
-# SCENARIO 6: MAX PROCESSING CAPACITY TEST
+# SCENARIO 9: MAX PROCESSING CAPACITY TEST
 # ============================================
 
-log_section "SCENARIO 6: Max Processing Capacity Test"
+log_section "SCENARIO 9: Max Processing Capacity Test"
 
 # This test verifies that the scheduler respects the maxProcessingRequests limit (default: 3)
 # When more requests are submitted than capacity allows, some should stay PENDING
