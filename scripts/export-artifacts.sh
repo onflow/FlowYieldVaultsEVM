@@ -60,7 +60,7 @@ fi
 echo -e "${GREEN}Exporting contract artifacts...${NC}"
 
 # Create directories if they don't exist
-mkdir -p deployments/artifacts
+mkdir -p deployments/artifacts solidity/deployments/artifacts
 
 # Build contracts
 echo -e "${YELLOW}Building contracts...${NC}"
@@ -68,9 +68,14 @@ cd solidity && forge build && cd ..
 
 # Extract ABI
 echo -e "${YELLOW}Extracting FlowYieldVaultsRequests ABI...${NC}"
-jq '.abi' solidity/out/FlowYieldVaultsRequests.sol/FlowYieldVaultsRequests.json > deployments/artifacts/FlowYieldVaultsRequests.json
+CANONICAL_ABI_PATH="deployments/artifacts/FlowYieldVaultsRequests.json"
+SOLIDITY_ABI_PATH="solidity/deployments/artifacts/FlowYieldVaultsRequests.json"
 
-echo -e "${GREEN}✓ ABI exported to deployments/artifacts/FlowYieldVaultsRequests.json${NC}"
+jq '.abi' solidity/out/FlowYieldVaultsRequests.sol/FlowYieldVaultsRequests.json > "$CANONICAL_ABI_PATH"
+cp "$CANONICAL_ABI_PATH" "$SOLIDITY_ABI_PATH"
+
+echo -e "${GREEN}✓ ABI exported to ${CANONICAL_ABI_PATH}${NC}"
+echo -e "${GREEN}✓ ABI synced to ${SOLIDITY_ABI_PATH}${NC}"
 
 # Update addresses if network is specified
 if [[ -n "$NETWORK" ]]; then
@@ -131,7 +136,8 @@ echo ""
 echo -e "${GREEN}Done!${NC}"
 echo ""
 echo "Exported files:"
-echo "  - deployments/artifacts/FlowYieldVaultsRequests.json (ABI)"
+echo "  - ${CANONICAL_ABI_PATH} (ABI)"
+echo "  - ${SOLIDITY_ABI_PATH} (ABI copy)"
 if [[ -n "$NETWORK" ]]; then
     echo "  - deployments/contract-addresses.json (updated for ${NETWORK})"
 fi
