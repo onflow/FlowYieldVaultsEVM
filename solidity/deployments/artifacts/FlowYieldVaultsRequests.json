@@ -328,6 +328,11 @@
         "name": "message",
         "type": "string",
         "internalType": "string"
+      },
+      {
+        "name": "refundAmount",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "outputs": [],
