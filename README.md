@@ -193,6 +193,19 @@ forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYie
 
 Source of truth for published addresses: `deployments/contract-addresses.json`.
 
+## Versioning and Branching
+
+This repo follows the contract versioning approach discussed in
+[onflow/FlowYieldVaults#229](https://github.com/onflow/FlowYieldVaults/pull/229/changes).
+
+- `main` is the active development branch for the next FYVEVM contract generation.
+- `v0` is the maintained branch for the current FYVEVM production line.
+- `v0` should track the clean source baseline for that production line, not a temporary deployment-only workaround.
+- If a live deployment required a hardcoded compatibility patch to avoid a non-upgradeable change, treat that as an operational exception and remove it in the next versioned contract generation.
+- Persistent deployments should come from a version branch such as `v0`, not from `main`.
+- If a change is not upgrade-compatible, it should start a new version branch such as `v1`.
+- New contract generations should use clear naming and deployment boundaries so operators can distinguish the deployed version from in-progress development work.
+
 ## Testing
 
 ### Solidity Tests

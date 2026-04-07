@@ -1,4 +1,5 @@
 import Test
+import BlockchainHelpers
 import "EVM"
 import "FlowToken"
 import "FlowYieldVaults"
@@ -27,6 +28,24 @@ fun setup() {
 
     let workerResult = setupWorkerWithBadge(admin)
     Test.expect(workerResult, Test.beSucceeded())
+}
+
+access(self)
+fun makeERC20BoolReturnData(length: Int, lastByte: UInt8, poisonIndex: Int?): [UInt8] {
+    var data: [UInt8] = []
+    var i = 0
+    while i < length {
+        var value: UInt8 = 0
+        if i == length - 1 {
+            value = lastByte
+        }
+        if poisonIndex != nil && i == poisonIndex! {
+            value = 7
+        }
+        data.append(value)
+        i = i + 1
+    }
+    return data
 }
 
 // -----------------------------------------------------------------------------
@@ -199,4 +218,99 @@ fun testRequestStatusFailedStructure() {
 
     Test.assertEqual(FlowYieldVaultsEVM.RequestStatus.FAILED.rawValue, failedRequest.status)
     Test.assertEqual("Insufficient balance", failedRequest.message)
+}
+
+access(all)
+fun testIsERC20BoolReturnSuccessUnitCases() {
+    Test.assert(
+        FlowYieldVaultsEVM.isERC20BoolReturnSuccess([]),
+        message: "Empty return data should be accepted for compatibility"
+    )
+
+    let canonicalTrue = makeERC20BoolReturnData(length: 32, lastByte: 1, poisonIndex: nil)
+    Test.assert(
+        FlowYieldVaultsEVM.isERC20BoolReturnSuccess(canonicalTrue),
+        message: "Canonical ABI-encoded true should be accepted"
+    )
+
+    let canonicalFalse = makeERC20BoolReturnData(length: 32, lastByte: 0, poisonIndex: nil)
+    Test.assert(
+        !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(canonicalFalse),
+        message: "Canonical ABI-encoded false should be rejected"
+    )
+
+    let nonCanonicalTrue = makeERC20BoolReturnData(length: 32, lastByte: 2, poisonIndex: nil)
+    Test.assert(
+        !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(nonCanonicalTrue),
+        message: "Non-canonical bool values should be rejected"
+    )
+
+    let poisonedMiddleByte = makeERC20BoolReturnData(length: 32, lastByte: 1, poisonIndex: 5)
+    Test.assert(
+        !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(poisonedMiddleByte),
+        message: "Non-zero bytes before the final bool byte should be rejected"
+    )
+
+    let shortReturn = makeERC20BoolReturnData(length: 31, lastByte: 1, poisonIndex: nil)
+    Test.assert(
+        !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(shortReturn),
+        message: "Non-empty short return data should be rejected"
+    )
+
+    let longReturn = makeERC20BoolReturnData(length: 33, lastByte: 1, poisonIndex: nil)
+    Test.assert(
+        !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(longReturn),
+        message: "Non-empty long return data should be rejected"
+    )
+}
+
+access(all)
+fun testMarkRequestAsFailedRejectsFalseApproveRefunds() {
+    // completeProcessing only needs the configured requests contract address as the
+    // spender for approve(address,uint256). The call should fail before any request
+    // contract interaction, so a dummy address is enough for this regression path.
+    let requestsResult = updateRequestsAddress(admin, mockRequestsAddr.toString())
+    Test.expect(requestsResult, Test.beSucceeded())
+
+    let requestFailedCountBefore = Test.eventsOfType(Type<FlowYieldVaultsEVM.RequestFailed>()).length
+    // Deploy a minimal ERC20-shaped contract that returns false from approve(...)
+    // without reverting, matching the bug class fixed by this PR.
+    let falseApproveTokenAddress = deployFalseApproveToken(admin)
+
+    // The transaction itself asserts that markRequestAsFailed(...) returns false after
+    // the refund approval check, rather than silently succeeding.
+    let markFailedResult = _executeTransaction(
+        "transactions/mark_request_as_failed_false_approve.cdc",
+        [falseApproveTokenAddress],
+        admin
+    )
+    Test.expect(markFailedResult, Test.beSucceeded())
+
+    let requestFailedEvents = Test.eventsOfType(Type<FlowYieldVaultsEVM.RequestFailed>())
+    Test.assert(
+        requestFailedEvents.length > requestFailedCountBefore,
+        message: "Expected RequestFailed events for the approve(false) refund path"
+    )
+
+    // markRequestAsFailed emits one RequestFailed immediately. The last event should
+    // be the follow-up failure emitted by completeProcessing after approve(false).
+    let lastEvent = requestFailedEvents[requestFailedEvents.length - 1] as! FlowYieldVaultsEVM.RequestFailed
+    let expectedTokenAddress = EVM.addressFromString(falseApproveTokenAddress).toString()
+    Test.assertEqual(4242 as UInt256, lastEvent.requestId)
+    Test.assertEqual(expectedTokenAddress, lastEvent.tokenAddress)
+    Test.assertEqual(
+        "ERC20 approve for refund returned false or invalid bool data",
+        lastEvent.reason
+    )
+}
+
+access(all)
+fun testERC20TransferFalseReturnIsRejected() {
+    let falseTransferTokenAddress = deployFalseApproveToken(admin)
+    let transferCheckResult = _executeTransaction(
+        "transactions/check_false_transfer_return.cdc",
+        [falseTransferTokenAddress],
+        admin
+    )
+    Test.expect(transferCheckResult, Test.beSucceeded())
 }

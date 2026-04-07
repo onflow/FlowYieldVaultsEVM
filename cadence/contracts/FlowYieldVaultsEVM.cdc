@@ -1009,7 +1009,8 @@ access(all) contract FlowYieldVaultsEVM {
 
         /// @notice Marks a request as COMPLETED or FAILED, returning escrowed funds on failure
         /// @dev For failed CREATE/DEPOSIT: returns funds from COA to EVM contract via msg.value (native)
-        ///      or approve+transferFrom (ERC20). For WITHDRAW/CLOSE or success: no refund sent.
+        ///      or approve+transferFrom (ERC20). ERC20 approve return data is validated when present.
+        ///      For WITHDRAW/CLOSE or success: no refund sent.
         /// @param requestId The request ID to complete
         /// @param success Whether the operation succeeded
         /// @param yieldVaultId The associated YieldVault Id
@@ -1075,6 +1076,19 @@ access(all) contract FlowYieldVaultsEVM {
                             amount: refundAmount,
                             yieldVaultId: yieldVaultId,
                             reason: "ERC20 approve for refund failed: \(errorMsg)"
+                        )
+                        return false
+                    }
+
+                    if !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(approveResult.data) {
+                        emit RequestFailed(
+                            requestId: requestId,
+                            userAddress: "",
+                            requestType: requestType,
+                            tokenAddress: tokenAddress.toString(),
+                            amount: refundAmount,
+                            yieldVaultId: yieldVaultId,
+                            reason: "ERC20 approve for refund returned false or invalid bool data"
                         )
                         return false
                     }
@@ -1188,7 +1202,8 @@ access(all) contract FlowYieldVaultsEVM {
 
         /// @notice Bridges a Cadence vault to ERC20 tokens on EVM and transfers to recipient
         /// @dev Uses COA.depositTokens() to bridge tokens to EVM, then calls ERC20.transfer()
-        ///      to send the tokens to the recipient address.
+        ///      to send the tokens to the recipient address. ERC20 transfer return data is validated
+        ///      when present to ensure semantic success.
         /// @param vault The Cadence vault containing tokens to bridge (will be consumed)
         /// @param recipient The EVM address to receive the tokens
         /// @param tokenAddress The ERC20 token address on EVM
@@ -1223,6 +1238,10 @@ access(all) contract FlowYieldVaultsEVM {
             if transferResult.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(transferResult.data)
                 panic("ERC20 transfer to recipient failed: \(errorMsg)")
+            }
+
+            if !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(transferResult.data) {
+                panic("ERC20 transfer to recipient returned false or invalid bool data")
             }
         }
 
@@ -2022,6 +2041,29 @@ access(all) contract FlowYieldVaultsEVM {
             }
         }
         return "EVM revert data: 0x\(String.encodeHex(data))"
+    }
+
+    /// @notice Validates ERC20 bool return data semantics
+    /// @dev ERC20 methods may return no data (accepted for compatibility) or ABI-encoded bool.
+    ///      When return data is present, it must be exactly 32 bytes with value `1` (true).
+    access(all) view fun isERC20BoolReturnSuccess(_ data: [UInt8]): Bool {
+        if data.length == 0 {
+            return true
+        }
+
+        if data.length != 32 {
+            return false
+        }
+
+        var i = 0
+        while i < 31 {
+            if data[i] != 0 {
+                return false
+            }
+            i = i + 1
+        }
+
+        return data[31] == 1
     }
 
     /// @notice Emits the RequestFailed event and returns a ProcessResult with success=false
