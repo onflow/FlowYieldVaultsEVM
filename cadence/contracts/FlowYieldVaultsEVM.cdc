@@ -1022,14 +1022,16 @@ access(all) contract FlowYieldVaultsEVM {
         }
 
         /// @notice Marks a request as COMPLETED or FAILED, returning any refund owed on EVM
-        /// @dev Failed CREATE/DEPOSIT requests return the full escrowed amount.
-        ///      Successful CREATE/DEPOSIT requests may return a precision residual that could not
-        ///      be represented in Cadence. WITHDRAW/CLOSE requests never send a refund.
+        /// @dev Failed CREATE/DEPOSIT requests return the full escrowed amount to the EVM requests
+        ///      contract, where it is credited to claimable refunds. Successful CREATE/DEPOSIT
+        ///      requests may return only a precision residual that Cadence could not represent
+        ///      exactly. WITHDRAW/CLOSE requests never send a refund. ERC20 approve return data
+        ///      is validated when present.
         /// @param requestId The request ID to complete
         /// @param success Whether the operation succeeded
         /// @param yieldVaultId The associated YieldVault Id
         /// @param message Status message or error reason
-        /// @param refundAmount Amount to refund to claimable refunds (0 if no refund needed)
+        /// @param refundAmount Amount to credit to claimable refunds (0 if no refund needed)
         /// @param tokenAddress Token address for refund (used to determine native vs ERC20)
         /// @param requestType The type of request (needed to determine if refund applies)
         /// @return True if the EVM call succeeded, false otherwise
@@ -1088,6 +1090,19 @@ access(all) contract FlowYieldVaultsEVM {
                             amount: refundAmount,
                             yieldVaultId: yieldVaultId,
                             reason: "ERC20 approve for refund failed: \(errorMsg)"
+                        )
+                        return false
+                    }
+
+                    if !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(approveResult.data) {
+                        emit RequestFailed(
+                            requestId: requestId,
+                            userAddress: "",
+                            requestType: requestType,
+                            tokenAddress: tokenAddress.toString(),
+                            amount: refundAmount,
+                            yieldVaultId: yieldVaultId,
+                            reason: "ERC20 approve for refund returned false or invalid bool data"
                         )
                         return false
                     }
@@ -1201,7 +1216,8 @@ access(all) contract FlowYieldVaultsEVM {
 
         /// @notice Bridges a Cadence vault to ERC20 tokens on EVM and transfers to recipient
         /// @dev Uses COA.depositTokens() to bridge tokens to EVM, then calls ERC20.transfer()
-        ///      to send the tokens to the recipient address.
+        ///      to send the tokens to the recipient address. ERC20 transfer return data is validated
+        ///      when present to ensure semantic success.
         /// @param vault The Cadence vault containing tokens to bridge (will be consumed)
         /// @param recipient The EVM address to receive the tokens
         /// @param tokenAddress The ERC20 token address on EVM
@@ -1236,6 +1252,10 @@ access(all) contract FlowYieldVaultsEVM {
             if transferResult.status != EVM.Status.successful {
                 let errorMsg = FlowYieldVaultsEVM.decodeEVMError(transferResult.data)
                 panic("ERC20 transfer to recipient failed: \(errorMsg)")
+            }
+
+            if !FlowYieldVaultsEVM.isERC20BoolReturnSuccess(transferResult.data) {
+                panic("ERC20 transfer to recipient returned false or invalid bool data")
             }
         }
 
@@ -2046,6 +2066,29 @@ access(all) contract FlowYieldVaultsEVM {
             }
         }
         return "EVM revert data: 0x\(String.encodeHex(data))"
+    }
+
+    /// @notice Validates ERC20 bool return data semantics
+    /// @dev ERC20 methods may return no data (accepted for compatibility) or ABI-encoded bool.
+    ///      When return data is present, it must be exactly 32 bytes with value `1` (true).
+    access(all) view fun isERC20BoolReturnSuccess(_ data: [UInt8]): Bool {
+        if data.length == 0 {
+            return true
+        }
+
+        if data.length != 32 {
+            return false
+        }
+
+        var i = 0
+        while i < 31 {
+            if data[i] != 0 {
+                return false
+            }
+            i = i + 1
+        }
+
+        return data[31] == 1
     }
 
     /// @notice Emits the RequestFailed event and returns a ProcessResult with success=false
