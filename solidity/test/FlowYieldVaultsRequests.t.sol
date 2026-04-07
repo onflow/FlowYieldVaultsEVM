@@ -2,9 +2,25 @@
 pragma solidity 0.8.20;
 
 import "forge-std/Test.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "../src/FlowYieldVaultsRequests.sol";
+
+contract TestERC20 is ERC20 {
+    uint8 private immutable _tokenDecimals;
+
+    constructor(string memory name, string memory symbol, uint8 tokenDecimals_) ERC20(name, symbol) {
+        _tokenDecimals = tokenDecimals_;
+    }
+
+    function mint(address account, uint256 amount) external {
+        _mint(account, amount);
+    }
+
+    function decimals() public view override returns (uint8) {
+        return _tokenDecimals;
+    }
+}
 
 contract MockDAI is ERC20 {
     constructor() ERC20("Mock DAI", "DAI") {}
@@ -81,6 +97,15 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.startProcessingBatch(successfulRequestIds, new uint256[](0));
     }
 
+    function _completeProcessingNoRefund(
+        uint256 requestId,
+        bool success,
+        uint64 yieldVaultId,
+        string memory message
+    ) internal {
+        c.completeProcessing(requestId, success, yieldVaultId, message, 0);
+    }
+
     // ============================================
     // USER REQUEST LIFECYCLE
     // ============================================
@@ -116,12 +141,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.expectRevert(
             FlowYieldVaultsRequests.CannotRegisterSentinelYieldVaultId.selector
         );
-        c.completeProcessing(
-            reqId,
-            true,
-            sentinelYieldVaultId,
-            "Invalid yieldVaultId"
-        );
+        _completeProcessingNoRefund(reqId, true, sentinelYieldVaultId, "Invalid yieldVaultId");
         vm.stopPrank();
     }
 
@@ -131,7 +151,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 0, "YieldVault 0 created");
+        _completeProcessingNoRefund(reqId, true, 0, "YieldVault 0 created");
         vm.stopPrank();
 
         assertTrue(c.isYieldVaultIdValid(0), "YieldVault ID 0 should be valid");
@@ -263,7 +283,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // 3. COA fails and returns funds
         uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed");
+        c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed", 1 ether);
 
         // 4. User has refund in claimableRefunds (not pendingUserBalances)
         assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
@@ -297,7 +317,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         _startProcessingBatch(reqId);
         uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 2 ether}(reqId, false, sentinelYieldVaultId, "Failed");
+        c.completeProcessing{value: 2 ether}(reqId, false, sentinelYieldVaultId, "Failed", 2 ether);
 
         // Claim only NATIVE_FLOW
         uint256 balBefore = user.balance;
@@ -316,7 +336,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         _startProcessingBatch(reqId);
         uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed");
+        c.completeProcessing{value: 1 ether}(reqId, false, sentinelYieldVaultId, "Failed", 1 ether);
 
         // RefundClaimed is emitted on claim (no BalanceUpdated since we use separate claimableRefunds mapping)
         vm.prank(user);
@@ -372,7 +392,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 100, "YieldVault created");
+        _completeProcessingNoRefund(reqId, true, 100, "YieldVault created");
         vm.stopPrank();
 
         FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
@@ -396,7 +416,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 0);
 
         // COA must return funds when completing with failure
-        c.completeProcessing{value: 1 ether}(reqId, false, c.NO_YIELDVAULT_ID(), "Cadence error");
+        c.completeProcessing{value: 1 ether}(reqId, false, c.NO_YIELDVAULT_ID(), "Cadence error", 1 ether);
         vm.stopPrank();
 
         // Funds go to claimableRefunds (not pendingUserBalances)
@@ -405,6 +425,68 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
+    }
+
+    function test_CompleteProcessing_FailureRefundsExactCreateAmountWithDust() public {
+        uint256 amount = 1 ether + 123456789;
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: amount}(NATIVE_FLOW, amount, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        c.completeProcessing{value: amount}(reqId, false, c.NO_YIELDVAULT_ID(), "Cadence error", amount);
+        vm.stopPrank();
+
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), amount);
+    }
+
+    function test_CompleteProcessing_SuccessCreditsCreateResidualRefund() public {
+        // Cadence can only consume the 8-decimal portion. The sub-8-decimal wei stays on
+        // the EVM side and must be credited back as a refund even though the request succeeds.
+        uint256 residual = 123456789;
+        uint256 amount = 1 ether + residual;
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: amount}(NATIVE_FLOW, amount, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        c.completeProcessing{value: residual}(reqId, true, 100, "YieldVault created", residual);
+        vm.stopPrank();
+
+        // The YieldVault is created with the Cadence-representable amount and the leftover
+        // wei is made claimable instead of remaining stranded in the COA.
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), residual);
+
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
+        assertEq(req.yieldVaultId, 100);
+        assertEq(c.doesUserOwnYieldVault(user, 100), true);
+    }
+
+    function test_CompleteProcessing_RevertWrongCreateResidualRefund() public {
+        // A successful completion must return the exact precision residual; omitting it would
+        // strand funds in the COA, so the contract rejects the completion.
+        uint256 residual = 123456789;
+        uint256 amount = 1 ether + residual;
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: amount}(NATIVE_FLOW, amount, VAULT_ID, STRATEGY_ID);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                residual,
+                uint256(0)
+            )
+        );
+        _completeProcessingNoRefund(reqId, true, 100, "YieldVault created");
+        vm.stopPrank();
     }
 
     function test_CompleteProcessing_FailureRefundsBalance_DepositToYieldVault() public {
@@ -418,7 +500,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(c.getClaimableRefund(user, NATIVE_FLOW), 0);
 
         // COA must return funds when completing with failure
-        c.completeProcessing{value: 1 ether}(reqId, false, 42, "Cadence error");
+        c.completeProcessing{value: 1 ether}(reqId, false, 42, "Cadence error", 1 ether);
         vm.stopPrank();
 
         // Funds go to claimableRefunds (not pendingUserBalances)
@@ -431,13 +513,183 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.FAILED));
     }
 
+    function test_CompleteProcessing_FailureRefundsExactDepositAmountWithDust() public {
+        uint256 amount = 1 ether + 987654321;
+
+        vm.prank(user);
+        uint256 reqId = c.depositToYieldVault{value: amount}(42, NATIVE_FLOW, amount);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        c.completeProcessing{value: amount}(reqId, false, 42, "Cadence error", amount);
+        vm.stopPrank();
+
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), amount);
+    }
+
+    function test_CompleteProcessing_SuccessCreditsDepositResidualRefund() public {
+        // Deposits follow the same rule as vault creation: only the 8-decimal Cadence amount
+        // is bridged, and the remaining wei is refunded on successful completion.
+        uint256 residual = 987654321;
+        uint256 amount = 1 ether + residual;
+
+        vm.prank(user);
+        uint256 reqId = c.depositToYieldVault{value: amount}(42, NATIVE_FLOW, amount);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        c.completeProcessing{value: residual}(reqId, true, 42, "Deposited", residual);
+        vm.stopPrank();
+
+        // Success should not consume the dust on the EVM side; it must become claimable.
+        assertEq(c.getUserPendingBalance(user, NATIVE_FLOW), 0);
+        assertEq(c.getClaimableRefund(user, NATIVE_FLOW), residual);
+
+        FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
+        assertEq(uint8(req.status), uint8(FlowYieldVaultsRequests.RequestStatus.COMPLETED));
+        assertEq(req.yieldVaultId, 42);
+    }
+
+    function test_CompleteProcessing_SuccessCreditsERC20ResidualRefund() public {
+        // ERC20 tokens with more than 8 decimals also leave a remainder after Cadence
+        // truncation, and that remainder must be refunded on success.
+        TestERC20 token = new TestERC20("Mock Token", "MOCK", 18);
+        uint256 residual = 123456789;
+        uint256 amount = 1 ether + residual;
+
+        vm.prank(c.owner());
+        c.setTokenConfig(address(token), true, 1 ether, false);
+
+        token.mint(user, amount);
+
+        vm.startPrank(user);
+        token.approve(address(c), amount);
+        uint256 reqId = c.createYieldVault(address(token), amount, VAULT_ID, STRATEGY_ID);
+        vm.stopPrank();
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        token.approve(address(c), residual);
+        c.completeProcessing(reqId, true, 101, "YieldVault created", residual);
+        vm.stopPrank();
+
+        // The ERC20 residual is tracked in claimableRefunds exactly like native FLOW dust.
+        assertEq(c.getUserPendingBalance(user, address(token)), 0);
+        assertEq(c.getClaimableRefund(user, address(token)), residual);
+        assertEq(c.totalAccountedBalance(address(token)), residual);
+        assertEq(c.doesUserOwnYieldVault(user, 101), true);
+
+        uint256 balanceBefore = token.balanceOf(user);
+        vm.prank(user);
+        c.claimRefund(address(token));
+        assertEq(token.balanceOf(user), balanceBefore + residual);
+        assertEq(c.totalAccountedBalance(address(token)), 0);
+    }
+
+    function test_CompleteProcessing_RevertUnexpectedRefundForExactAmount() public {
+        // When the amount is already exactly representable in Cadence, a successful completion
+        // must not send any refund amount.
+        uint256 amount = 1 ether;
+        uint256 refundAmount = 1;
+
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: amount}(NATIVE_FLOW, amount, VAULT_ID, STRATEGY_ID);
+
+        vm.deal(coa, refundAmount);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                uint256(0),
+                refundAmount
+            )
+        );
+        c.completeProcessing{value: refundAmount}(reqId, true, 100, "YieldVault created", refundAmount);
+        vm.stopPrank();
+    }
+
+    function test_CompleteProcessing_RevertNonZeroRefundForWithdraw() public {
+        // Non-escrowed requests must never credit refunds, even on success.
+        vm.prank(user);
+        uint256 reqId = c.withdrawFromYieldVault(42, 1 ether);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                uint256(0),
+                uint256(1)
+            )
+        );
+        c.completeProcessing(reqId, true, 42, "Withdrawn", 1);
+        vm.stopPrank();
+    }
+
+    function test_CompleteProcessing_RevertNonZeroRefundForFailedWithdraw() public {
+        // The same zero-refund invariant applies when a WITHDRAW fails.
+        vm.prank(user);
+        uint256 reqId = c.withdrawFromYieldVault(42, 1 ether);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                uint256(0),
+                uint256(1)
+            )
+        );
+        c.completeProcessing(reqId, false, 42, "Failed", 1);
+        vm.stopPrank();
+    }
+
+    function test_CompleteProcessing_RevertNonZeroRefundForClose() public {
+        // CLOSE shares the same non-escrowed accounting rule as WITHDRAW.
+        vm.prank(user);
+        uint256 reqId = c.closeYieldVault(42);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                uint256(0),
+                uint256(1)
+            )
+        );
+        c.completeProcessing(reqId, true, 42, "Closed", 1);
+        vm.stopPrank();
+    }
+
+    function test_CompleteProcessing_RevertNonZeroRefundForFailedClose() public {
+        // A failed CLOSE must also reject any non-zero refundAmount.
+        vm.prank(user);
+        uint256 reqId = c.closeYieldVault(42);
+
+        vm.startPrank(coa);
+        _startProcessingBatch(reqId);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                FlowYieldVaultsRequests.InvalidRefundAmount.selector,
+                uint256(0),
+                uint256(1)
+            )
+        );
+        c.completeProcessing(reqId, false, 42, "Failed", 1);
+        vm.stopPrank();
+    }
+
     function test_CompleteProcessing_CloseYieldVaultRemovesOwnership() public {
         vm.prank(user);
         uint256 reqId = c.closeYieldVault(42);
 
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 42, "Closed");
+        _completeProcessingNoRefund(reqId, true, 42, "Closed");
         vm.stopPrank();
 
         assertEq(c.doesUserOwnYieldVault(user, 42), false);
@@ -450,7 +702,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.prank(coa);
         vm.expectRevert(FlowYieldVaultsRequests.InvalidRequestState.selector);
-        c.completeProcessing(reqId, true, 100, "Should fail");
+        _completeProcessingNoRefund(reqId, true, 100, "Should fail");
     }
 
     // ============================================
@@ -822,7 +1074,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // 3. COA completes processing (funds are bridged via COA in Cadence)
         vm.prank(coa);
-        c.completeProcessing(reqId, true, 100, "YieldVault created");
+        _completeProcessingNoRefund(reqId, true, 100, "YieldVault created");
 
         // Verify final state
         assertEq(c.getPendingRequestCount(), 0);
@@ -841,7 +1093,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // COA processes
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 42, "Withdrawn");
+        _completeProcessingNoRefund(reqId, true, 42, "Withdrawn");
         vm.stopPrank();
 
         FlowYieldVaultsRequests.Request memory req = c.getRequest(reqId);
@@ -902,7 +1154,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Process middle request (req3)
         vm.startPrank(coa);
         _startProcessingBatch(req3);
-        c.completeProcessing(req3, true, 200, "Created");
+        _completeProcessingNoRefund(req3, true, 200, "Created");
         vm.stopPrank();
 
         // Verify FIFO order is maintained: [req1, req2, req4, req5]
@@ -924,7 +1176,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Remove first element
         vm.startPrank(coa);
         _startProcessingBatch(req1);
-        c.completeProcessing(req1, true, 100, "Created");
+        _completeProcessingNoRefund(req1, true, 100, "Created");
         vm.stopPrank();
 
         (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
@@ -943,7 +1195,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Remove last element
         vm.startPrank(coa);
         _startProcessingBatch(req3);
-        c.completeProcessing(req3, true, 100, "Created");
+        _completeProcessingNoRefund(req3, true, 100, "Created");
         vm.stopPrank();
 
         (uint256[] memory ids, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
@@ -962,13 +1214,13 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Process in FIFO order
         vm.startPrank(coa);
         _startProcessingBatch(req1);
-        c.completeProcessing(req1, true, 100, "Created");
+        _completeProcessingNoRefund(req1, true, 100, "Created");
 
         _startProcessingBatch(req2);
-        c.completeProcessing(req2, true, 101, "Created");
+        _completeProcessingNoRefund(req2, true, 101, "Created");
 
         _startProcessingBatch(req3);
-        c.completeProcessing(req3, true, 102, "Created");
+        _completeProcessingNoRefund(req3, true, 102, "Created");
         vm.stopPrank();
 
         assertEq(c.getPendingRequestCount(), 0, "All requests should be processed");
@@ -985,7 +1237,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Process out of order: req2, req4, req1, req3
         vm.startPrank(coa);
         _startProcessingBatch(req2);
-        c.completeProcessing(req2, true, 100, "Created");
+        _completeProcessingNoRefund(req2, true, 100, "Created");
 
         // After removing req2: [req1, req3, req4]
         (uint256[] memory ids1, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
@@ -994,7 +1246,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(ids1[2], req4);
 
         _startProcessingBatch(req4);
-        c.completeProcessing(req4, true, 101, "Created");
+        _completeProcessingNoRefund(req4, true, 101, "Created");
 
         // After removing req4: [req1, req3]
         (uint256[] memory ids2, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
@@ -1002,7 +1254,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(ids2[1], req3);
 
         _startProcessingBatch(req1);
-        c.completeProcessing(req1, true, 102, "Created");
+        _completeProcessingNoRefund(req1, true, 102, "Created");
 
         // After removing req1: [req3]
         (uint256[] memory ids3, , , , , , , , , , ) = c.getPendingRequestsUnpacked(0, 0);
@@ -1010,7 +1262,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         assertEq(ids3[0], req3);
 
         _startProcessingBatch(req3);
-        c.completeProcessing(req3, true, 103, "Created");
+        _completeProcessingNoRefund(req3, true, 103, "Created");
         vm.stopPrank();
 
         assertEq(c.getPendingRequestCount(), 0);
@@ -1260,7 +1512,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Process req2
         vm.startPrank(coa);
         _startProcessingBatch(req2);
-        c.completeProcessing(req2, true, 100, "Created");
+        _completeProcessingNoRefund(req2, true, 100, "Created");
         vm.stopPrank();
 
         // User should now have req1 and req3
@@ -1318,7 +1570,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Remove user's middle request (u1r2)
         vm.startPrank(coa);
         _startProcessingBatch(u1r2);
-        c.completeProcessing(u1r2, true, 100, "Created");
+        _completeProcessingNoRefund(u1r2, true, 100, "Created");
         vm.stopPrank();
 
         // Verify user1's remaining requests
@@ -1344,9 +1596,9 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(req1);
-        c.completeProcessing(req1, true, 100, "Created");
+        _completeProcessingNoRefund(req1, true, 100, "Created");
         _startProcessingBatch(req2);
-        c.completeProcessing(req2, true, 101, "Created");
+        _completeProcessingNoRefund(req2, true, 101, "Created");
         vm.stopPrank();
 
         (uint256[] memory ids, , , , , , , , , , , uint256[] memory pendingBalances, ) = c.getPendingRequestsByUserUnpacked(user);
@@ -1365,7 +1617,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 200, "Created");
+        _completeProcessingNoRefund(reqId, true, 200, "Created");
         vm.stopPrank();
 
         // Verify yieldvault is registered
@@ -1379,7 +1631,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(closeReqId);
-        c.completeProcessing(closeReqId, true, 200, "Closed");
+        _completeProcessingNoRefund(closeReqId, true, 200, "Closed");
         vm.stopPrank();
 
         // Verify yieldvault is unregistered
@@ -1399,11 +1651,11 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(req1);
-        c.completeProcessing(req1, true, 100, "Created");
+        _completeProcessingNoRefund(req1, true, 100, "Created");
         _startProcessingBatch(req2);
-        c.completeProcessing(req2, true, 101, "Created");
+        _completeProcessingNoRefund(req2, true, 101, "Created");
         _startProcessingBatch(req3);
-        c.completeProcessing(req3, true, 102, "Created");
+        _completeProcessingNoRefund(req3, true, 102, "Created");
         vm.stopPrank();
 
         // User now has yieldvaults: 42, 100, 101, 102
@@ -1416,7 +1668,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(closeReq);
-        c.completeProcessing(closeReq, true, 101, "Closed");
+        _completeProcessingNoRefund(closeReq, true, 101, "Closed");
         vm.stopPrank();
 
         // Verify 101 is removed
@@ -1437,7 +1689,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(closeReq);
-        c.completeProcessing(closeReq, true, 42, "Closed");
+        _completeProcessingNoRefund(closeReq, true, 42, "Closed");
         vm.stopPrank();
 
         uint64[] memory userYieldVaults = c.getYieldVaultIdsForUser(user);
@@ -1470,7 +1722,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.startPrank(coa);
         for (uint256 i = 1; i < numRequests; i += 2) {
             _startProcessingBatch(requestIds[i]);
-            c.completeProcessing(requestIds[i], true, uint64(100 + i), "Created");
+            _completeProcessingNoRefund(requestIds[i], true, uint64(100 + i), "Created");
         }
         vm.stopPrank();
 
@@ -1508,7 +1760,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         // Process user[2]'s middle request
         vm.startPrank(coa);
         _startProcessingBatch(userRequestIds[2][1]);
-        c.completeProcessing(userRequestIds[2][1], true, 300, "Created");
+        _completeProcessingNoRefund(userRequestIds[2][1], true, 300, "Created");
         vm.stopPrank();
 
         // Verify all other users still have 3 requests
@@ -1532,7 +1784,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 100, "Created");
+        _completeProcessingNoRefund(reqId, true, 100, "Created");
         vm.stopPrank();
 
         assertEq(c.getPendingRequestCount(), 0);
@@ -1551,7 +1803,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.startPrank(coa);
         _startProcessingBatch(req1);
         // COA must return funds when completing with failure
-        c.completeProcessing{value: 1 ether}(req1, false, c.NO_YIELDVAULT_ID(), "Failed");
+        c.completeProcessing{value: 1 ether}(req1, false, c.NO_YIELDVAULT_ID(), "Failed", 1 ether);
         vm.stopPrank();
 
         // req1 should still be removed from pending (it's marked FAILED)
@@ -1592,7 +1844,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 100, "Created");
+        _completeProcessingNoRefund(reqId, true, 100, "Created");
 
         // Try to register same ID again (simulate COA bug)
         uint256 reqId2 = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
@@ -1601,7 +1853,7 @@ contract FlowYieldVaultsRequestsTest is Test {
             FlowYieldVaultsRequests.YieldVaultIdAlreadyRegistered.selector,
             100
         ));
-        c.completeProcessing(reqId2, true, 100, "Duplicate");
+        _completeProcessingNoRefund(reqId2, true, 100, "Duplicate");
         vm.stopPrank();
     }
 
@@ -1612,7 +1864,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 100, "Created");
+        _completeProcessingNoRefund(reqId, true, 100, "Created");
         vm.stopPrank();
 
         // Try to deposit but COA provides wrong ID
@@ -1626,7 +1878,7 @@ contract FlowYieldVaultsRequestsTest is Test {
             100,  // expected
             101   // provided (wrong)
         ));
-        c.completeProcessing(depositReq, true, 101, "Wrong ID");
+        _completeProcessingNoRefund(depositReq, true, 101, "Wrong ID");
         vm.stopPrank();
     }
 
@@ -1637,7 +1889,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         _startProcessingBatch(reqId);
-        c.completeProcessing(reqId, true, 100, "Created");
+        _completeProcessingNoRefund(reqId, true, 100, "Created");
         vm.stopPrank();
 
         vm.prank(user2);
@@ -1708,7 +1960,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
         vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustEqualAmount.selector);
-        c.completeProcessing{value: 3 ether}(req1, false, sentinelYieldVaultId, "Failed");
+        c.completeProcessing{value: 3 ether}(req1, false, sentinelYieldVaultId, "Failed", 5 ether);
 
         c.testRegisterYieldVaultId(101, user2, address(dai));
         c.setTokenConfig(address(dai), true, 0.5 ether, false);
@@ -1724,12 +1976,12 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.prank(coa);
         vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustBeZero.selector);
-        c.completeProcessing{value: 5 ether}(req2, false, 101, "Failed");
+        c.completeProcessing{value: 5 ether}(req2, false, 101, "Failed", 5 ether);
 
         // Success case must also reject non-zero msg.value (the `else` branch)
         vm.prank(coa);
         vm.expectRevert(FlowYieldVaultsRequests.MsgValueMustBeZero.selector);
-        c.completeProcessing{value: 1 ether}(req2, true, 101, "Success");
+        c.completeProcessing{value: 1 ether}(req2, true, 101, "Success", 0);
     }
 
     function test_CompleteProcessing_RefundNativeFunds() public {
@@ -1748,7 +2000,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         uint64 sentinelYieldVaultId = c.NO_YIELDVAULT_ID();
         vm.prank(coa);
-        c.completeProcessing{value: 5 ether}(reqId, false, sentinelYieldVaultId, "Failed");
+        c.completeProcessing{value: 5 ether}(reqId, false, sentinelYieldVaultId, "Failed", 5 ether);
         assertEq(coa.balance, 0 ether);
         assertEq(address(c).balance, 5 ether);
 
@@ -1782,7 +2034,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         dai.approve(address(c), 5 ether);
-        c.completeProcessing(reqId, false, c.NO_YIELDVAULT_ID(), "Failed");
+        c.completeProcessing(reqId, false, c.NO_YIELDVAULT_ID(), "Failed", 5 ether);
         assertEq(dai.balanceOf(coa), 0 ether);
         assertEq(dai.balanceOf(address(c)), 5 ether);
         vm.stopPrank();
@@ -1919,7 +2171,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         vm.startPrank(coa);
         dai.approve(address(c), 5 ether);
-        c.completeProcessing(reqId, false, c.NO_YIELDVAULT_ID(), "Failed");
+        c.completeProcessing(reqId, false, c.NO_YIELDVAULT_ID(), "Failed", 5 ether);
         assertEq(dai.balanceOf(coa), 0 ether);
         assertEq(dai.balanceOf(address(c)), 5 ether);
         vm.stopPrank();

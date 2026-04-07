@@ -64,7 +64,7 @@ This bridge allows EVM users to interact with Flow YieldVaults (yield-generating
 3. **SchedulerHandler** fetches pending requests, calls `preprocessRequests()` to validate and transition (PENDING → PROCESSING), then schedules WorkerHandlers
 4. **WorkerHandler** processes individual requests via `processRequest()`:
    - Execute Cadence operation (create/deposit/withdraw/close YieldVault)
-   - `completeProcessing()`: Marks as COMPLETED or FAILED (on failure, credits `claimableRefunds`; user claims via `claimRefund`)
+   - `completeProcessing()`: Marks as COMPLETED or FAILED and credits any EVM-side refund due to `claimableRefunds` (failed CREATE/DEPOSIT or successful CREATE/DEPOSIT precision residuals; user claims via `claimRefund`)
 5. **Funds bridged** to user on withdrawal/close operations
 
 ## Quick Start
@@ -193,6 +193,8 @@ forge script ./solidity/script/FlowYieldVaultsYieldVaultOperations.s.sol:FlowYie
 
 Source of truth for published addresses: `deployments/contract-addresses.json`.
 
+The current contracts must be deployed in lockstep: the worker now calls the 5-argument `completeProcessing(uint256,bool,uint64,string,uint256)` ABI, so any environment still pointing at an older `FlowYieldVaultsRequests` deployment must be updated before using the current Cadence worker.
+
 ## Versioning and Branching
 
 This repo follows the contract versioning approach discussed in
@@ -281,7 +283,7 @@ Testnet E2E uses `deployments/contract-addresses.json` to auto-load addresses (s
 
 ### Fund Safety
 
-- Funds are escrowed until processing begins; failed CREATE/DEPOSIT credit refunds to `claimableRefunds` (user calls `claimRefund`)
+- Funds are escrowed until processing begins; failed CREATE/DEPOSIT and successful CREATE/DEPOSIT precision residuals credit `claimableRefunds` (user calls `claimRefund`)
 - Two-phase commit keeps EVM-side balance updates consistent; cross-VM flow is not atomic
 - Request cancellation and admin drop move escrowed funds to `claimableRefunds` (pull pattern)
 

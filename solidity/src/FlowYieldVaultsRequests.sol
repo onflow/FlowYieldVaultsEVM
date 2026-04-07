@@ -2,6 +2,7 @@
 pragma solidity 0.8.20;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -29,7 +30,12 @@ import {
  *
  *      Processing uses atomic two-phase commit:
  *      - startProcessingBatch(): Marks requests as PROCESSING, deducts user balances
- *      - completeProcessing(): Marks as COMPLETED/FAILED, credits claimable refunds on failure
+ *      - completeProcessing(): Marks as COMPLETED/FAILED and credits claimable refunds
+ *
+ *      PRECISION NOTE: Native FLOW uses 18 decimals and ERC20 tokens use their own token decimals,
+ *      while Cadence UFix64 supports 8 decimal places. When a CREATE/DEPOSIT amount carries more
+ *      precision than Cadence can represent, the worker rounds the bridged amount down to the nearest
+ *      Cadence-representable quantity and refunds the remainder to claimableRefunds during completion.
  */
 contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     using SafeERC20 for IERC20;
@@ -220,7 +226,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Amount must be greater than zero
     error AmountMustBeGreaterThanZero();
 
-    /// @notice msg.value must equal amount for native token deposits
+    /// @notice msg.value must equal the required native token amount for this operation
     error MsgValueMustEqualAmount();
 
     /// @notice msg.value must be zero for ERC20 deposits
@@ -290,6 +296,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice No refund available for the specified token
     error NoRefundAvailable(address token);
+
+    /// @notice Refund amount is inconsistent with the request lifecycle
+    error InvalidRefundAmount(uint256 expectedOrMaximum, uint256 actual);
 
     /// @notice Recovery user address cannot be zero
     error InvalidRecoveryUserAddress();
@@ -937,7 +946,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     }
 
     /// @notice Claims all refunded funds for a specific token
-    /// @dev Refunds accumulate in claimableRefunds when requests are cancelled, dropped, or fail.
+    /// @dev Refunds accumulate in claimableRefunds when requests are cancelled, dropped,
+    ///      fail, or return precision residuals on successful CREATE/DEPOSIT completion.
     ///      This function allows users to withdraw those funds. Does NOT touch funds escrowed
     ///      for active pending requests (pendingUserBalances).
     /// @param tokenAddress Token to claim refund for (NATIVE_FLOW or ERC20)
@@ -989,34 +999,83 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      * @dev This is the second phase of the two-phase commit pattern. Must be called by the
      *      authorized COA after Cadence-side operations complete.
      *
-     *      Refund handling (for failed CREATE/DEPOSIT requests only):
-     *      - Native FLOW: COA must send exact amount via msg.value
-     *      - ERC20: COA must approve this contract, funds are pulled via safeTransferFrom
-     *      - Refunded funds are credited to user's claimableRefunds for later claim
+     *      Refund handling:
+     *      - Failed CREATE/DEPOSIT: refund the full request amount
+     *      - Successful CREATE/DEPOSIT: refund only the precision residual, if any
+     *      - WITHDRAW/CLOSE: refundAmount must be 0
      *
      *      YieldVault registration:
      *      - Successful CREATE: Registers new YieldVault ownership
      *      - Successful CLOSE: Unregisters YieldVault ownership
      *
-     *      For all other cases (success, WITHDRAW/CLOSE), msg.value must be 0.
+     *      The Cadence worker passes the explicit refund amount so Solidity can validate
+     *      lifecycle accounting before finalizing the request.
      * @param requestId The unique identifier of the request to complete.
      * @param success True if the Cadence operation succeeded, false otherwise.
      * @param yieldVaultId The YieldVault Id from Cadence (for CREATE: newly assigned; for others: existing).
      * @param message Human-readable status message or error description.
+     * @param refundAmount Amount returned from the COA to claimableRefunds.
      */
     function completeProcessing(
         uint256 requestId,
         bool success,
         uint64 yieldVaultId,
-        string calldata message
+        string calldata message,
+        uint256 refundAmount
     ) external payable onlyAuthorizedCOA nonReentrant {
         Request storage request = requests[requestId];
+        _completeProcessing(
+            request,
+            requestId,
+            success,
+            yieldVaultId,
+            message,
+            refundAmount
+        );
+    }
 
+    function _completeProcessing(
+        Request storage request,
+        uint256 requestId,
+        bool success,
+        uint64 yieldVaultId,
+        string calldata message,
+        uint256 refundAmount
+    ) internal {
         // === VALIDATION ===
         if (request.id != requestId) revert RequestNotFound();
         // Only PROCESSING requests can be completed (must call startProcessingBatch first)
         if (request.status != RequestStatus.PROCESSING)
             revert InvalidRequestState();
+
+        bool isEscrowedRequest =
+            request.requestType == RequestType.CREATE_YIELDVAULT ||
+            request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT;
+
+        if (!success) {
+            uint256 expectedFailedRefundAmount = isEscrowedRequest
+                ? request.amount
+                : 0;
+            if (refundAmount != expectedFailedRefundAmount) {
+                revert InvalidRefundAmount(
+                    expectedFailedRefundAmount,
+                    refundAmount
+                );
+            }
+        } else {
+            uint256 expectedSuccessRefundAmount = isEscrowedRequest
+                ? _expectedPrecisionResidual(
+                    request.tokenAddress,
+                    request.amount
+                )
+                : 0;
+            if (refundAmount != expectedSuccessRefundAmount) {
+                revert InvalidRefundAmount(
+                    expectedSuccessRefundAmount,
+                    refundAmount
+                );
+            }
+        }
 
         // === UPDATE REQUEST STATUS ===
         RequestStatus newStatus = success
@@ -1033,37 +1092,32 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             revert YieldVaultIdMismatch(request.yieldVaultId, yieldVaultId);
         }
 
-        // === HANDLE REFUNDS FOR FAILED CREATE/DEPOSIT ===
-        // COA must return the funds that were transferred in startProcessingBatch
-        if (
-            !success &&
-            (request.requestType == RequestType.CREATE_YIELDVAULT ||
-                request.requestType == RequestType.DEPOSIT_TO_YIELDVAULT)
-        ) {
+        // === HANDLE REFUNDS FOR FAILED CREATE/DEPOSIT OR SUCCESS-PATH RESIDUALS ===
+        // COA must return any amount that should remain claimable on the EVM side.
+        if (refundAmount > 0) {
             if (isNativeFlow(request.tokenAddress)) {
-                // Native FLOW: must be sent with this transaction
-                if (msg.value != request.amount) revert MsgValueMustEqualAmount();
+                // Native FLOW: refund is sent with this transaction
+                if (msg.value != refundAmount) revert MsgValueMustEqualAmount();
             } else {
                 // ERC20: pull from COA (requires prior approval)
                 if (msg.value != 0) revert MsgValueMustBeZero();
                 IERC20(request.tokenAddress).safeTransferFrom(
                     msg.sender,
                     address(this),
-                    request.amount
+                    refundAmount
                 );
-                totalAccountedBalance[request.tokenAddress] += request.amount;
+                totalAccountedBalance[request.tokenAddress] += refundAmount;
             }
             // Credit refunded funds to claimable refunds for later claim
-            claimableRefunds[request.user][request.tokenAddress] += request
-                .amount;
+            claimableRefunds[request.user][request.tokenAddress] += refundAmount;
             emit RefundCredited(
                 request.user,
                 request.tokenAddress,
-                request.amount,
+                refundAmount,
                 requestId
             );
         } else {
-            // No refund expected for: successful requests OR WITHDRAW/CLOSE requests
+            // No refund expected for this completion path
             if (msg.value != 0) revert MsgValueMustBeZero();
         }
 
@@ -1700,6 +1754,29 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             IERC20(tokenAddress).safeTransfer(to, amount);
             totalAccountedBalance[tokenAddress] -= amount;
         }
+    }
+
+    /**
+     * @dev Computes the precision residual that cannot be represented in Cadence UFix64.
+     *      Cadence preserves at most 8 decimal places, so amounts are rounded down to the
+     *      nearest token quantum of 10^(decimals-8) smallest units when decimals exceed 8.
+     */
+    function _expectedPrecisionResidual(
+        address tokenAddress,
+        uint256 amount
+    ) internal view returns (uint256) {
+        if (isNativeFlow(tokenAddress)) {
+            return amount % 1e10;
+        }
+
+        uint8 decimals = IERC20Metadata(tokenAddress).decimals();
+        if (decimals <= 8) return 0;
+
+        uint8 precisionLossDecimals = decimals - 8;
+        if (precisionLossDecimals > 77) return amount;
+
+        uint256 quantum = 10 ** precisionLossDecimals;
+        return amount % quantum;
     }
 
     /**

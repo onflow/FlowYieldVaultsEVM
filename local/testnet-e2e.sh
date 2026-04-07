@@ -107,6 +107,8 @@
 #      - ERC20 (WFLOW): COA approves contract, then contract pulls via transferFrom
 #   4. Contract receives funds and credits claimableRefunds
 #   5. User can claim the refund via claimRefund()
+# Successful CREATE/DEPOSIT can also credit a smaller claimable refund equal to the
+# precision residual that Cadence cannot represent exactly.
 #
 # =============================================================================
 # TYPICAL TEST FLOW
@@ -147,6 +149,8 @@ WFLOW="0xd3bF53DAC106A0290B0483EcBC89d40FcC961f3e"
 PYUSD0="0xd7d43ab7b365f0d0789aE83F4385fA710FfdC98F"
 NATIVE_FLOW="0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF"
 DEFAULT_CONTRACT="0xF633C9dBf1a3964a895fCC4CA4404B6f8BA8141d"
+# Override CONTRACT when testing branches that change the `completeProcessing` ABI.
+# The worker and FlowYieldVaultsRequests deployment must stay in lockstep.
 DEFAULT_CADENCE_CONTRACT="0x764bdff06a0ee77e"
 REFUND_CHECK_MAX_ATTEMPTS="${REFUND_CHECK_MAX_ATTEMPTS:-60}"
 REFUND_CHECK_DELAY_SECONDS="${REFUND_CHECK_DELAY_SECONDS:-5}"
