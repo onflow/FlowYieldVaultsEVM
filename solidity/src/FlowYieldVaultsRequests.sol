@@ -1,18 +1,14 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {
     SafeERC20
 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {
-    ReentrancyGuard
-} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {
-    Ownable2Step,
-    Ownable
-} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 /**
  * @title FlowYieldVaultsRequests
@@ -37,7 +33,11 @@ import {
  *      precision than Cadence can represent, the worker rounds the bridged amount down to the nearest
  *      Cadence-representable quantity and refunds the remainder to claimableRefunds during completion.
  */
-contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
+contract FlowYieldVaultsRequests is
+    ReentrancyGuardTransient,
+    OwnableUpgradeable,
+    UUPSUpgradeable
+{
     using SafeERC20 for IERC20;
 
     // ============================================
@@ -110,7 +110,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @notice WFLOW (Wrapped FLOW) ERC20 token address
     /// @dev On Cadence side, WFLOW is automatically unwrapped to native FlowToken by FlowEVMBridge
-    address public immutable WFLOW;
+    ///      Set once in initialize(). Any future upgrade that introduces a setter must
+    ///      also migrate allowedTokens[oldWFLOW] → allowedTokens[newWFLOW].
+    address public WFLOW;
 
     /// @notice Sentinel value for "no yieldvault"
     /// @dev Uses type(uint64).max since valid yieldVaultIds can be 0
@@ -531,10 +533,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     // Constructor
     // ============================================
 
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
     /// @notice Initializes the contract with COA address and default configuration
     /// @param coaAddress Address of the authorized COA
     /// @param wflowAddress Address of the WFLOW (Wrapped FLOW) ERC20 token
-    constructor(address coaAddress, address wflowAddress) Ownable(msg.sender) {
+    function initialize(address coaAddress, address wflowAddress) public initializer {
+        __Ownable_init(msg.sender);
+
         if (coaAddress == address(0)) revert InvalidCOAAddress();
 
         authorizedCOA = coaAddress;
@@ -2001,4 +2010,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             delete _requestIndexInUserArray[requestId];
         }
     }
+
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 }

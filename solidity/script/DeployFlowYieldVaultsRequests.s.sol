@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {FlowYieldVaultsRequests} from "../src/FlowYieldVaultsRequests.sol";
 
 /**
@@ -27,12 +28,18 @@ contract DeployFlowYieldVaultsRequests is Script {
         address wflowAddress = vm.envOr("WFLOW_ADDRESS", address(0));
 
         vm.startBroadcast(deployerPrivateKey);
+        FlowYieldVaultsRequests fyvImplementation = new FlowYieldVaultsRequests();
 
-        FlowYieldVaultsRequests flowYieldVaultsRequests = new FlowYieldVaultsRequests(coaAddress, wflowAddress);
-
+        ERC1967Proxy fyvProxy = new ERC1967Proxy(
+            address(fyvImplementation),
+            abi.encodeCall(FlowYieldVaultsRequests.initialize, (coaAddress, wflowAddress))
+        );
         vm.stopBroadcast();
 
-        console.log("FlowYieldVaultsRequests deployed at:", address(flowYieldVaultsRequests));
+        FlowYieldVaultsRequests flowYieldVaultsRequests = FlowYieldVaultsRequests(address(fyvProxy));
+
+        console.log("FlowYieldVaultsRequests proxy deployed at:", address(flowYieldVaultsRequests));
+        console.log("FlowYieldVaultsRequests implementation at:", address(fyvImplementation));
         console.log("Authorized COA:", coaAddress);
         console.log("WFLOW Address:", wflowAddress);
         console.log("Owner:", flowYieldVaultsRequests.owner());

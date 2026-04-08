@@ -153,12 +153,13 @@ DEPLOYMENT_OUTPUT=$(forge script ./solidity/script/DeployFlowYieldVaultsRequests
   --root ./solidity \
   --rpc-url "http://$RPC_URL" \
   --broadcast \
-  --legacy 2>&1)
+  --legacy \
+  --slow 2>&1)
 
 echo "$DEPLOYMENT_OUTPUT"
 
 # Extract the deployed contract address from the output
-FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowYieldVaultsRequests deployed at:" | sed 's/.*: //')
+FLOW_VAULTS_REQUESTS_CONTRACT=$(echo "$DEPLOYMENT_OUTPUT" | grep "FlowYieldVaultsRequests proxy deployed at:" | sed 's/.*: //')
 
 if [ -z "$FLOW_VAULTS_REQUESTS_CONTRACT" ]; then
   echo "❌ Failed to extract FlowYieldVaultsRequests contract address from deployment"
