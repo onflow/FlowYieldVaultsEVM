@@ -1982,7 +1982,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
             strategyIdentifier: strategyIdentifier
         });
 
-        // Add to global pending queue with index tracking for O(1) lookup
+        // Add to the global FIFO queue in O(1) by writing at the tail pointer
         _enqueueRequest(requestId);
         userPendingRequestCount[msg.sender]++;
 
@@ -2079,8 +2079,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /**
      * @dev Drops a request from the requestsQueue.
-     *      O(n) operation — scans from the removed element to the tail and shifts
-     *      the queue to all subsequent elements left to maintain FIFO order.
+     *      O(n) operation — scans from the head until the request is found, then
+     *      shifts all subsequent queue entries one slot left to maintain FIFO order.
      *
      * @param requestId The request ID to remove from the pending requests queue.
      */
@@ -2091,7 +2091,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 requestFound = true;
             }
 
-            // Shift the matching request to the queue's tail, then delete it
+            // Once found, shift later requests left and delete the duplicated tail slot
             if (requestFound && (i + 1 < _requestsQueueTail)) {
                 _requestsQueue[i] = _requestsQueue[i + 1];
             } else if (requestFound) {
