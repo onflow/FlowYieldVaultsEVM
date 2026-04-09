@@ -16,10 +16,6 @@
     "stateMutability": "nonpayable"
   },
   {
-    "type": "receive",
-    "stateMutability": "payable"
-  },
-  {
     "type": "function",
     "name": "DEFAULT_MINIMUM_BALANCE",
     "inputs": [],
@@ -947,25 +943,6 @@
   },
   {
     "type": "function",
-    "name": "pendingRequestIds",
-    "inputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "pendingRequestIdsByUser",
     "inputs": [
       {
@@ -1011,6 +988,29 @@
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "recoverTokens",
+    "inputs": [
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -1185,6 +1185,25 @@
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "totalAccountedBalance",
+    "inputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -1862,6 +1881,31 @@
   },
   {
     "type": "event",
+    "name": "TokensRecovered",
+    "inputs": [
+      {
+        "name": "to",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Unpaused",
     "inputs": [
       {
@@ -1992,6 +2036,11 @@
   },
   {
     "type": "error",
+    "name": "EmptyRequestsQueue",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "EmptyStrategyIdentifier",
     "inputs": []
   },
@@ -2023,12 +2072,38 @@
   },
   {
     "type": "error",
+    "name": "InsufficientRecoveryAmount",
+    "inputs": [
+      {
+        "name": "available",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "requested",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
     "name": "InvalidCOAAddress",
     "inputs": []
   },
   {
     "type": "error",
     "name": "InvalidMinimumBalance",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidRecoveryTokenAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidRecoveryUserAddress",
     "inputs": []
   },
   {
@@ -2147,6 +2222,33 @@
     "type": "error",
     "name": "RequestNotFound",
     "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RequestNotInQueue",
+    "inputs": [
+      {
+        "name": "requestId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RequestProcessOutOfOrder",
+    "inputs": [
+      {
+        "name": "expectedId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "processedId",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
   },
   {
     "type": "error",
