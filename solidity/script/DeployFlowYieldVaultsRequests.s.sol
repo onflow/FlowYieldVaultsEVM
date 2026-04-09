@@ -3,6 +3,7 @@ pragma solidity 0.8.20;
 
 import {Script, console} from "forge-std/Script.sol";
 import {FlowYieldVaultsRequests} from "../src/FlowYieldVaultsRequests.sol";
+import {FlowYieldVaultsAdmin} from "../src/FlowYieldVaultsAdmin.sol";
 
 /**
  * @title DeployFlowYieldVaultsRequests
@@ -28,7 +29,8 @@ contract DeployFlowYieldVaultsRequests is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        FlowYieldVaultsRequests flowYieldVaultsRequests = new FlowYieldVaultsRequests(coaAddress, wflowAddress);
+        FlowYieldVaultsAdmin fyvAdmin = new FlowYieldVaultsAdmin(coaAddress, wflowAddress);
+        FlowYieldVaultsRequests flowYieldVaultsRequests = new FlowYieldVaultsRequests(wflowAddress, address(fyvAdmin));
 
         vm.stopBroadcast();
 

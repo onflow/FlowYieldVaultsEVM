@@ -13,6 +13,7 @@ import {
     Ownable2Step,
     Ownable
 } from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import "src/FlowYieldVaultsAdmin.sol";
 
 /**
  * @title FlowYieldVaultsRequests
@@ -86,16 +87,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         string strategyIdentifier;
     }
 
-    /// @notice Configuration for supported tokens
-    /// @param isSupported Whether the token can be used
-    /// @param minimumBalance Minimum deposit amount required
-    /// @param isNative True if this represents native $FLOW
-    struct TokenConfig {
-        bool isSupported;
-        uint256 minimumBalance;
-        bool isNative;
-    }
-
     struct YieldVault {
         uint64 id;
         address owner;
@@ -124,36 +115,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
     /// @dev Auto-incrementing counter for request IDs, starts at 1
     uint256 private _requestIdCounter;
-
-    /// @notice Address of the authorized COA that can process requests
-    address public authorizedCOA;
-
-    /// @notice Whether allowlist enforcement is active
-    bool public allowlistEnabled;
-
-    /// @notice Addresses permitted to create requests when allowlist is enabled
-    mapping(address => bool) public allowlisted;
-
-    /// @notice Whether blocklist enforcement is active
-    bool public blocklistEnabled;
-
-    /// @notice Whether the contract is paused
-    bool public paused;
-
-    /// @notice Addresses blocked from creating requests
-    mapping(address => bool) public blocklisted;
-
-    /// @notice Token configurations indexed by token address
-    mapping(address => TokenConfig) public allowedTokens;
-
-    /// @notice Token addresses surfaced in per-user balance views
-    address[] private _trackedTokens;
-
-    /// @notice O(1) lookup for tracked-token membership
-    mapping(address => bool) private _isTrackedToken;
-
-    /// @notice Maximum number of pending requests allowed per user (0 = unlimited)
-    uint256 public maxPendingRequestsPerUser;
 
     /// @notice Pending request IDs per user for O(1) lookup
     mapping(address => uint256[]) public pendingRequestIdsByUser;
@@ -189,33 +150,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @dev Internal visibility allows test helpers to properly initialize state
     mapping(address => mapping(uint64 => uint256)) internal _yieldVaultIndexInUserArray;
 
+    FlowYieldVaultsAdmin private _fyvAdmin;
+
     // ============================================
     // Errors
     // ============================================
-
-    /// @notice Caller is not the authorized COA
-    error NotAuthorizedCOA(address sender);
-
-    /// @notice Caller is not in the allowlist
-    error NotInAllowlist(address sender);
-
-    /// @notice Caller is in the blocklist
-    error Blocklisted(address sender);
-
-    /// @notice COA address cannot be zero
-    error InvalidCOAAddress();
-
-    /// @notice Minimum balance must be non-zero for supported tokens
-    error InvalidMinimumBalance();
-
-    /// @notice Address array cannot be empty
-    error EmptyAddressArray();
-
-    /// @notice Cannot add zero address to allowlist
-    error CannotAllowlistZeroAddress();
-
-    /// @notice Cannot add zero address to blocklist
-    error CannotBlocklistZeroAddress();
 
     /// @notice Amount must be greater than zero
     error AmountMustBeGreaterThanZero();
@@ -278,9 +217,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         address expected,
         address provided
     );
-
-    /// @notice Contract is paused
-    error ContractPaused();
 
     /// @notice Vault identifier cannot be empty for CREATE_YIELDVAULT
     error EmptyVaultIdentifier();
@@ -389,69 +325,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256 amount
     );
 
-    /// @notice Emitted when authorized COA is changed
-    /// @param oldCOA Previous COA address
-    /// @param newCOA New COA address
-    event AuthorizedCOAUpdated(address indexed oldCOA, address indexed newCOA);
-
-    /// @notice Emitted when allowlist status changes
-    /// @param enabled New status
-    /// @param changedBy Admin who changed the status
-    event AllowlistEnabled(bool enabled, address indexed changedBy);
-
-    /// @notice Emitted when addresses are added to allowlist
-    /// @param addresses Addresses added
-    /// @param addedBy Admin who added the addresses
-    event AddressesAddedToAllowlist(address[] addresses, address indexed addedBy);
-
-    /// @notice Emitted when addresses are removed from allowlist
-    /// @param addresses Addresses removed
-    /// @param removedBy Admin who removed the addresses
-    event AddressesRemovedFromAllowlist(address[] addresses, address indexed removedBy);
-
-    /// @notice Emitted when blocklist status changes
-    /// @param enabled New status
-    /// @param changedBy Admin who changed the status
-    event BlocklistEnabled(bool enabled, address indexed changedBy);
-
-    /// @notice Emitted when addresses are added to blocklist
-    /// @param addresses Addresses added
-    /// @param addedBy Admin who added the addresses
-    event AddressesAddedToBlocklist(address[] addresses, address indexed addedBy);
-
-    /// @notice Emitted when addresses are removed from blocklist
-    /// @param addresses Addresses removed
-    /// @param removedBy Admin who removed the addresses
-    event AddressesRemovedFromBlocklist(address[] addresses, address indexed removedBy);
-
-    /// @notice Emitted when token configuration changes
-    /// @param token Token address
-    /// @param isSupported Whether token is supported
-    /// @param minimumBalance Minimum deposit amount
-    /// @param isNative Whether token is native $FLOW
-    /// @param configuredBy Admin who configured the token
-    event TokenConfigured(
-        address indexed token,
-        bool isSupported,
-        uint256 minimumBalance,
-        bool isNative,
-        address indexed configuredBy
-    );
-
-    /// @notice Emitted when max pending requests limit changes
-    /// @param oldMax Previous limit
-    /// @param newMax New limit
-    /// @param updatedBy Admin who updated the limit
-    event MaxPendingRequestsPerUserUpdated(uint256 oldMax, uint256 newMax, address indexed updatedBy);
-
-    /// @notice Emitted when the contract is paused
-    /// @param account Address that paused the contract
-    event Paused(address account);
-
-    /// @notice Emitted when the contract is unpaused
-    /// @param account Address that unpaused the contract
-    event Unpaused(address account);
-
     /// @notice Emitted when a new YieldVault is registered
     /// @param yieldVaultId Newly registered YieldVault Id
     /// @param owner Address of the YieldVault owner
@@ -490,58 +363,15 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     );
 
     // ============================================
-    // Modifiers
-    // ============================================
-
-    /// @dev Restricts function to authorized COA only
-    modifier onlyAuthorizedCOA() {
-        if (msg.sender != authorizedCOA) revert NotAuthorizedCOA(msg.sender);
-        _;
-    }
-
-    /// @dev Requires caller to be allowlisted (if allowlist is enabled)
-    modifier onlyAllowlisted() {
-        if (allowlistEnabled && !allowlisted[msg.sender]) {
-            revert NotInAllowlist(msg.sender);
-        }
-        _;
-    }
-
-    /// @dev Requires caller to not be blocklisted (if blocklist is enabled)
-    modifier notBlocklisted() {
-        if (blocklistEnabled && blocklisted[msg.sender]) {
-            revert Blocklisted(msg.sender);
-        }
-        _;
-    }
-
-    /// @dev Requires contract to not be paused
-    modifier whenNotPaused() {
-        if (paused) revert ContractPaused();
-        _;
-    }
-
-    // ============================================
     // Constructor
     // ============================================
 
     /// @notice Initializes the contract with COA address and default configuration
-    /// @param coaAddress Address of the authorized COA
     /// @param wflowAddress Address of the WFLOW (Wrapped FLOW) ERC20 token
-    constructor(address coaAddress, address wflowAddress) Ownable(msg.sender) {
-        if (coaAddress == address(0)) revert InvalidCOAAddress();
-
-        authorizedCOA = coaAddress;
+    constructor(address wflowAddress, address fyvAdmin) Ownable(msg.sender) {
         WFLOW = wflowAddress;
         _requestIdCounter = 1;
-        maxPendingRequestsPerUser = 10;
-
-        _setTokenConfig(NATIVE_FLOW, true, DEFAULT_MINIMUM_BALANCE, true);
-
-        // WFLOW is treated as ERC20 on EVM side, but unwraps to native FlowToken on Cadence
-        if (wflowAddress != address(0)) {
-            _setTokenConfig(WFLOW, true, DEFAULT_MINIMUM_BALANCE, false);
-        }
+        _fyvAdmin = FlowYieldVaultsAdmin(fyvAdmin);
     }
 
     // ============================================
@@ -577,145 +407,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         emit TokensRecovered(to, tokenAddress, amount);
     }
 
-    /// @notice Updates the authorized COA address
-    /// @param _coa New COA address
-    function setAuthorizedCOA(address _coa) external onlyOwner {
-        if (_coa == address(0)) revert InvalidCOAAddress();
-        address oldCOA = authorizedCOA;
-        authorizedCOA = _coa;
-        emit AuthorizedCOAUpdated(oldCOA, _coa);
-    }
-
-    /// @notice Enables or disables allowlist enforcement
-    /// @param _enabled True to enable, false to disable
-    function setAllowlistEnabled(bool _enabled) external onlyOwner {
-        allowlistEnabled = _enabled;
-        emit AllowlistEnabled(_enabled, msg.sender);
-    }
-
-    /// @notice Adds multiple addresses to the allowlist
-    /// @param _addresses Addresses to add
-    function batchAddToAllowlist(
-        address[] calldata _addresses
-    ) external onlyOwner {
-        if (_addresses.length == 0) revert EmptyAddressArray();
-
-        for (uint256 i = 0; i < _addresses.length; ) {
-            if (_addresses[i] == address(0))
-                revert CannotAllowlistZeroAddress();
-            allowlisted[_addresses[i]] = true;
-            unchecked {
-                ++i;
-            }
-        }
-
-        emit AddressesAddedToAllowlist(_addresses, msg.sender);
-    }
-
-    /// @notice Removes multiple addresses from the allowlist
-    /// @param _addresses Addresses to remove
-    function batchRemoveFromAllowlist(
-        address[] calldata _addresses
-    ) external onlyOwner {
-        if (_addresses.length == 0) revert EmptyAddressArray();
-
-        for (uint256 i = 0; i < _addresses.length; ) {
-            allowlisted[_addresses[i]] = false;
-            unchecked {
-                ++i;
-            }
-        }
-
-        emit AddressesRemovedFromAllowlist(_addresses, msg.sender);
-    }
-
-    /// @notice Enables or disables blocklist enforcement
-    /// @param _enabled True to enable, false to disable
-    function setBlocklistEnabled(bool _enabled) external onlyOwner {
-        blocklistEnabled = _enabled;
-        emit BlocklistEnabled(_enabled, msg.sender);
-    }
-
-    /// @notice Adds multiple addresses to the blocklist
-    /// @param _addresses Addresses to add
-    function batchAddToBlocklist(
-        address[] calldata _addresses
-    ) external onlyOwner {
-        if (_addresses.length == 0) revert EmptyAddressArray();
-
-        for (uint256 i = 0; i < _addresses.length; ) {
-            if (_addresses[i] == address(0))
-                revert CannotBlocklistZeroAddress();
-            blocklisted[_addresses[i]] = true;
-            unchecked {
-                ++i;
-            }
-        }
-
-        emit AddressesAddedToBlocklist(_addresses, msg.sender);
-    }
-
-    /// @notice Removes multiple addresses from the blocklist
-    /// @param _addresses Addresses to remove
-    function batchRemoveFromBlocklist(
-        address[] calldata _addresses
-    ) external onlyOwner {
-        if (_addresses.length == 0) revert EmptyAddressArray();
-
-        for (uint256 i = 0; i < _addresses.length; ) {
-            blocklisted[_addresses[i]] = false;
-            unchecked {
-                ++i;
-            }
-        }
-
-        emit AddressesRemovedFromBlocklist(_addresses, msg.sender);
-    }
-
-    /// @notice Configures token support and requirements
-    /// @param tokenAddress Token to configure
-    /// @param isSupported Whether the token is supported
-    /// @param minimumBalance Minimum deposit amount (in wei)
-    /// @param isNative Whether this represents native $FLOW
-    function setTokenConfig(
-        address tokenAddress,
-        bool isSupported,
-        uint256 minimumBalance,
-        bool isNative
-    ) external onlyOwner {
-        _setTokenConfig(tokenAddress, isSupported, minimumBalance, isNative);
-
-        emit TokenConfigured(
-            tokenAddress,
-            isSupported,
-            minimumBalance,
-            isNative,
-            msg.sender
-        );
-    }
-
-    /// @notice Sets the maximum pending requests allowed per user
-    /// @param _maxRequests New limit (0 = unlimited)
-    function setMaxPendingRequestsPerUser(
-        uint256 _maxRequests
-    ) external onlyOwner {
-        uint256 oldMax = maxPendingRequestsPerUser;
-        maxPendingRequestsPerUser = _maxRequests;
-        emit MaxPendingRequestsPerUserUpdated(oldMax, _maxRequests, msg.sender);
-    }
-
-    /// @notice Pauses the contract, preventing new request creation
-    function pause() external onlyOwner {
-        paused = true;
-        emit Paused(msg.sender);
-    }
-
-    /// @notice Unpauses the contract, allowing new request creation
-    function unpause() external onlyOwner {
-        paused = false;
-        emit Unpaused(msg.sender);
-    }
-
     /**
      * @notice Drops pending requests. Escrowed funds are moved to claimableRefunds.
      * @dev Admin-only cleanup function for removing stuck or problematic requests.
@@ -749,12 +440,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     )
         external
         payable
-        whenNotPaused
-        onlyAllowlisted
-        notBlocklisted
         nonReentrant
         returns (uint256)
     {
+        _fyvAdmin.checkAddress(msg.sender);
+
         // Validate identifiers are not empty (fail fast before escrowing funds)
         if (bytes(vaultIdentifier).length == 0) revert EmptyVaultIdentifier();
         if (bytes(strategyIdentifier).length == 0)
@@ -786,12 +476,11 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     )
         external
         payable
-        whenNotPaused
-        onlyAllowlisted
-        notBlocklisted
         nonReentrant
         returns (uint256)
     {
+        _fyvAdmin.checkAddress(msg.sender);
+
         if (yieldVaults[yieldVaultId].owner == address(0))
             revert InvalidYieldVaultId(yieldVaultId, msg.sender);
         address vaultToken = yieldVaults[yieldVaultId].tokenAddress;
@@ -820,7 +509,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function withdrawFromYieldVault(
         uint64 yieldVaultId,
         uint256 amount
-    ) external whenNotPaused onlyAllowlisted notBlocklisted returns (uint256) {
+    ) external returns (uint256) {
+        _fyvAdmin.checkAddress(msg.sender);
+
         if (amount == 0) revert AmountMustBeGreaterThanZero();
         _validateYieldVaultOwnership(yieldVaultId, msg.sender);
         address vaultToken = yieldVaults[yieldVaultId].tokenAddress;
@@ -843,7 +534,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @return requestId The created request ID
     function closeYieldVault(
         uint64 yieldVaultId
-    ) external whenNotPaused onlyAllowlisted notBlocklisted returns (uint256) {
+    ) external returns (uint256) {
+        _fyvAdmin.checkAddress(msg.sender);
+
         _validateYieldVaultOwnership(yieldVaultId, msg.sender);
         address vaultToken = yieldVaults[yieldVaultId].tokenAddress;
         if (vaultToken == address(0)) revert YieldVaultTokenNotSet(yieldVaultId);
@@ -970,7 +663,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function startProcessingBatch(
         uint256[] calldata successfulRequestIds,
         uint256[] calldata rejectedRequestIds
-    ) external onlyAuthorizedCOA nonReentrant {
+    ) external nonReentrant {
+        _fyvAdmin.onlyAuthorizedCOA(msg.sender);
 
         // === REJECTED REQUESTS ===
         _dropRequestsInternal(rejectedRequestIds);
@@ -1013,7 +707,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint64 yieldVaultId,
         string calldata message,
         uint256 refundAmount
-    ) external payable onlyAuthorizedCOA nonReentrant {
+    ) external payable nonReentrant {
+        _fyvAdmin.onlyAuthorizedCOA(msg.sender);
+
         Request storage request = requests[requestId];
         _completeProcessing(
             request,
@@ -1138,7 +834,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @param tokenAddress Token to check
     /// @return True if token is native $FLOW
     function isNativeFlow(address tokenAddress) public view returns (bool) {
-        return allowedTokens[tokenAddress].isNative;
+        (, , bool isNative) = _fyvAdmin.allowedTokens(tokenAddress);
+        return isNative;
     }
 
     /// @notice Gets a user's escrowed balance for a token (funds tied to active pending requests)
@@ -1429,13 +1126,14 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
 
         // Return balances for the full tracked token set so previously configured
         // tokens remain visible even if later disabled.
-        uint256 tokenCount = _trackedTokens.length;
+        address[] memory trackedTokens = _fyvAdmin.getTrackedTokens();
+        uint256 tokenCount = trackedTokens.length;
         balanceTokens = new address[](tokenCount);
         pendingBalances = new uint256[](tokenCount);
         claimableRefundsArray = new uint256[](tokenCount);
 
         for (uint256 i = 0; i < tokenCount; ) {
-            address token = _trackedTokens[i];
+            address token = trackedTokens[i];
             balanceTokens[i] = token;
             pendingBalances[i] = pendingUserBalances[user][token];
             claimableRefundsArray[i] = claimableRefunds[user][token];
@@ -1539,27 +1237,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
     }
 
-    /// @dev Stores token configuration and records tokens for future balance queries.
-    function _setTokenConfig(
-        address tokenAddress,
-        bool isSupported,
-        uint256 minimumBalance,
-        bool isNative
-    ) internal {
-        if (isSupported && minimumBalance == 0) revert InvalidMinimumBalance();
-
-        allowedTokens[tokenAddress] = TokenConfig({
-            isSupported: isSupported,
-            minimumBalance: minimumBalance,
-            isNative: isNative
-        });
-
-        if (isSupported && !_isTrackedToken[tokenAddress]) {
-            _isTrackedToken[tokenAddress] = true;
-            _trackedTokens.push(tokenAddress);
-        }
-    }
-
     /**
      * @dev Internal implementation for starting request processing.
      *      Transitions request to PROCESSING status and handles fund transfers.
@@ -1605,6 +1282,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                 pendingUserBalances[request.user][request.tokenAddress]
             );
 
+            address authorizedCOA = _fyvAdmin.authorizedCOA();
             // Transfer escrowed funds to COA for bridging to Cadence
             if (isNativeFlow(request.tokenAddress)) {
                 // Native FLOW: send via low-level call
@@ -1651,20 +1329,20 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
 
         // Load token configuration to check if supported and get requirements
-        TokenConfig memory config = allowedTokens[tokenAddress];
-        if (!config.isSupported) revert TokenNotSupported(tokenAddress);
+        (bool isSupported, uint256 minimumBalance, bool isNative) = _fyvAdmin.allowedTokens(tokenAddress);
+        if (!isSupported) revert TokenNotSupported(tokenAddress);
 
         // Enforce minimum balance requirement if configured
-        if (config.minimumBalance > 0 && amount < config.minimumBalance) {
+        if (minimumBalance > 0 && amount < minimumBalance) {
             revert BelowMinimumBalance(
                 tokenAddress,
                 amount,
-                config.minimumBalance
+                minimumBalance
             );
         }
 
         // Handle token transfer based on token type
-        if (config.isNative) {
+        if (isNative) {
             // Native FLOW: validate msg.value matches the deposit amount
             if (msg.value != amount) revert MsgValueMustEqualAmount();
         } else {
@@ -1707,6 +1385,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      */
     function _checkPendingRequestLimit(address user) internal view {
         // Skip check if limit is disabled (maxPendingRequestsPerUser == 0)
+        uint256 maxPendingRequestsPerUser = _fyvAdmin.maxPendingRequestsPerUser();
         if (
             maxPendingRequestsPerUser > 0 &&
             this.getUserPendingRequestCount(user) >= maxPendingRequestsPerUser
