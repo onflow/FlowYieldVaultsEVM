@@ -153,6 +153,7 @@ DEPLOYMENT_OUTPUT=$(forge script ./solidity/script/DeployFlowYieldVaultsRequests
   --root ./solidity \
   --rpc-url "http://$RPC_URL" \
   --broadcast \
+  --slow \
   --legacy 2>&1)
 
 echo "$DEPLOYMENT_OUTPUT"
