@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import "../src/FlowYieldVaultsRequests.sol";
+import "../src/FlowYieldVaultsAdmin.sol";
 
 contract TestERC20 is ERC20 {
     uint8 private immutable _tokenDecimals;
@@ -31,21 +32,23 @@ contract MockDAI is ERC20 {
 }
 
 contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
-    constructor(address coaAddress, address wflowAddress) FlowYieldVaultsRequests(coaAddress, wflowAddress) {}
+    constructor(address wflowAddress, address fyvAdmin) FlowYieldVaultsRequests(wflowAddress, fyvAdmin) {}
 
     function testRegisterYieldVaultId(uint64 yieldVaultId, address owner, address tokenAddress) external {
-        validYieldVaultIds[yieldVaultId] = true;
-        yieldVaultOwners[yieldVaultId] = owner;
-        yieldVaultTokens[yieldVaultId] = tokenAddress;
+        yieldVaults[yieldVaultId] = FlowYieldVaultsRequests.YieldVault({
+            id: yieldVaultId,
+            owner: owner,
+            tokenAddress: tokenAddress
+        });
         // Track index for O(1) removal (matches _registerYieldVault behavior)
         _yieldVaultIndexInUserArray[owner][yieldVaultId] = yieldVaultsByUser[owner].length;
         yieldVaultsByUser[owner].push(yieldVaultId);
-        userOwnsYieldVault[owner][yieldVaultId] = true;
     }
 }
 
 contract FlowYieldVaultsRequestsTest is Test {
     FlowYieldVaultsRequestsTestHelper public c;
+    FlowYieldVaultsAdmin public fyvAdmin;
     ERC20Mock public wflow;
     ERC20Mock public tokenB;
     address user = makeAddr("user");
@@ -84,7 +87,8 @@ contract FlowYieldVaultsRequestsTest is Test {
         wflow.mint(user2, 100 ether);
         tokenB.mint(user, 100 ether);
         tokenB.mint(user2, 100 ether);
-        c = new FlowYieldVaultsRequestsTestHelper(coa, WFLOW);
+        fyvAdmin = new FlowYieldVaultsAdmin(coa, WFLOW);
+        c = new FlowYieldVaultsRequestsTestHelper(WFLOW, address(fyvAdmin));
         c.testRegisterYieldVaultId(42, user, NATIVE_FLOW);
 
         dai = new MockDAI();
@@ -382,7 +386,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
 
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.NotAuthorizedCOA.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsAdmin.NotAuthorizedCOA.selector, user));
         _startProcessingBatch(reqId);
     }
 
@@ -559,7 +563,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         uint256 amount = 1 ether + residual;
 
         vm.prank(c.owner());
-        c.setTokenConfig(address(token), true, 1 ether, false);
+        fyvAdmin.setTokenConfig(address(token), true, 1 ether, false);
 
         token.mint(user, amount);
 
@@ -713,29 +717,29 @@ contract FlowYieldVaultsRequestsTest is Test {
         address newCOA = makeAddr("newCOA");
 
         vm.prank(c.owner());
-        c.setAuthorizedCOA(newCOA);
+        fyvAdmin.setAuthorizedCOA(newCOA);
 
-        assertEq(c.authorizedCOA(), newCOA);
+        assertEq(fyvAdmin.authorizedCOA(), newCOA);
     }
 
     function test_SetAuthorizedCOA_RevertZeroAddress() public {
         vm.prank(c.owner());
-        vm.expectRevert(FlowYieldVaultsRequests.InvalidCOAAddress.selector);
-        c.setAuthorizedCOA(address(0));
+        vm.expectRevert(FlowYieldVaultsAdmin.InvalidCOAAddress.selector);
+        fyvAdmin.setAuthorizedCOA(address(0));
     }
 
     function test_Constructor_RevertZeroCOAAddress() public {
-        vm.expectRevert(FlowYieldVaultsRequests.InvalidCOAAddress.selector);
-        new FlowYieldVaultsRequestsTestHelper(address(0), WFLOW);
+        vm.expectRevert(FlowYieldVaultsAdmin.InvalidCOAAddress.selector);
+        new FlowYieldVaultsAdmin(address(0), WFLOW);
     }
 
     function test_SetTokenConfig() public {
         address token = makeAddr("token");
 
         vm.prank(c.owner());
-        c.setTokenConfig(token, true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(token, true, 0.5 ether, false);
 
-        (bool isSupported, uint256 minBalance, bool isNative) = c.allowedTokens(token);
+        (bool isSupported, uint256 minBalance, bool isNative) = fyvAdmin.allowedTokens(token);
         assertEq(isSupported, true);
         assertEq(minBalance, 0.5 ether);
         assertEq(isNative, false);
@@ -745,20 +749,20 @@ contract FlowYieldVaultsRequestsTest is Test {
         address token = makeAddr("token");
 
         vm.prank(c.owner());
-        vm.expectRevert(FlowYieldVaultsRequests.InvalidMinimumBalance.selector);
-        c.setTokenConfig(token, true, 0, false);
+        vm.expectRevert(FlowYieldVaultsAdmin.InvalidMinimumBalance.selector);
+        fyvAdmin.setTokenConfig(token, true, 0, false);
     }
 
     function test_SetMaxPendingRequestsPerUser() public {
         vm.prank(c.owner());
-        c.setMaxPendingRequestsPerUser(5);
+        fyvAdmin.setMaxPendingRequestsPerUser(5);
 
-        assertEq(c.maxPendingRequestsPerUser(), 5);
+        assertEq(fyvAdmin.maxPendingRequestsPerUser(), 5);
     }
 
     function test_MaxPendingRequests_EnforcesLimit() public {
         vm.prank(c.owner());
-        c.setMaxPendingRequestsPerUser(2);
+        fyvAdmin.setMaxPendingRequestsPerUser(2);
 
         vm.startPrank(user);
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
@@ -839,7 +843,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     function test_TransferOwnership_NewOwnerHasAdminRights() public {
         address newOwner = makeAddr("newOwner");
-        address originalOwner = c.owner();
+        address originalOwner = fyvAdmin.owner();
 
         vm.prank(originalOwner);
         c.transferOwnership(newOwner);
@@ -847,15 +851,20 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.prank(newOwner);
         c.acceptOwnership();
 
+        vm.prank(user);
+        uint256 reqId = c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
+
         // New owner can perform admin actions
         vm.prank(newOwner);
-        c.setMaxPendingRequestsPerUser(99);
-        assertEq(c.maxPendingRequestsPerUser(), 99);
+        uint256[] memory requestIds = new uint256[](1);
+        requestIds[0] = reqId;
+        c.dropRequests(requestIds);
+        assertEq(c.getPendingRequestCount(), 0);
 
         // Old owner cannot
         vm.prank(originalOwner);
         vm.expectRevert(abi.encodeWithSelector(OwnableUnauthorizedAccount.selector, originalOwner));
-        c.setMaxPendingRequestsPerUser(50);
+        c.dropRequests(requestIds);
     }
 
     // ============================================
@@ -867,8 +876,8 @@ contract FlowYieldVaultsRequestsTest is Test {
         addrs[0] = user;
 
         vm.startPrank(c.owner());
-        c.setAllowlistEnabled(true);
-        c.batchAddToAllowlist(addrs);
+        fyvAdmin.setAllowlistEnabled(true);
+        fyvAdmin.batchAddToAllowlist(addrs);
         vm.stopPrank();
 
         // Allowlisted user can create
@@ -877,7 +886,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Non-allowlisted user cannot
         vm.prank(user2);
-        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.NotInAllowlist.selector, user2));
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsAdmin.NotInAllowlist.selector, user2));
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
@@ -886,12 +895,12 @@ contract FlowYieldVaultsRequestsTest is Test {
         addrs[0] = user;
 
         vm.startPrank(c.owner());
-        c.setBlocklistEnabled(true);
-        c.batchAddToBlocklist(addrs);
+        fyvAdmin.setBlocklistEnabled(true);
+        fyvAdmin.batchAddToBlocklist(addrs);
         vm.stopPrank();
 
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.Blocklisted.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsAdmin.Blocklisted.selector, user));
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
@@ -900,8 +909,8 @@ contract FlowYieldVaultsRequestsTest is Test {
         addrs[0] = address(0);
 
         vm.prank(c.owner());
-        vm.expectRevert(FlowYieldVaultsRequests.CannotBlocklistZeroAddress.selector);
-        c.batchAddToBlocklist(addrs);
+        vm.expectRevert(FlowYieldVaultsAdmin.CannotBlocklistZeroAddress.selector);
+        fyvAdmin.batchAddToBlocklist(addrs);
     }
 
     function test_BlocklistTakesPrecedence() public {
@@ -909,15 +918,15 @@ contract FlowYieldVaultsRequestsTest is Test {
         addrs[0] = user;
 
         vm.startPrank(c.owner());
-        c.setAllowlistEnabled(true);
-        c.batchAddToAllowlist(addrs);
-        c.setBlocklistEnabled(true);
-        c.batchAddToBlocklist(addrs);
+        fyvAdmin.setAllowlistEnabled(true);
+        fyvAdmin.batchAddToAllowlist(addrs);
+        fyvAdmin.setBlocklistEnabled(true);
+        fyvAdmin.batchAddToBlocklist(addrs);
         vm.stopPrank();
 
         // User is both allowlisted AND blocklisted - blocklist wins
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsRequests.Blocklisted.selector, user));
+        vm.expectRevert(abi.encodeWithSelector(FlowYieldVaultsAdmin.Blocklisted.selector, user));
         c.createYieldVault{value: 1 ether}(NATIVE_FLOW, 1 ether, VAULT_ID, STRATEGY_ID);
     }
 
@@ -1106,7 +1115,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     function test_WFLOWConfiguredOnDeployment() public {
         // WFLOW should be configured as supported token on deployment
-        (bool isSupported, uint256 minBalance, bool isNative) = c.allowedTokens(WFLOW);
+        (bool isSupported, uint256 minBalance, bool isNative) = fyvAdmin.allowedTokens(WFLOW);
         assertEq(isSupported, true, "WFLOW should be supported");
         assertEq(minBalance, 1 ether, "WFLOW minimum balance should be 1 ether");
         assertEq(isNative, false, "WFLOW should not be marked as native");
@@ -1119,7 +1128,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     function test_DeployWithZeroWFLOWAddress() public {
         // Deploy with address(0) for WFLOW - should work but not configure WFLOW
-        FlowYieldVaultsRequestsTestHelper contractNoWflow = new FlowYieldVaultsRequestsTestHelper(coa, address(0));
+        FlowYieldVaultsAdmin contractNoWflow = new FlowYieldVaultsAdmin(makeAddr("coa"), address(0));
 
         // WFLOW at address(0) should NOT be supported
         (bool isSupported, , ) = contractNoWflow.allowedTokens(address(0));
@@ -1368,7 +1377,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     function test_GetPendingRequestsByUserUnpacked_IncludesTrackedERC20Balances() public {
         vm.prank(c.owner());
-        c.setTokenConfig(TOKEN_B, true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(TOKEN_B, true, 0.5 ether, false);
 
         vm.startPrank(user);
         tokenB.approve(address(c), 3 ether);
@@ -1407,7 +1416,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     function test_GetPendingRequestsByUserUnpacked_KeepsTrackedTokenVisibleAfterDisable() public {
         vm.prank(c.owner());
-        c.setTokenConfig(TOKEN_B, true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(TOKEN_B, true, 0.5 ether, false);
 
         vm.startPrank(user);
         tokenB.approve(address(c), 2 ether);
@@ -1416,7 +1425,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         vm.stopPrank();
 
         vm.prank(c.owner());
-        c.setTokenConfig(TOKEN_B, false, 0, false);
+        fyvAdmin.setTokenConfig(TOKEN_B, false, 0, false);
 
         (
             uint256[] memory ids,
@@ -1444,7 +1453,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     function test_GetPendingRequestsByUserUnpacked_DoesNotTrackNeverSupportedToken() public {
         vm.prank(c.owner());
-        c.setTokenConfig(TOKEN_B, false, 0, false);
+        fyvAdmin.setTokenConfig(TOKEN_B, false, 0, false);
 
         (
             uint256[] memory ids,
@@ -1707,7 +1716,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
         // Increase max pending requests limit
         vm.prank(c.owner());
-        c.setMaxPendingRequestsPerUser(25);
+        fyvAdmin.setMaxPendingRequestsPerUser(25);
 
         // Create many requests
         vm.startPrank(user);
@@ -1963,7 +1972,7 @@ contract FlowYieldVaultsRequestsTest is Test {
         c.completeProcessing{value: 3 ether}(req1, false, sentinelYieldVaultId, "Failed", 5 ether);
 
         c.testRegisterYieldVaultId(101, user2, address(dai));
-        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(address(dai), true, 0.5 ether, false);
 
         vm.startPrank(user2);
         deal(address(dai), user2, 20 ether);
@@ -2014,7 +2023,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     function test_CompleteProcessing_RefundERC20Tokens() public {
         vm.prank(c.owner());
         c.testRegisterYieldVaultId(101, user, address(dai));
-        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(address(dai), true, 0.5 ether, false);
 
         deal(address(dai), user, 20 ether);
         assertEq(dai.balanceOf(user), 20 ether);
@@ -2099,7 +2108,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     function test_RecoverTokens_WithPendingUserBalanceAndNoExcessAmount() public {
         vm.prank(c.owner());
         c.testRegisterYieldVaultId(101, user, address(dai));
-        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(address(dai), true, 0.5 ether, false);
 
         deal(address(dai), user, 20 ether);
         assertEq(dai.balanceOf(user), 20 ether);
@@ -2124,7 +2133,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     function test_RecoverTokens_WithCancelledRequestAndNoExcessAmount() public {
         vm.prank(c.owner());
         c.testRegisterYieldVaultId(101, user, address(dai));
-        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(address(dai), true, 0.5 ether, false);
 
         deal(address(dai), user, 20 ether);
         assertEq(dai.balanceOf(user), 20 ether);
@@ -2151,7 +2160,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     function test_RecoverTokens_WithClaimableRefundAndNoExcessAmount() public {
         vm.prank(c.owner());
         c.testRegisterYieldVaultId(101, user, address(dai));
-        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(address(dai), true, 0.5 ether, false);
 
         deal(address(dai), user, 20 ether);
         assertEq(dai.balanceOf(user), 20 ether);
@@ -2188,7 +2197,7 @@ contract FlowYieldVaultsRequestsTest is Test {
     function test_RecoverTokens_WithProcessingRequestAndExcessAmount() public {
         vm.prank(c.owner());
         c.testRegisterYieldVaultId(101, user, address(dai));
-        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(address(dai), true, 0.5 ether, false);
 
         deal(address(dai), user, 20 ether);
         assertEq(dai.balanceOf(user), 20 ether);
@@ -2217,7 +2226,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     function test_RecoverTokens_RevertWhenAccountedExceedsAmount() public {
         c.testRegisterYieldVaultId(101, user, address(dai));
-        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(address(dai), true, 0.5 ether, false);
         deal(address(dai), user, 20 ether);
         vm.startPrank(user);
         dai.approve(address(c), 5 ether);
@@ -2237,7 +2246,7 @@ contract FlowYieldVaultsRequestsTest is Test {
 
     function test_RecoverTokens_WithAccountedLessThanAmount() public {
         c.testRegisterYieldVaultId(101, user, address(dai));
-        c.setTokenConfig(address(dai), true, 0.5 ether, false);
+        fyvAdmin.setTokenConfig(address(dai), true, 0.5 ether, false);
         deal(address(dai), user, 20 ether);
         vm.startPrank(user);
         dai.approve(address(c), 5 ether);
