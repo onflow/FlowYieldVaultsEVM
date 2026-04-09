@@ -96,6 +96,12 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         bool isNative;
     }
 
+    struct YieldVault {
+        uint64 id;
+        address owner;
+        address tokenAddress;
+    }
+
     // ============================================
     // State Variables
     // ============================================
@@ -149,29 +155,17 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     /// @notice Maximum number of pending requests allowed per user (0 = unlimited)
     uint256 public maxPendingRequestsPerUser;
 
-    /// @notice Count of pending requests per user
-    mapping(address => uint256) public userPendingRequestCount;
-
     /// @notice Pending request IDs per user for O(1) lookup
     mapping(address => uint256[]) public pendingRequestIdsByUser;
 
     /// @notice Index of request ID in user's pending array (for O(1) removal)
     mapping(uint256 => uint256) private _requestIndexInUserArray;
 
-    /// @notice Registry of valid YieldVault Ids created through this contract
-    mapping(uint64 => bool) public validYieldVaultIds;
-
-    /// @notice Owner address for each YieldVault Id
-    mapping(uint64 => address) public yieldVaultOwners;
-
-    /// @notice Token address associated with each YieldVault Id
-    mapping(uint64 => address) public yieldVaultTokens;
+    /// @notice Registry of valid YieldVaults created through this contract
+    mapping(uint64 => YieldVault) public yieldVaults;
 
     /// @notice Array of YieldVault Ids owned by each user
     mapping(address => uint64[]) public yieldVaultsByUser;
-
-    /// @notice O(1) lookup for yieldvault ownership verification
-    mapping(address => mapping(uint64 => bool)) public userOwnsYieldVault;
 
     /// @notice Escrowed balances for active pending requests: user => token => amount
     mapping(address => mapping(address => uint256)) public pendingUserBalances;
@@ -798,9 +792,9 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         nonReentrant
         returns (uint256)
     {
-        if (!validYieldVaultIds[yieldVaultId])
+        if (yieldVaults[yieldVaultId].owner == address(0))
             revert InvalidYieldVaultId(yieldVaultId, msg.sender);
-        address vaultToken = yieldVaultTokens[yieldVaultId];
+        address vaultToken = yieldVaults[yieldVaultId].tokenAddress;
         if (vaultToken == address(0)) revert YieldVaultTokenNotSet(yieldVaultId);
         if (vaultToken != tokenAddress)
             revert YieldVaultTokenMismatch(yieldVaultId, vaultToken, tokenAddress);
@@ -829,7 +823,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     ) external whenNotPaused onlyAllowlisted notBlocklisted returns (uint256) {
         if (amount == 0) revert AmountMustBeGreaterThanZero();
         _validateYieldVaultOwnership(yieldVaultId, msg.sender);
-        address vaultToken = yieldVaultTokens[yieldVaultId];
+        address vaultToken = yieldVaults[yieldVaultId].tokenAddress;
         if (vaultToken == address(0)) revert YieldVaultTokenNotSet(yieldVaultId);
         _checkPendingRequestLimit(msg.sender);
 
@@ -851,7 +845,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint64 yieldVaultId
     ) external whenNotPaused onlyAllowlisted notBlocklisted returns (uint256) {
         _validateYieldVaultOwnership(yieldVaultId, msg.sender);
-        address vaultToken = yieldVaultTokens[yieldVaultId];
+        address vaultToken = yieldVaults[yieldVaultId].tokenAddress;
         if (vaultToken == address(0)) revert YieldVaultTokenNotSet(yieldVaultId);
         _checkPendingRequestLimit(msg.sender);
 
@@ -898,9 +892,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         request.message = cancelMessage;
 
         // === UPDATE PENDING COUNTS AND QUEUES ===
-        if (userPendingRequestCount[request.user] > 0) {
-            userPendingRequestCount[request.user]--;
-        }
         _removePendingRequest(requestId);
 
         // === REFUND HANDLING (pull pattern) ===
@@ -1333,7 +1324,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function isYieldVaultIdValid(
         uint64 yieldVaultId
     ) external view returns (bool) {
-        return validYieldVaultIds[yieldVaultId];
+        return yieldVaults[yieldVaultId].owner != address(0);
     }
 
     /// @notice Gets a user's pending request count
@@ -1342,7 +1333,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     function getUserPendingRequestCount(
         address user
     ) external view returns (uint256) {
-        return userPendingRequestCount[user];
+        return pendingRequestIdsByUser[user].length;
     }
 
     /// @notice Gets all YieldVault Ids owned by a user
@@ -1362,7 +1353,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         address user,
         uint64 yieldVaultId
     ) external view returns (bool) {
-        return userOwnsYieldVault[user][yieldVaultId];
+        return yieldVaults[yieldVaultId].owner == user;
     }
 
     /// @notice Gets pending requests for a specific user in unpacked format
@@ -1510,11 +1501,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
                     );
                 }
 
-                // Update user's pending request count
-                if (userPendingRequestCount[request.user] > 0) {
-                    userPendingRequestCount[request.user]--;
-                }
-
                 // Remove from pending queues (both global and user-specific)
                 _removePendingRequest(requestId);
 
@@ -1640,9 +1626,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
 
         // === CLEANUP PENDING STATE ===
-        if (userPendingRequestCount[request.user] > 0) {
-            userPendingRequestCount[request.user]--;
-        }
         _removePendingRequest(requestId);
 
         emit RequestProcessed(
@@ -1709,8 +1692,8 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
     ) internal view {
         // Check both validity and ownership in a single condition for gas efficiency
         if (
-            !validYieldVaultIds[yieldVaultId] ||
-            yieldVaultOwners[yieldVaultId] != user
+            yieldVaults[yieldVaultId].owner == address(0) ||
+            yieldVaults[yieldVaultId].owner != user
         ) {
             revert InvalidYieldVaultId(yieldVaultId, user);
         }
@@ -1726,7 +1709,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         // Skip check if limit is disabled (maxPendingRequestsPerUser == 0)
         if (
             maxPendingRequestsPerUser > 0 &&
-            userPendingRequestCount[user] >= maxPendingRequestsPerUser
+            this.getUserPendingRequestCount(user) >= maxPendingRequestsPerUser
         ) {
             revert TooManyPendingRequests();
         }
@@ -1799,23 +1782,22 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         uint256 requestId
     ) internal {
         // Uniqueness guard, reject registering an already-valid yieldVaultId
-        if (validYieldVaultIds[yieldVaultId]) {
+        if (yieldVaults[yieldVaultId].owner != address(0)) {
             revert YieldVaultIdAlreadyRegistered(yieldVaultId);
         }
         // Reject sentinel value to prevent corruption of "no yieldvault" semantics
         if (yieldVaultId == NO_YIELDVAULT_ID) revert CannotRegisterSentinelYieldVaultId();
 
         // Mark YieldVault as valid and set owner
-        validYieldVaultIds[yieldVaultId] = true;
-        yieldVaultOwners[yieldVaultId] = user;
-        yieldVaultTokens[yieldVaultId] = tokenAddress;
+        yieldVaults[yieldVaultId] = YieldVault({
+            id: yieldVaultId,
+            owner: user,
+            tokenAddress: tokenAddress
+        });
 
         // Track index in user's array for O(1) removal later
         _yieldVaultIndexInUserArray[user][yieldVaultId] = yieldVaultsByUser[user].length;
         yieldVaultsByUser[user].push(yieldVaultId);
-
-        // Set ownership flag for O(1) ownership verification
-        userOwnsYieldVault[user][yieldVaultId] = true;
 
         emit YieldVaultIdRegistered(yieldVaultId, user, requestId);
     }
@@ -1831,7 +1813,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
      */
     function _unregisterYieldVault(uint64 yieldVaultId, address user, uint256 requestId) internal {
         // Prove the yieldVaultId is actually registered under the provided user
-        if (yieldVaultOwners[yieldVaultId] != user) {
+        if (yieldVaults[yieldVaultId].owner != user) {
             revert InvalidYieldVaultId(yieldVaultId, user);
         }
 
@@ -1858,10 +1840,7 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         }
 
         // Clear all ownership-related state
-        userOwnsYieldVault[user][yieldVaultId] = false;
-        validYieldVaultIds[yieldVaultId] = false;
-        delete yieldVaultOwners[yieldVaultId];
-        delete yieldVaultTokens[yieldVaultId];
+        delete yieldVaults[yieldVaultId];
 
         emit YieldVaultIdUnregistered(yieldVaultId, user, requestId);
     }
@@ -1911,7 +1890,6 @@ contract FlowYieldVaultsRequests is ReentrancyGuard, Ownable2Step {
         // Add to global pending queue with index tracking for O(1) lookup
         _requestIndexInGlobalArray[requestId] = pendingRequestIds.length;
         pendingRequestIds.push(requestId);
-        userPendingRequestCount[msg.sender]++;
 
         // Add to user's pending array with index tracking for O(1) removal
         _requestIndexInUserArray[requestId] = pendingRequestIdsByUser[msg.sender].length;

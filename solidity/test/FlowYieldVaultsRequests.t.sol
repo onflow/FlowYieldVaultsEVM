@@ -34,13 +34,14 @@ contract FlowYieldVaultsRequestsTestHelper is FlowYieldVaultsRequests {
     constructor(address coaAddress, address wflowAddress) FlowYieldVaultsRequests(coaAddress, wflowAddress) {}
 
     function testRegisterYieldVaultId(uint64 yieldVaultId, address owner, address tokenAddress) external {
-        validYieldVaultIds[yieldVaultId] = true;
-        yieldVaultOwners[yieldVaultId] = owner;
-        yieldVaultTokens[yieldVaultId] = tokenAddress;
+        yieldVaults[yieldVaultId] = FlowYieldVaultsRequests.YieldVault({
+            id: yieldVaultId,
+            owner: owner,
+            tokenAddress: tokenAddress
+        });
         // Track index for O(1) removal (matches _registerYieldVault behavior)
         _yieldVaultIndexInUserArray[owner][yieldVaultId] = yieldVaultsByUser[owner].length;
         yieldVaultsByUser[owner].push(yieldVaultId);
-        userOwnsYieldVault[owner][yieldVaultId] = true;
     }
 }
 
