@@ -1,4 +1,4 @@
-# Flow YieldVaults EVM Integration
+# FlowYieldVaultsEVM — Flow Yield Vaults on Flow EVM (Invisible DeFi)
 
 Cross-VM bridge enabling Flow EVM users to access Flow YieldVaults's Cadence-based yield farming protocol through asynchronous request processing.
 
@@ -301,3 +301,11 @@ Testnet E2E uses `deployments/contract-addresses.json` to auto-load addresses (s
 ## License
 
 MIT
+## About Flow
+
+This repo is part of the [Flow network](https://flow.com), a Layer 1 blockchain built for consumer applications, AI agents, and DeFi at scale.
+
+- Developer docs: https://developers.flow.com
+- Cadence language: https://cadence-lang.org
+- Community: [Flow Discord](https://discord.gg/flow) · [Flow Forum](https://forum.flow.com)
+- Governance: [Flow Improvement Proposals](https://github.com/onflow/flips)
