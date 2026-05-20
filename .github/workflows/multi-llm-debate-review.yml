@@ -1,0 +1,150 @@
+name: Multi-LLM Debate Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+
+concurrency:
+  group: multi-llm-debate-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  debate-review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build PR diff
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base_ref='${{ github.event.pull_request.base.ref }}'
+          max_diff_size='${{ vars.AI_DEBATE_MAX_DIFF_SIZE }}'
+          : "${max_diff_size:=150000}"
+
+          git fetch origin "${base_ref}" --depth=1
+          git diff "origin/${base_ref}...HEAD" -- > /tmp/pr-diff.txt
+
+          diff_size="$(wc -c < /tmp/pr-diff.txt | tr -d ' ')"
+          echo "size=${diff_size}" >> "${GITHUB_OUTPUT}"
+
+          if [[ "${diff_size}" -gt "${max_diff_size}" ]]; then
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Run multi-round debate
+        if: steps.diff.outputs.skip == 'false'
+        id: debate
+        continue-on-error: true
+        env:
+          DIFF_FILE: /tmp/pr-diff.txt
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PROVIDERS: ${{ vars.AI_DEBATE_PROVIDERS }}
+          MAX_DEBATE_DIFF_SIZE: ${{ vars.AI_DEBATE_MAX_DIFF_SIZE }}
+          MAX_DEBATE_ROUNDS: ${{ vars.AI_DEBATE_MAX_ROUNDS }}
+          MIN_DEBATE_ROUNDS: ${{ vars.AI_DEBATE_MIN_ROUNDS }}
+          RISK_TOLERANCE: ${{ vars.AI_REVIEW_RISK_TOLERANCE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${PROVIDERS:=claude,openai}"
+          : "${MAX_DEBATE_ROUNDS:=4}"
+          : "${MIN_DEBATE_ROUNDS:=2}"
+          : "${RISK_TOLERANCE:=moderate}"
+
+          bash ./scripts/multi-llm-debate-review.sh
+
+      - name: Upsert debate comment
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          DIFF_SKIPPED: ${{ steps.diff.outputs.skip }}
+          DIFF_SIZE: ${{ steps.diff.outputs.size }}
+          MAX_DIFF_SIZE: ${{ vars.AI_DEBATE_MAX_DIFF_SIZE }}
+          DEBATE_OUTCOME: ${{ steps.debate.outcome }}
+          DEBATE_REPORT: ${{ steps.debate.outputs.report_markdown }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const marker = '<!-- multi-llm-debate-review -->';
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            let body = '';
+
+            if (process.env.DIFF_SKIPPED === 'true') {
+              body = [
+                marker,
+                '## Multi-LLM Debate Review',
+                'Skipped: diff too large for debate.',
+                `- diff size: ${process.env.DIFF_SIZE} bytes`,
+                `- maximum allowed: ${process.env.MAX_DIFF_SIZE || '150000'} bytes`
+              ].join('\n');
+            } else if (process.env.DEBATE_OUTCOME !== 'success') {
+              body = [
+                marker,
+                '## Multi-LLM Debate Review',
+                'Debate execution failed.',
+                `- workflow run: ${runUrl}`,
+                '- check job logs for API/auth/prompt issues'
+              ].join('\n');
+            } else {
+              body = process.env.DEBATE_REPORT || [
+                marker,
+                '## Multi-LLM Debate Review',
+                'Debate finished but no report payload was produced.',
+                `- workflow run: ${runUrl}`
+              ].join('\n');
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+
+            const existing = comments.find(
+              c => c.user?.type === 'Bot' && typeof c.body === 'string' && c.body.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }
+
+      - name: Enforce convergence gate
+        if: |
+          steps.diff.outputs.skip == 'false' &&
+          (steps.debate.outcome != 'success' || steps.debate.outputs.converged != 'true')
+        shell: bash
+        run: |
+          echo "Debate did not converge (or execution failed). Blocking merge for manual follow-up."
+          exit 1
